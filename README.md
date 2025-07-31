@@ -105,7 +105,7 @@ result = lx.extract(
 >
 > **Model Lifecycle**: Note that Gemini models have a lifecycle with defined retirement dates. Users should consult the [official model version documentation](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions) to stay informed about the latest stable and legacy versions.
 
-For olllama, 
+For ollama, 
 
 ```python
 from langextract import inference

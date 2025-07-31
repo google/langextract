@@ -12,18 +12,28 @@
 
 ## Table of Contents
 
-- [Introduction](#introduction)
-- [Why LangExtract?](#why-langextract)
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
-- [More Examples](#more-examples)
-  - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
-  - [Medication Extraction](#medication-extraction)
-  - [Radiology Report Structuring: RadExtract](#radiology-report-structuring-radextract)
-- [Contributing](#contributing)
-- [Testing](#testing)
-- [Disclaimer](#disclaimer)
+- [LangExtract](#langextract)
+  - [Table of Contents](#table-of-contents)
+  - [Introduction](#introduction)
+  - [Why LangExtract?](#why-langextract)
+  - [Quick Start](#quick-start)
+    - [1. Define Your Extraction Task](#1-define-your-extraction-task)
+    - [2. Run the Extraction](#2-run-the-extraction)
+    - [3. Visualize the Results](#3-visualize-the-results)
+    - [Scaling to Longer Documents](#scaling-to-longer-documents)
+  - [Installation](#installation)
+    - [From PyPI](#from-pypi)
+    - [From Source](#from-source)
+  - [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
+    - [API Key Sources](#api-key-sources)
+    - [Setting up API key in your environment](#setting-up-api-key-in-your-environment)
+  - [More Examples](#more-examples)
+    - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
+    - [Medication Extraction](#medication-extraction)
+    - [Radiology Report Structuring: RadExtract](#radiology-report-structuring-radextract)
+  - [Contributing](#contributing)
+  - [Testing](#testing)
+  - [Disclaimer](#disclaimer)
 
 ## Introduction
 
@@ -104,6 +114,25 @@ result = lx.extract(
 > **Model Selection**: `gemini-2.5-flash` is the recommended default, offering an excellent balance of speed, cost, and quality. For highly complex tasks requiring deeper reasoning, `gemini-2.5-pro` may provide superior results. For large-scale or production use, a Tier 2 Gemini quota is suggested to increase throughput and avoid rate limits. See the [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits#tier-2) for details.
 >
 > **Model Lifecycle**: Note that Gemini models have a lifecycle with defined retirement dates. Users should consult the [official model version documentation](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions) to stay informed about the latest stable and legacy versions.
+
+For olllama, 
+
+```python
+from langextract import inference
+
+# The input text to be processed
+input_text = "Lady Juliet gazed longingly at the stars, her heart aching for Romeo"
+
+# Run the extraction
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    language_model_type=inference.OllamaLanguageModel,
+    model_id="gemma2:latest",
+    model_url="http://localhost:11434"
+)
+```
 
 ### 3. Visualize the Results
 

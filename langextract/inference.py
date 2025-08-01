@@ -452,6 +452,7 @@ class OpenAILanguageModel(BaseLanguageModel):
   base_url: str | None = None
   temperature: float = 0.0
   max_workers: int = 10
+  output_schema: Any | None = None
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
@@ -463,6 +464,7 @@ class OpenAILanguageModel(BaseLanguageModel):
       base_url: str | None = None,
       temperature: float = 0.0,
       max_workers: int = 10,
+      output_schema: Any | None = None,
       **kwargs,
   ) -> None:
     """Initialize the OpenAI language model."""
@@ -471,6 +473,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     self.base_url = base_url
     self.temperature = temperature
     self.max_workers = max_workers
+    self.output_schema = output_schema
     self._extra_kwargs = kwargs or {}
 
     if not self.api_key:
@@ -486,20 +489,111 @@ class OpenAILanguageModel(BaseLanguageModel):
 
   def _process_single_prompt(self, prompt: str, config: dict) -> ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
+    final_prompt = prompt
+    if self.output_schema:
+      schema_json = {}
+      try:
+        # Pydantic models have a `model_json_schema` method.
+        schema_json = self.output_schema.model_json_schema()
+        schema_str = json.dumps(schema_json, indent=2)
+      except AttributeError:
+        # Fallback for dicts or other objects.
+        schema_json = self.output_schema
+        schema_str = json.dumps(schema_json, indent=2)
+
+      # Create a mock example from the schema properties.
+      example = {
+          prop: details.get('type', 'any')
+          for prop, details in schema_json.get('properties', {}).items()
+      }
+      example_str = json.dumps(example, indent=2)
+
+      try:
+        # Pydantic models have a `model_json_schema` method.
+        schema_json = self.output_schema.model_json_schema()
+        schema_str = json.dumps(schema_json, indent=2)
+      except AttributeError:
+        # Fallback for dicts or other objects.
+        schema_json = self.output_schema
+        schema_str = json.dumps(schema_json, indent=2)
+
+      # Create a mock example from the schema properties.
+      example = {
+          prop: details.get('type', 'any')
+          for prop, details in schema_json.get('properties', {}).items()
+      }
+      example_str = json.dumps(example, indent=2)
+
+      final_prompt = (
+          f'{prompt}\n\nYour response MUST be a JSON object that strictly'
+          ' follows this schema. Do not include any other text or'
+          ' explanations.\n\n'
+          f'SCHEMA:\n```json\n{schema_str}\n```\n\n'
+          f'EXAMPLE:\n```json\n{example_str}\n```'
+      )
+
     try:
       response = openai.ChatCompletion.create(
           model=self.model_id,
           messages=[
-              {'role': 'system', 'content': 'You are a helpful assistant.'},
-              {'role': 'user', 'content': prompt},
+              {'role': 'system', 'content': 'You are a helpful assistant that only speaks JSON.'},
+              {'role': 'user', 'content': final_prompt},
           ],
           **config,
       )
-      output = response.choices[0].message.content
-      return ScoredOutput(score=1.0, output=output)
+      model_output_str = response.choices[0].message.content
+
+      # Always try to clean the output from the model first, as it may
+      # unexpectedly return markdown fences or other text.
+      clean_output_str = model_output_str.strip()
+      if clean_output_str.startswith("```json"):
+          clean_output_str = clean_output_str[7:]
+      if clean_output_str.endswith("```"):
+          clean_output_str = clean_output_str[:-3]
+      clean_output_str = clean_output_str.strip()
+
+      # Now, decide if we need to wrap the cleaned output.
+      if self.output_schema:
+        try:
+          # When a schema is used, we expect a flat JSON. We wrap it
+          # for the resolver.
+          parsed_json = json.loads(clean_output_str)
+          extractions = [{k: v} for k, v in parsed_json.items()]
+          wrapped_output = {schema.EXTRACTIONS_KEY: extractions}
+          final_output_str = json.dumps(wrapped_output)
+        except (json.JSONDecodeError, TypeError):
+          # If parsing or wrapping fails, fallback to the original raw output.
+          final_output_str = model_output_str
+      else:
+        # If not using a schema, the default prompt already asks for the
+        # correct structure. We just return the cleaned-up version.
+        final_output_str = clean_output_str
+
+      return ScoredOutput(score=1.0, output=final_output_str)
 
     except Exception as e:
       raise InferenceOutputError(f'OpenAI API error: {str(e)}') from e
+
+  def parse_output(self, output: str) -> Any:
+    """Parses OpenAI output as JSON, optionally validating against a schema."""
+    try:
+      # Attempt to parse the string as JSON first.
+      parsed_json = json.loads(output)
+      if self.output_schema:
+        try:
+          # If a Pydantic model is provided, validate the data against it.
+          return self.output_schema.model_validate(parsed_json)
+        except AttributeError:
+          # If it's not a Pydantic model, return the raw JSON.
+          return parsed_json
+      return parsed_json
+    except json.JSONDecodeError as e:
+      raise ValueError(f'Failed to parse output as JSON: {str(e)}') from e
+    except Exception as e:
+      # This can catch Pydantic validation errors.
+      raise ValueError(
+          f'Failed to validate output against schema: {str(e)}'
+      ) from e
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs

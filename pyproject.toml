@@ -62,7 +62,8 @@ dev = [
 ]
 test = [
     "pytest>=7.4.0",
-    "tomli>=2.0.0"
+    "tomli>=2.0.0",
+    "pydantic>=1.8.0",
 ]
 
 [tool.setuptools]

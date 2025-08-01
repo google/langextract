@@ -193,7 +193,11 @@ for med_name, extractions in medication_groups.items():
         print(f"  • {extraction.extraction_class.capitalize()}: {extraction.extraction_text}{position_info}")
 
 # Save and visualize the results
-lx.io.save_annotated_documents([result], output_name="medical_relationship_extraction.jsonl")
+lx.io.save_annotated_documents(
+    [result],
+    output_name="medical_ner_extraction.jsonl",
+    output_dir="." # Saves to the current directory instead of the default 'test_output/'
+) 
 
 # Generate the interactive visualization
 html_content = lx.visualize("medical_relationship_extraction.jsonl")

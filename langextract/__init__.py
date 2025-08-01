@@ -171,37 +171,42 @@ def extract(
   schema_constraint = None
 
   # TODO: Unify schema generation.
-  if (
-      use_schema_constraints
-      and language_model_type == inference.GeminiLanguageModel
-  ):
-    model_schema = schema.GeminiSchema.from_examples(prompt_template.examples)
-
   if not api_key:
     api_key = os.environ.get("LANGEXTRACT_API_KEY")
 
-    # Currently only Gemini is supported
-    if not api_key and language_model_type == inference.GeminiLanguageModel:
-      raise ValueError(
-          "API key must be provided for cloud-hosted models via the api_key"
-          " parameter or the LANGEXTRACT_API_KEY environment variable"
-      )
-
-  base_lm_kwargs: dict[str, Any] = {
+  lm_kwargs: dict[str, Any] = {
       "api_key": api_key,
       "model_id": model_id,
-      "gemini_schema": model_schema,
-      "format_type": format_type,
       "temperature": temperature,
-      "model_url": model_url,
-      "constraint": schema_constraint,
       "max_workers": max_workers,
   }
 
-  # Merge user-provided params which have precedence over defaults.
-  base_lm_kwargs.update(language_model_params or {})
+  if language_model_type == inference.GeminiLanguageModel:
+    if use_schema_constraints:
+      lm_kwargs["gemini_schema"] = schema.GeminiSchema.from_examples(
+          prompt_template.examples
+      )
+    lm_kwargs["format_type"] = format_type
+    if not api_key:
+      raise ValueError(
+          "API key must be provided for Gemini models via the api_key"
+          " parameter or the LANGEXTRACT_API_KEY environment variable"
+      )
+  elif language_model_type == inference.OpenAILanguageModel:
+    lm_kwargs["base_url"] = model_url
+    if not api_key:
+        raise ValueError(
+            "API key must be provided for OpenAI models via the api_key"
+            " parameter or the LANGEXTRACT_API_KEY environment variable"
+        )
+  elif language_model_type == inference.OllamaLanguageModel:
+    lm_kwargs["model_url"] = model_url
 
-  filtered_kwargs = {k: v for k, v in base_lm_kwargs.items() if v is not None}
+  # Merge user-provided params which have precedence over defaults.
+  lm_kwargs.update(language_model_params or {})
+
+  # Filter out None values before passing to the constructor
+  filtered_kwargs = {k: v for k, v in lm_kwargs.items() if v is not None}
 
   language_model = language_model_type(**filtered_kwargs)
 

@@ -14,6 +14,7 @@
 
 from unittest import mock
 import langfun as lf
+import pydantic
 from absl.testing import absltest
 from langextract import inference
 
@@ -138,6 +139,77 @@ class TestOllamaLanguageModel(absltest.TestCase):
     ]]
     self.assertEqual(results, expected_results)
 
+
+
+class TestOpenAILanguageModel(absltest.TestCase):
+
+  @mock.patch.object(inference.openai.ChatCompletion, "create")
+  def test_openai_infer(self, mock_create):
+    mock_completion = mock.Mock()
+    mock_completion.choices = [mock.Mock()]
+    mock_completion.choices[0].message.content = "Test response"
+    mock_create.return_value = mock_completion
+
+    model = inference.OpenAILanguageModel(
+        model_id="gpt-4",
+        api_key="test_key",
+    )
+    batch_prompts = ["Test prompt"]
+    results = list(model.infer(batch_prompts))
+
+    mock_create.assert_called_once_with(
+        model="gpt-4",
+        messages=[
+            {'role': 'system', 'content': 'You are a helpful assistant that only speaks JSON.'},
+            {'role': 'user', 'content': 'Test prompt'},
+        ],
+        temperature=0.0,
+    )
+    expected_results = [[
+        inference.ScoredOutput(
+            score=1.0, output="Test response"
+        )
+    ]]
+    self.assertEqual(results, expected_results)
+
+  @mock.patch.object(inference.openai.ChatCompletion, "create")
+  def test_openai_infer_with_schema(self, mock_create):
+    class Translation(pydantic.BaseModel):
+      text: str
+      language: str
+
+    mock_response_content = '{"text": "cuore", "language": "Italian"}'
+    mock_completion = mock.Mock()
+    mock_completion.choices = [mock.Mock()]
+    mock_completion.choices[0].message.content = mock_response_content
+    mock_create.return_value = mock_completion
+
+    model = inference.OpenAILanguageModel(
+        model_id="gpt-4",
+        api_key="test_key",
+        output_schema=Translation,
+    )
+    batch_prompts = ["Translate heart to Italian."]
+    results = list(model.infer(batch_prompts))
+
+    # Verify the prompt was augmented with schema instructions.
+    sent_messages = mock_create.call_args[1]['messages']
+    user_content = sent_messages[1]['content']
+    self.assertIn("Translate heart to Italian.", user_content)
+    self.assertIn("Your response MUST be a JSON object", user_content)
+    self.assertIn("SCHEMA:", user_content)
+    self.assertIn("EXAMPLE:", user_content)
+    self.assertIn('"title": "Translation"', user_content)
+    self.assertIn('"type": "object"', user_content)
+    self.assertIn('"text": "string"', user_content)
+    self.assertIn('"language": "string"', user_content)
+
+    # Verify the output is correctly wrapped for the resolver.
+    raw_output = results[0][0].output
+    expected_wrapped_output = (
+        '{"extractions": [{"text": "cuore"}, {"language": "Italian"}]}'
+    )
+    self.assertEqual(raw_output, expected_wrapped_output)
 
 if __name__ == "__main__":
   absltest.main()

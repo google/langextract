@@ -26,6 +26,7 @@ from typing import Any
 from google import genai
 import langfun as lf
 import requests
+import openai
 from typing_extensions import override
 import yaml
 
@@ -439,3 +440,105 @@ class GeminiLanguageModel(BaseLanguageModel):
       raise ValueError(
           f'Failed to parse output as {self.format_type.name}: {str(e)}'
       ) from e
+
+
+
+@dataclasses.dataclass(init=False)
+class OpenAILanguageModel(BaseLanguageModel):
+  """Language model inference using OpenAI's API."""
+
+  model_id: str
+  api_key: str | None = None
+  base_url: str | None = None
+  temperature: float = 0.0
+  max_workers: int = 10
+  _extra_kwargs: dict[str, Any] = dataclasses.field(
+      default_factory=dict, repr=False, compare=False
+  )
+
+  def __init__(
+      self,
+      model_id: str,
+      api_key: str | None = None,
+      base_url: str | None = None,
+      temperature: float = 0.0,
+      max_workers: int = 10,
+      **kwargs,
+  ) -> None:
+    """Initialize the OpenAI language model."""
+    self.model_id = model_id
+    self.api_key = api_key
+    self.base_url = base_url
+    self.temperature = temperature
+    self.max_workers = max_workers
+    self._extra_kwargs = kwargs or {}
+
+    if not self.api_key:
+      raise ValueError('API key not provided.')
+
+    openai.api_key = self.api_key
+    if self.base_url:
+      openai.api_base = self.base_url
+
+    super().__init__(
+        constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)
+    )
+
+  def _process_single_prompt(self, prompt: str, config: dict) -> ScoredOutput:
+    """Process a single prompt and return a ScoredOutput."""
+    try:
+      response = openai.ChatCompletion.create(
+          model=self.model_id,
+          messages=[
+              {'role': 'system', 'content': 'You are a helpful assistant.'},
+              {'role': 'user', 'content': prompt},
+          ],
+          **config,
+      )
+      output = response.choices[0].message.content
+      return ScoredOutput(score=1.0, output=output)
+
+    except Exception as e:
+      raise InferenceOutputError(f'OpenAI API error: {str(e)}') from e
+
+  def infer(
+      self, batch_prompts: Sequence[str], **kwargs
+  ) -> Iterator[Sequence[ScoredOutput]]:
+    """Runs inference on a list of prompts via OpenAI's API."""
+    config = {
+        'temperature': kwargs.get('temperature', self.temperature),
+    }
+    if 'max_tokens' in kwargs:
+      config['max_tokens'] = kwargs['max_tokens']
+    if 'top_p' in kwargs:
+      config['top_p'] = kwargs['top_p']
+
+    if len(batch_prompts) > 1 and self.max_workers > 1:
+      with concurrent.futures.ThreadPoolExecutor(
+          max_workers=min(self.max_workers, len(batch_prompts))
+      ) as executor:
+        future_to_index = {
+            executor.submit(
+                self._process_single_prompt, prompt, config.copy()
+            ): i
+            for i, prompt in enumerate(batch_prompts)
+        }
+
+        results: list[ScoredOutput | None] = [None] * len(batch_prompts)
+        for future in concurrent.futures.as_completed(future_to_index):
+          index = future_to_index[future]
+          try:
+            results[index] = future.result()
+          except Exception as e:
+            raise InferenceOutputError(
+                f'Parallel inference error: {str(e)}'
+            ) from e
+
+        for result in results:
+          if result is None:
+            raise InferenceOutputError('Failed to process one or more prompts')
+          yield [result]
+    else:
+      for prompt in batch_prompts:
+        result = self._process_single_prompt(prompt, config.copy())
+        yield [result]

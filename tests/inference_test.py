@@ -139,5 +139,37 @@ class TestOllamaLanguageModel(absltest.TestCase):
     self.assertEqual(results, expected_results)
 
 
+
+class TestOpenAILanguageModel(absltest.TestCase):
+
+  @mock.patch.object(inference.openai.Client, "chat")
+  def test_openai_infer(self, mock_chat):
+    mock_completion = mock.Mock()
+    mock_completion.choices = [mock.Mock()]
+    mock_completion.choices[0].message.content = "Test response"
+    mock_chat.completions.create.return_value = mock_completion
+
+    model = inference.OpenAILanguageModel(
+        model_id="gpt-4",
+        api_key="test_key",
+    )
+    batch_prompts = ["Test prompt"]
+    results = list(model.infer(batch_prompts))
+
+    mock_chat.completions.create.assert_called_once_with(
+        model="gpt-4",
+        messages=[
+            {'role': 'system', 'content': 'You are a helpful assistant.'},
+            {'role': 'user', 'content': 'Test prompt'},
+        ],
+        temperature=0.0,
+    )
+    expected_results = [[
+        inference.ScoredOutput(
+            score=1.0, output="Test response"
+        )
+    ]]
+    self.assertEqual(results, expected_results)
+
 if __name__ == "__main__":
   absltest.main()

@@ -110,6 +110,13 @@ class OllamaLanguageModel(BaseLanguageModel):
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
+  seed: int | None = None
+  temperature: float | None = None
+  top_k: int | None = None
+  num_threads: int | None = None
+  num_ctx: int | None = None
+  max_output_tokens: int | None = None
+
 
   def __init__(
       self,
@@ -136,6 +143,7 @@ class OllamaLanguageModel(BaseLanguageModel):
           model=self._model,
           structured_output_format=self._structured_output_format,
           model_url=self._model_url,
+          **kwargs,
       )
       # No score for Ollama. Default to 1.0
       yield [ScoredOutput(score=1.0, output=response['response'])]
@@ -198,18 +206,18 @@ class OllamaLanguageModel(BaseLanguageModel):
       exceptions.
     """
     options = {'keep_alive': keep_alive}
-    if seed:
-      options['seed'] = seed
-    if temperature:
-      options['temperature'] = temperature
-    if top_k:
-      options['top_k'] = top_k
-    if num_threads:
-      options['num_thread'] = num_threads
-    if max_output_tokens:
-      options['num_predict'] = max_output_tokens
-    if num_ctx:
-      options['num_ctx'] = num_ctx
+    if seed or self.seed:
+      options['seed'] = seed or self.seed
+    if temperature or self.temperature:
+      options['temperature'] = temperature or self.temperature
+    if top_k or self.top_k:
+      options['top_k'] = top_k or self.top_k
+    if num_threads or self.num_threads:
+      options['num_thread'] = num_threads or self.num_threads
+    if max_output_tokens or self.max_output_tokens:
+      options['num_predict'] = max_output_tokens or self.max_output_tokens
+    if num_ctx or self.num_ctx:
+      options['num_ctx'] = num_ctx or self.num_ctx
     model_url = model_url + '/api/generate'
 
     payload = {

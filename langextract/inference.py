@@ -364,26 +364,13 @@ class GeminiLanguageModel(BaseLanguageModel):
       with concurrent.futures.ThreadPoolExecutor(
           max_workers=min(self.max_workers, len(batch_prompts))
       ) as executor:
-        future_to_index = {
-            executor.submit(
-                self._process_single_prompt, prompt, config.copy()
-            ): i
-            for i, prompt in enumerate(batch_prompts)
-        }
-
-        results: list[ScoredOutput | None] = [None] * len(batch_prompts)
-        for future in concurrent.futures.as_completed(future_to_index):
-          index = future_to_index[future]
-          try:
-            results[index] = future.result()
-          except Exception as e:
-            raise InferenceOutputError(
-                f'Parallel inference error: {str(e)}'
-            ) from e
-
-        for result in results:
-          if result is None:
-            raise InferenceOutputError('Failed to process one or more prompts')
+        # Use executor.map for a simpler, more robust implementation.
+        # It returns results in order and fails fast.
+        results_iterator = executor.map(
+            lambda p: self._process_single_prompt(p, config.copy()),
+            batch_prompts
+        )
+        for result in results_iterator:
           yield [result]
     else:
       # Sequential processing for single prompt or worker

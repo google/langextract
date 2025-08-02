@@ -76,7 +76,7 @@ result = lx.extract(
 print(f"Extracted {len(result.extractions)} entities from {len(result.text):,} characters")
 
 # Save and visualize the results
-lx.io.save_annotated_documents([result], output_name="romeo_juliet_extractions.jsonl")
+lx.io.save_annotated_documents([result], output_name="romeo_juliet_extractions.jsonl", output_dir=".")
 
 # Generate the interactive visualization
 html_content = lx.visualize("romeo_juliet_extractions.jsonl")

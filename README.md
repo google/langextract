@@ -111,7 +111,7 @@ The extractions can be saved to a `.jsonl` file, a popular format for working wi
 
 ```python
 # Save the results to a JSONL file
-lx.io.save_annotated_documents([result], output_name="extraction_results.jsonl")
+lx.io.save_annotated_documents([result], output_name="extraction_results.jsonl", output_dir=".")
 
 # Generate the visualization from the file
 html_content = lx.visualize("extraction_results.jsonl")

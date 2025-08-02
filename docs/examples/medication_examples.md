@@ -62,7 +62,7 @@ for entity in result.extractions:
     print(f"• {entity.extraction_class.capitalize()}: {entity.extraction_text}{position_info}")
 
 # Save and visualize the results
-lx.io.save_annotated_documents([result], output_name="medical_ner_extraction.jsonl")
+lx.io.save_annotated_documents([result], output_name="medical_ner_extraction.jsonl", output_dir=".")
 
 # Generate the interactive visualization
 html_content = lx.visualize("medical_ner_extraction.jsonl")

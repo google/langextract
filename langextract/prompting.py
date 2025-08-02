@@ -63,20 +63,31 @@ def read_prompt_template_structured_from_file(
 
   Raises:
     ParseError: If the file cannot be parsed successfully.
+    ValueError: If the file is empty or malformed.
   """
   adapter = pydantic.TypeAdapter(PromptTemplateStructured)
   try:
     with pathlib.Path(prompt_path).open("rt") as f:
-      data_dict = {}
       prompt_content = f.read()
+      if not prompt_content:
+        raise ValueError(f"Prompt file is empty: {prompt_path}")
       if format_type == data.FormatType.YAML:
         data_dict = yaml.safe_load(prompt_content)
       elif format_type == data.FormatType.JSON:
         data_dict = json.loads(prompt_content)
+      else:
+        # Should be unreachable if using the enum
+        raise ValueError(f"Unsupported format type: {format_type}")
+      if not data_dict:
+        raise ValueError(f"Malformed or empty YAML/JSON in file: {prompt_path}")
       return adapter.validate_python(data_dict)
+  except (yaml.YAMLError, json.JSONDecodeError) as e:
+    raise ValueError(
+        f"Failed to parse prompt template from file due to a syntax error: {prompt_path}"
+    ) from e
   except Exception as e:
     raise ParseError(
-        f"Failed to parse prompt template from file: {prompt_path}"
+        f"An unexpected error occurred while parsing prompt template from file: {prompt_path}"
     ) from e
 
 

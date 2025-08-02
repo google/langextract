@@ -105,6 +105,25 @@ result = lx.extract(
 >
 > **Model Lifecycle**: Note that Gemini models have a lifecycle with defined retirement dates. Users should consult the [official model version documentation](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions) to stay informed about the latest stable and legacy versions.
 
+For ollama, 
+
+```python
+from langextract import inference
+
+# The input text to be processed
+input_text = "Lady Juliet gazed longingly at the stars, her heart aching for Romeo"
+
+# Run the extraction
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    language_model_type=inference.OllamaLanguageModel,
+    model_id="gemma2:latest",
+    model_url="http://localhost:11434"
+)
+```
+
 ### 3. Visualize the Results
 
 The extractions can be saved to a `.jsonl` file, a popular format for working with language model data. LangExtract can then generate an interactive HTML visualization from this file to review the entities in context.

@@ -116,6 +116,7 @@ class OllamaLanguageModel(BaseLanguageModel):
   num_threads: int | None = None
   num_ctx: int | None = None
   max_output_tokens: int | None = None
+  timeout: int = 30
 
 
   def __init__(
@@ -160,7 +161,7 @@ class OllamaLanguageModel(BaseLanguageModel):
       system: str = '',
       raw: bool = False,
       model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
-      timeout: int = 30,  # seconds
+      timeout: int | None = None,  # seconds
       keep_alive: int = 5 * 60,  # if loading, keep model up for 5 minutes.
       num_threads: int | None = None,
       num_ctx: int = 2048,
@@ -237,12 +238,12 @@ class OllamaLanguageModel(BaseLanguageModel):
               'Accept': 'application/json',
           },
           json=payload,
-          timeout=timeout,
+          timeout=timeout or self.timeout,
       )
     except requests.exceptions.RequestException as e:
       if isinstance(e, requests.exceptions.ReadTimeout):
         msg = (
-            f'Ollama Model timed out (timeout={timeout},'
+            f'Ollama Model timed out (timeout={timeout or self.timeout},'
             f' num_threads={num_threads})'
         )
         raise ValueError(msg) from e

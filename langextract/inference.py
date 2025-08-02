@@ -155,6 +155,14 @@ class OllamaLanguageModel(BaseLanguageModel):
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
+  seed: int | None = None
+  temperature: float | None = None
+  top_k: int | None = None
+  num_threads: int | None = None
+  num_ctx: int | None = None
+  max_output_tokens: int | None = None
+  timeout: int = 30
+
 
   def __init__(
       self,
@@ -181,6 +189,7 @@ class OllamaLanguageModel(BaseLanguageModel):
           model=self._model,
           structured_output_format=self._structured_output_format,
           model_url=self._model_url,
+          **kwargs,
       )
       # No score for Ollama. Default to 1.0
       yield [ScoredOutput(score=1.0, output=response['response'])]
@@ -197,7 +206,7 @@ class OllamaLanguageModel(BaseLanguageModel):
       system: str = '',
       raw: bool = False,
       model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
-      timeout: int = 30,  # seconds
+      timeout: int | None = None,  # seconds
       keep_alive: int = 5 * 60,  # if loading, keep model up for 5 minutes.
       num_threads: int | None = None,
       num_ctx: int = 2048,
@@ -243,18 +252,18 @@ class OllamaLanguageModel(BaseLanguageModel):
       exceptions.
     """
     options = {'keep_alive': keep_alive}
-    if seed:
-      options['seed'] = seed
-    if temperature:
-      options['temperature'] = temperature
-    if top_k:
-      options['top_k'] = top_k
-    if num_threads:
-      options['num_thread'] = num_threads
-    if max_output_tokens:
-      options['num_predict'] = max_output_tokens
-    if num_ctx:
-      options['num_ctx'] = num_ctx
+    if seed or self.seed:
+      options['seed'] = seed or self.seed
+    if temperature or self.temperature:
+      options['temperature'] = temperature or self.temperature
+    if top_k or self.top_k:
+      options['top_k'] = top_k or self.top_k
+    if num_threads or self.num_threads:
+      options['num_thread'] = num_threads or self.num_threads
+    if max_output_tokens or self.max_output_tokens:
+      options['num_predict'] = max_output_tokens or self.max_output_tokens
+    if num_ctx or self.num_ctx:
+      options['num_ctx'] = num_ctx or self.num_ctx
     model_url = model_url + '/api/generate'
 
     payload = {
@@ -274,12 +283,12 @@ class OllamaLanguageModel(BaseLanguageModel):
               'Accept': 'application/json',
           },
           json=payload,
-          timeout=timeout,
+          timeout=timeout or self.timeout,
       )
     except requests.exceptions.RequestException as e:
       if isinstance(e, requests.exceptions.ReadTimeout):
         msg = (
-            f'Ollama Model timed out (timeout={timeout},'
+            f'Ollama Model timed out (timeout={timeout or self.timeout},'
             f' num_threads={num_threads})'
         )
         raise ValueError(msg) from e
@@ -401,26 +410,13 @@ class GeminiLanguageModel(BaseLanguageModel):
       with concurrent.futures.ThreadPoolExecutor(
           max_workers=min(self.max_workers, len(batch_prompts))
       ) as executor:
-        future_to_index = {
-            executor.submit(
-                self._process_single_prompt, prompt, config.copy()
-            ): i
-            for i, prompt in enumerate(batch_prompts)
-        }
-
-        results: list[ScoredOutput | None] = [None] * len(batch_prompts)
-        for future in concurrent.futures.as_completed(future_to_index):
-          index = future_to_index[future]
-          try:
-            results[index] = future.result()
-          except Exception as e:
-            raise InferenceOutputError(
-                f'Parallel inference error: {str(e)}'
-            ) from e
-
-        for result in results:
-          if result is None:
-            raise InferenceOutputError('Failed to process one or more prompts')
+        # Use executor.map for a simpler, more robust implementation.
+        # It returns results in order and fails fast.
+        results_iterator = executor.map(
+            lambda p: self._process_single_prompt(p, config.copy()),
+            batch_prompts
+        )
+        for result in results_iterator:
           yield [result]
     else:
       # Sequential processing for single prompt or worker

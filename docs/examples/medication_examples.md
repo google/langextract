@@ -196,7 +196,7 @@ for med_name, extractions in medication_groups.items():
 lx.io.save_annotated_documents(
     [result],
     output_name="medical_ner_extraction.jsonl",
-    output_dir="." # Saves to the current directory instead of the default 'test_output/'
+    output_dir="." 
 ) 
 
 # Generate the interactive visualization

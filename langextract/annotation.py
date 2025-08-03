@@ -31,6 +31,7 @@ from absl import logging
 
 from langextract import chunking
 from langextract import data
+from langextract import exceptions
 from langextract import inference
 from langextract import progress
 from langextract import prompting
@@ -39,7 +40,7 @@ from langextract import resolver as resolver_lib
 ATTRIBUTE_SUFFIX = "_attributes"
 
 
-class DocumentRepeatError(Exception):
+class DocumentRepeatError(exceptions.LangExtractError):
   """Exception raised when identical document ids are present."""
 
 

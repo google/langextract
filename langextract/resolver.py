@@ -31,6 +31,7 @@ from absl import logging
 import yaml
 
 from langextract import data
+from langextract import exceptions
 from langextract import schema
 from langextract import tokenizer
 
@@ -151,7 +152,7 @@ class AbstractResolver(abc.ABC):
 ExtractionValueType = str | int | float | dict | list | None
 
 
-class ResolverParsingError(Exception):
+class ResolverParsingError(exceptions.LangExtractError):
   """Error raised when content cannot be parsed as the given format."""
 
 

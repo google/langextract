@@ -26,12 +26,13 @@ import requests
 
 from langextract import data
 from langextract import data_lib
+from langextract import exceptions
 from langextract import progress
 
 DEFAULT_TIMEOUT_SECONDS = 30
 
 
-class InvalidDatasetError(Exception):
+class InvalidDatasetError(exceptions.LangExtractError):
   """Error raised when Dataset is empty or invalid."""
 
 

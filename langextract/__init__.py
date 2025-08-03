@@ -32,12 +32,27 @@ import dotenv
 
 from langextract import annotation
 from langextract import data
+from langextract import exceptions
 from langextract import inference
 from langextract import io
 from langextract import prompting
 from langextract import resolver
 from langextract import schema
 from langextract import visualization
+
+__all__ = [
+    "extract",
+    "visualize",
+    "annotation",
+    "data",
+    "exceptions",
+    "inference",
+    "io",
+    "prompting",
+    "resolver",
+    "schema",
+    "visualization",
+]
 
 LanguageModelT = TypeVar("LanguageModelT", bound=inference.BaseLanguageModel)
 

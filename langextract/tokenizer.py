@@ -30,8 +30,10 @@ import re
 
 from absl import logging
 
+from langextract import exceptions
 
-class BaseTokenizerError(Exception):
+
+class BaseTokenizerError(exceptions.LangExtractError):
   """Base class for all tokenizer-related errors."""
 
 

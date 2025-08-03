@@ -30,6 +30,7 @@ from typing_extensions import override
 import yaml
 
 from langextract import data
+from langextract import exceptions
 from langextract import schema
 
 _OLLAMA_DEFAULT_MODEL_URL = 'http://localhost:11434'
@@ -49,7 +50,7 @@ class ScoredOutput:
     return f'Score: {self.score:.2f}\nOutput:\n{formatted_lines}'
 
 
-class InferenceOutputError(Exception):
+class InferenceOutputError(exceptions.LangExtractError):
   """Exception raised when no scored outputs are available from the language model."""
 
   def __init__(self, message: str):

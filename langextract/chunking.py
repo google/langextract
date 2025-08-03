@@ -28,10 +28,11 @@ from absl import logging
 import more_itertools
 
 from langextract import data
+from langextract import exceptions
 from langextract import tokenizer
 
 
-class TokenUtilError(Exception):
+class TokenUtilError(exceptions.LangExtractError):
   """Error raised when token_util returns unexpected values."""
 
 

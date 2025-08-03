@@ -38,6 +38,7 @@ from langextract import prompting
 from langextract import resolver
 from langextract import schema
 from langextract import visualization
+from langextract.resolver import ResolverParsingError
 
 
 LanguageModelT = TypeVar("LanguageModelT", bound=inference.BaseLanguageModel)

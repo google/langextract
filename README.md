@@ -303,6 +303,39 @@ Or reproduce the full CI matrix locally with tox:
 tox  # runs pylint + pytest on Python 3.10 and 3.11
 ```
 
+## Development
+
+### Code Formatting
+
+This project uses automated formatting tools to maintain consistent code style:
+
+```bash
+# Auto-format all code
+./autoformat.sh
+
+# Or run formatters separately
+isort langextract tests --profile google --line-length 80
+pyink langextract tests --config pyproject.toml
+```
+
+### Pre-commit Hooks
+
+For automatic formatting checks:
+```bash
+pre-commit install  # One-time setup
+pre-commit run --all-files  # Manual run
+```
+
+### Linting
+
+Run linting before submitting PRs:
+
+```bash
+pylint --rcfile=.pylintrc langextract tests
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full development guidelines.
+
 ## Troubleshooting
 
 **libmagic error**: If you see "failed to find libmagic", install with `pip install langextract[full]` or install system dependencies:

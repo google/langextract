@@ -55,8 +55,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "black>=23.7.0",
-    "pylint>=2.17.5",
+    "pyink~=24.3.0",
+    "isort>=5.13.0",
+    "pylint>=3.0.0",
     "pytest>=7.4.0",
     "pytype>=2024.10.11",
     "tox>=4.0.0",
@@ -83,6 +84,25 @@ include-package-data = false
     "*.svg",
 ]
 
-[tool.pytest]
+[tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = "*_test.py" 
+python_files = "*_test.py"
+python_classes = "Test*"
+python_functions = "test_*"
+# Show extra test summary info
+addopts = "-ra"
+
+[tool.pyink]
+# Configuration for Google's style guide
+line-length = 80
+unstable = true
+pyink-indentation = 2
+pyink-use-majority-quotes = true
+
+[tool.isort]
+# Configuration for Google's style guide
+profile = "google"
+line_length = 80
+force_sort_within_sections = true
+# Allow multiple imports on one line for these modules
+single_line_exclusions = ["typing", "typing_extensions", "collections.abc"]

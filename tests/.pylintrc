@@ -1,0 +1,52 @@
+# Copyright 2025 Google LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Test-specific Pylint configuration
+# Inherits from parent ../.pylintrc and adds test-specific relaxations
+
+[MASTER]
+# Python will merge with parent; no need to repeat plugins.
+
+[MESSAGES CONTROL]
+# Additional disables for test code only
+disable=
+    # --- Test-specific relaxations ---
+    duplicate-code,           # Test fixtures often have similar patterns
+    too-many-lines,           # Large test files are common
+    missing-module-docstring, # Tests don't need module docs
+    missing-class-docstring,  # Test classes are self-explanatory
+    missing-function-docstring, # Test method names describe intent
+    line-too-long,            # Golden strings and test data
+    invalid-name,             # setUp, tearDown, maxDiff, etc.
+    protected-access,         # Tests often access private members
+    use-dict-literal,         # Parametrized tests benefit from dict()
+    bad-indentation,          # pyink 2-space style conflicts with pylint
+    unused-argument,          # Mock callbacks often have unused args
+    import-error,             # Test dependencies may not be installed
+    unused-import,            # Some imports are for test fixtures
+    too-many-positional-arguments  # Test methods can have many args
+
+[DESIGN]
+# Relax complexity limits for tests
+max-args = 10                 # Fixtures often take many params
+max-locals = 25               # Complex test setups
+max-statements = 75           # Detailed test scenarios
+max-branches = 15             # Multiple test conditions
+
+[BASIC]
+# Allow common test naming patterns
+good-names=i,j,k,ex,Run,_,id,ok,fd,fp,maxDiff,setUp,tearDown
+
+# Include test-specific naming patterns
+method-rgx=[a-z_][a-z0-9_]{2,50}$|test[A-Z_][a-zA-Z0-9]*$|assert[A-Z][a-zA-Z0-9]*$

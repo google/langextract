@@ -14,9 +14,10 @@
 
 import textwrap
 
-from langextract import tokenizer
 from absl.testing import absltest
 from absl.testing import parameterized
+
+from langextract import tokenizer
 
 
 class TokenizerTest(parameterized.TestCase):

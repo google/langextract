@@ -28,10 +28,10 @@ import enum
 import html
 import itertools
 import json
-import textwrap
-
 import os
 import pathlib
+import textwrap
+
 from langextract import data as _data
 from langextract import io as _io
 
@@ -130,9 +130,9 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
       50% { text-decoration-color: #ff0000; }
       100% { text-decoration-color: #ff4444; }
     }
-    .lx-legend { 
-      font-size: 12px; margin-bottom: 8px; 
-      padding-bottom: 8px; border-bottom: 1px solid #e0e0e0; 
+    .lx-legend {
+      font-size: 12px; margin-bottom: 8px;
+      padding-bottom: 8px; border-bottom: 1px solid #e0e0e0;
     }
     .lx-label {
       display: inline-block;
@@ -456,12 +456,12 @@ def _build_visualization_html(
           <button class="lx-control-btn" onclick="nextExtraction()">⏭ Next</button>
         </div>
         <div class="lx-progress-container">
-          <input type="range" id="progressSlider" class="lx-progress-slider" 
-                 min="0" max="{len(extractions)-1}" value="0" 
+          <input type="range" id="progressSlider" class="lx-progress-slider"
+                 min="0" max="{len(extractions)-1}" value="0"
                  onchange="jumpToExtraction(this.value)">
         </div>
         <div class="lx-status-text">
-          Entity <span id="entityInfo">1/{len(extractions)}</span> | 
+          Entity <span id="entityInfo">1/{len(extractions)}</span> |
           Pos <span id="posInfo">{pos_info_str}</span>
         </div>
       </div>

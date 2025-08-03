@@ -16,12 +16,12 @@
 
 import dataclasses
 import json
+import os
+import pathlib
 
 import pydantic
 import yaml
 
-import os
-import pathlib
 from langextract import data
 from langextract import schema
 

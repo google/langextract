@@ -16,11 +16,9 @@ import string
 import textwrap
 from unittest import mock
 
-
-
-
 from absl.testing import absltest
 from absl.testing import parameterized
+
 from langextract import data
 from langextract import schema
 

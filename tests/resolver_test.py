@@ -17,6 +17,7 @@ from typing import Sequence
 
 from absl.testing import absltest
 from absl.testing import parameterized
+
 from langextract import chunking
 from langextract import data
 from langextract import resolver as resolver_lib

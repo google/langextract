@@ -29,11 +29,8 @@ import requests
 from typing_extensions import override
 import yaml
 
-
-
 from langextract import data
 from langextract import schema
-
 
 _OLLAMA_DEFAULT_MODEL_URL = 'http://localhost:11434'
 

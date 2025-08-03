@@ -14,13 +14,13 @@
 
 import json
 
+from absl.testing import absltest
+from absl.testing import parameterized
 import numpy as np
 
 from langextract import data
 from langextract import data_lib
 from langextract import tokenizer
-from absl.testing import absltest
-from absl.testing import parameterized
 
 
 class DataLibToDictParameterizedTest(parameterized.TestCase):

@@ -20,6 +20,7 @@ from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
+
 from langextract import annotation
 from langextract import data
 from langextract import inference

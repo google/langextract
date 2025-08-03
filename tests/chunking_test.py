@@ -14,11 +14,12 @@
 
 import textwrap
 
+from absl.testing import absltest
+from absl.testing import parameterized
+
 from langextract import chunking
 from langextract import data
 from langextract import tokenizer
-from absl.testing import absltest
-from absl.testing import parameterized
 
 
 class SentenceIterTest(absltest.TestCase):
@@ -368,7 +369,9 @@ class TextChunkTest(absltest.TestCase):
     )""")
     document = data.Document(text=text, document_id="test_doc_123")
     tokenized_text = tokenizer.tokenize(text)
-    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer=7, document=document)
+    chunk_iter = chunking.ChunkIterator(
+        tokenized_text, max_char_buffer=7, document=document
+    )
     text_chunk = next(chunk_iter)
     self.assertEqual(str(text_chunk), expected)
 

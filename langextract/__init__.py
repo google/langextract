@@ -19,13 +19,13 @@ from __future__ import annotations
 # Ensure libmagic is available before langfun imports python-magic.
 # pylibmagic provides pre-built binaries that python-magic needs.
 try:
-    import pylibmagic  # noqa: F401 (side-effect import)
+  import pylibmagic  # noqa: F401 (side-effect import)
 except ImportError:
-    pass
+  pass
 
 from collections.abc import Iterable, Sequence
 import os
-from typing import Any, Type, TypeVar, cast
+from typing import Any, cast, Type, TypeVar
 import warnings
 
 import dotenv
@@ -38,7 +38,6 @@ from langextract import prompting
 from langextract import resolver
 from langextract import schema
 from langextract import visualization
-
 
 LanguageModelT = TypeVar("LanguageModelT", bound=inference.BaseLanguageModel)
 

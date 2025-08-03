@@ -13,12 +13,15 @@
 # limitations under the License.
 
 from unittest import mock
-import langfun as lf
+
 from absl.testing import absltest
+import langfun as lf
+
 from langextract import inference
 
 
 class TestLangFunLanguageModel(absltest.TestCase):
+
   @mock.patch.object(
       inference.lf.core.language_model, "LanguageModel", autospec=True
   )

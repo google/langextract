@@ -167,6 +167,16 @@ class OllamaLanguageModel(BaseLanguageModel):
     Yields:
       Lists of ScoredOutputs.
     """
+    for prompt in batch_prompts:
+      response = self._ollama_query(
+          prompt=prompt,
+          model=self._model,
+          structured_output_format=self._structured_output_format,
+          model_url=self._model_url,
+          **kwargs,
+      )
+      # No score for Ollama. Default to 1.0
+      yield [ScoredOutput(score=1.0, output=response['response'])]
 
   def _ollama_query(
       self,

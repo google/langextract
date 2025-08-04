@@ -421,7 +421,6 @@ class GeminiLanguageModel(BaseLanguageModel):
           f'Failed to parse output as {self.format_type.name}: {str(e)}'
       ) from e
 
-
 @dataclasses.dataclass(init=False)
 class OpenAILanguageModel(BaseLanguageModel):
   """Language model inference using OpenAI's API with structured output."""

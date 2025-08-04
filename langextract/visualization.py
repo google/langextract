@@ -119,9 +119,7 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
       padding: 8px 10px; margin-top: 8px; font-size: 13px;
     }
     .lx-current-highlight {
-      text-decoration: underline;
-      text-decoration-color: #ff4444;
-      text-decoration-thickness: 3px;
+      border-bottom: 4px solid #ff4444;
       font-weight: bold;
       animation: lx-pulse 1s ease-in-out;
     }

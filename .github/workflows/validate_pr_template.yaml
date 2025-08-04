@@ -1,0 +1,41 @@
+name: Validate PR template
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event.pull_request.draft == false   # drafts can save early
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Fail if template untouched
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$PR_BODY" | tr -d '\r' > body.txt
+          
+          # Required sections from the template
+          required=( "# Description" "Fixes #" "# How Has This Been Tested?" "# Checklist" )
+          err=0
+          
+          # Check for required sections
+          for h in "${required[@]}"; do
+            grep -Fq "$h" body.txt || { echo "::error::$h missing"; err=1; }
+          done
+          
+          # Check for placeholder text that should be replaced
+          grep -Eiq 'Replace this with|Choose one:' body.txt && {
+            echo "::error::Template placeholders still present"; err=1; 
+          }
+          
+          # Also check for the unmodified issue number placeholder
+          grep -Fq 'Fixes #[issue number]' body.txt && {
+            echo "::error::Issue number placeholder not updated"; err=1;
+          }
+          
+          exit $err

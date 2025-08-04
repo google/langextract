@@ -340,7 +340,7 @@ class GeminiLanguageModel(BaseLanguageModel):
     """Process a single prompt and return a ScoredOutput."""
     try:
       if self.gemini_schema:
-        response_schema = self.gemini_schema.schema_dict
+        response_schema = self.gemini.schema_dict
         mime_type = (
             'application/json'
             if self.format_type == data.FormatType.JSON

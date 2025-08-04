@@ -329,6 +329,7 @@ class GeminiLanguageModel(BaseLanguageModel):
     if not self.api_key:
       raise ValueError('API key not provided.')
 
+    # Initialize the Gemini client
     self._client = genai.Client(api_key=self.api_key)
 
     super().__init__(

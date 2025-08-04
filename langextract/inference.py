@@ -118,7 +118,6 @@ class OllamaLanguageModel(BaseLanguageModel):
   max_output_tokens: int | None = None
   timeout: int = 30
 
-
   def __init__(
       self,
       model: str,
@@ -369,7 +368,7 @@ class GeminiLanguageModel(BaseLanguageModel):
         # It returns results in order and fails fast.
         results_iterator = executor.map(
             lambda p: self._process_single_prompt(p, config.copy()),
-            batch_prompts
+            batch_prompts,
         )
         for result in results_iterator:
           yield [result]

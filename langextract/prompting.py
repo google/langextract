@@ -83,11 +83,13 @@ def read_prompt_template_structured_from_file(
       return adapter.validate_python(data_dict)
   except (yaml.YAMLError, json.JSONDecodeError) as e:
     raise ValueError(
-        f"Failed to parse prompt template from file due to a syntax error: {prompt_path}"
+        "Failed to parse prompt template from file due to a syntax error:"
+        f" {prompt_path}"
     ) from e
   except Exception as e:
     raise ParseError(
-        f"An unexpected error occurred while parsing prompt template from file: {prompt_path}"
+        "An unexpected error occurred while parsing prompt template from file:"
+        f" {prompt_path}"
     ) from e
 
 

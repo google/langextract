@@ -192,7 +192,9 @@ class DataLibToDictParameterizedTest(parameterized.TestCase):
             data.Extraction(
                 extraction_class="demo_extraction",
                 extraction_text="placeholder",
-                extraction_index=np.int64(42),  # pytype: disable=wrong-arg-types
+                extraction_index=np.int64(
+                    42
+                ),  # pytype: disable=wrong-arg-types
             ),
         ],
     )

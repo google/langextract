@@ -1,0 +1,3 @@
+fix: Remove extra blank line in inference.py
+
+This commit removes an extra blank line before the `OpenAILanguageModel` class definition in `langextract/inference.py`. This resolves a formatting issue reported by `pyink` and should allow the `format` job to pass.

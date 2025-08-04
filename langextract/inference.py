@@ -262,8 +262,8 @@ class OllamaLanguageModel(BaseLanguageModel):
     except requests.exceptions.RequestException as e:
       if isinstance(e, requests.exceptions.ReadTimeout):
         msg = (
-            f'Ollama Model timed out (timeout={timeout or self.timeout},'
-            f' num_threads={num_threads})'
+            f'Ollama Model timed out (timeout={timeout or self.timeout}, '
+            f'num_threads={num_threads})'
         )
         raise ValueError(msg) from e
       raise e

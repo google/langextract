@@ -1,0 +1,63 @@
+name: Require linked issue with community support
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: write
+
+jobs:
+  enforce:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify linked issue
+        uses: nearform-actions/github-action-check-linked-issues@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment: true
+
+      - name: Check community support
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const body = context.payload.pull_request.body || '';
+            const match = body.match(/(?:Fixes|Closes|Resolves)\s+#(\d+)/i);
+            
+            if (!match) {
+              core.setFailed('No linked issue found');
+              return;
+            }
+
+            const issueNumber = Number(match[1]);
+            const { repository } = await github.graphql(`
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    reactionGroups {
+                      content
+                      users { totalCount }
+                    }
+                  }
+                }
+              }
+            `, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              number: issueNumber
+            });
+            
+            const reactions = repository.issue.reactionGroups;
+            const thumbsUp = reactions.find(g => g.content === 'THUMBS_UP')?.users.totalCount || 0;
+            
+            core.info(`Issue #${issueNumber} has ${thumbsUp} 👍 reactions`);
+            
+            const REQUIRED_THUMBS_UP = 5;
+            if (thumbsUp < REQUIRED_THUMBS_UP) {
+              core.setFailed(`Issue #${issueNumber} needs at least ${REQUIRED_THUMBS_UP} 👍 reactions (currently has ${thumbsUp})`);
+            }

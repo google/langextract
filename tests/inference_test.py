@@ -118,7 +118,10 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
 
     # Create model instance
     model = inference.OpenAILanguageModel(
-        model_id=model_id, api_key=api_key, temperature=temperature
+        model_id=model_id,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=temperature
     )
 
     # Test inference

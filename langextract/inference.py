@@ -113,13 +113,13 @@ class OllamaLanguageModel(BaseLanguageModel):
 
   def __init__(
       self,
-      model: str,
+      model_id: str,
       model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
       structured_output_format: str = 'json',
       constraint: schema.Constraint = schema.Constraint(),
       **kwargs,
   ) -> None:
-    self._model = model
+    self._model = model_id
     self._model_url = model_url
     self._structured_output_format = structured_output_format
     self._constraint = constraint

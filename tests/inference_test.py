@@ -73,7 +73,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     }
     mock_ollama_query.return_value = gemma_response
     model = inference.OllamaLanguageModel(
-        model="gemma2:latest",
+        model_id="gemma2:latest",
         model_url="http://localhost:11434",
         structured_output_format="json",
     )

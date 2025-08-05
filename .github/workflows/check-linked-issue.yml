@@ -3,6 +3,7 @@ name: Require linked issue with community support
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,11 +12,12 @@ permissions:
 
 jobs:
   enforce:
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
       - name: Verify linked issue
+        if: github.event_name == 'pull_request'
         uses: nearform-actions/github-action-check-linked-issues@v1.2.7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -32,6 +34,7 @@ jobs:
             Use GitHub automation to close the issue when this PR is merged.
 
       - name: Check community support
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -61,7 +64,9 @@ jobs:
                   issue(number: $number) {
                     reactionGroups {
                       content
-                      users { totalCount }
+                      users {
+                        totalCount
+                      }
                     }
                   }
                 }

@@ -3,6 +3,7 @@ name: Check PR size
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate PR size
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |

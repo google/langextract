@@ -90,7 +90,7 @@ jobs:
 
       - name: Detect file changes
         id: changes
-        uses: tj-actions/changed-files@v44
+        uses: tj-actions/changed-files@v46
         with:
           files: |
             langextract/inference.py

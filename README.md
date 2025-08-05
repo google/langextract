@@ -253,6 +253,29 @@ result = lx.extract(
 )
 ```
 
+**Option 4: Google Service Account (Vertex AI only)**
+
+When using Vertex AI, you can also use a Google service account directly. In this case, you must set `language_model_params` and include the following keys:
+
+* `vertexai: Literal[True]`
+* `project: str`
+* `location: str`
+* `credentials: google.auth.credentials.Credentials | None` (will use environment variables or default credentials if not set)
+
+```python
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description="Extract information...",
+    examples=[...],
+    model_id="gemini-2.5-flash",
+    language_model_params={
+        "vertexai": True,
+        "project": "your-project-id-here",
+        "location": "global"  # Or a more specific location
+    }
+)
+```
+
 ## Using OpenAI Models
 
 LangExtract also supports OpenAI models. Example OpenAI configuration:

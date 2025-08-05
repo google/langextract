@@ -196,10 +196,20 @@ def extract(
 
     # Currently only Gemini is supported
     if not api_key and language_model_type == inference.GeminiLanguageModel:
-      raise ValueError(
-          "API key must be provided for cloud-hosted models via the api_key"
-          " parameter or the LANGEXTRACT_API_KEY environment variable"
-      )
+      if (
+          not language_model_params.get("vertexai")
+          or not language_model_params.get("project")
+          or not language_model_params.get("location")
+      ):
+        raise ValueError(
+            "Gemini models require you to provide either:\n"
+            "  - an API key via the api_key parameter or the"
+            " LANGEXTRACT_API_KEY environment variable\n"
+            "  - language_model_params with:\n"
+            "    - vertex_ai = True\n"
+            "    - project\n"
+            "    - location"
+        )
 
   base_lm_kwargs: dict[str, Any] = {
       "api_key": api_key,

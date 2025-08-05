@@ -121,7 +121,7 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
         model_id=model_id,
         api_key=api_key,
         base_url=base_url,
-        temperature=temperature
+        temperature=temperature,
     )
 
     # Test inference

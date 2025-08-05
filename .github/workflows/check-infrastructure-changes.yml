@@ -3,6 +3,7 @@ name: Protect Infrastructure Files
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -10,11 +11,12 @@ permissions:
 
 jobs:
   protect-infrastructure:
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
       - name: Check for infrastructure file changes
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}

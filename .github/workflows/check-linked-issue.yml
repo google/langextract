@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Verify linked issue
-        uses: nearform-actions/github-action-check-linked-issues@v1
+        uses: nearform-actions/github-action-check-linked-issues@v1.2.7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment: true

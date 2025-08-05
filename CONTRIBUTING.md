@@ -117,8 +117,8 @@ Please fill out all sections of the template to help reviewers understand your c
 
 #### Pull Request Guidelines
 
-- **Keep PRs focused and small**: Each PR should address a single, specific change. This makes review easier and faster.
-- **Reference related issues**: Use "Fixes #123" or "Addresses #123" in your PR description to link to relevant issues.
+- **Keep PRs focused and small**: Each PR should address a single, specific change. PRs must be under 1000 lines of changes total.
+- **Reference related issues**: All PRs must include "Fixes #123" or "Closes #123" in the description. The linked issue should have at least 5 👍 reactions from the community.
 - **Single-change commits**: A PR should typically comprise a single git commit. Squash multiple commits before submitting.
 - **Clear description**: Explain what your change does and why it's needed.
 - **Ensure all tests pass**: Check that both formatting and tests are green before requesting review.
@@ -128,6 +128,8 @@ If your change is large or complex, consider:
 - Opening an issue first to discuss the approach
 - Breaking it into multiple smaller PRs
 - Clearly explaining in the PR description why a larger change is necessary
+
+**Note**: These requirements are enforced by automated checks. Maintainers may bypass them for exceptional cases (e.g., urgent fixes, automated dependency updates).
 
 For more details, read HAI-DEF's
 [Contributing guidelines](https://developers.google.com/health-ai-developer-foundations/community-guidelines#contributing)

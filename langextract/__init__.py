@@ -62,6 +62,9 @@ def extract(
     examples: Sequence[data.ExampleData] | None = None,
     model_id: str = "gemini-2.5-flash",
     api_key: str | None = None,
+    project: str | None = None,
+    location: str = "global",
+    thinking_budget: int = 0,
     language_model_type: Type[LanguageModelT] = inference.GeminiLanguageModel,
     format_type: data.FormatType = data.FormatType.JSON,
     max_char_buffer: int = 1000,
@@ -90,15 +93,20 @@ def extract(
         of Document objects.
       prompt_description: Instructions for what to extract from the text.
       examples: List of ExampleData objects to guide the extraction.
-      api_key: API key for Gemini or other LLM services (can also use
-        environment variable LANGEXTRACT_API_KEY). Cost considerations: Most
-        APIs charge by token volume. Smaller max_char_buffer values increase the
-        number of API calls, while extraction_passes > 1 reprocesses tokens
-        multiple times. Note that max_workers improves processing speed without
-        additional token costs. Refer to your API provider's pricing details and
-        monitor usage with small test runs to estimate costs.
       model_id: The model ID to use for extraction.
+      api_key: API key for Gemini or other LLM services (can also use
+        environment variable LANGEXTRACT_API_KEY). Used for standard Gemini API
+        access. Mutually exclusive with project parameter.
+      project: Google Cloud project ID for Vertex AI access. Used with
+        GeminiVertexLanguageModel. Mutually exclusive with api_key parameter.
+      location: Google Cloud location/region for Vertex AI. Defaults to "global".
+        Only used when project is specified.
+      thinking_budget: Thinking budget for reasoning models (0 = no thinking).
+        Higher values allow more reasoning steps. Only supported by Vertex AI
+        models. Defaults to 0.
       language_model_type: The type of language model to use for inference.
+        Use GeminiLanguageModel for API key access or GeminiVertexLanguageModel
+        for Vertex AI access.
       format_type: The format type for the output (JSON or YAML).
       max_char_buffer: Max number of characters for inference.
       temperature: The sampling temperature for generation. Higher values (e.g.,
@@ -147,7 +155,8 @@ def extract(
 
   Raises:
       ValueError: If examples is None or empty.
-      ValueError: If no API key is provided or found in environment variables.
+      ValueError: If no API key or project is provided for cloud-hosted models.
+      ValueError: If both api_key and project are provided (mutually exclusive).
       requests.RequestException: If URL download fails.
   """
   if not examples:
@@ -180,6 +189,14 @@ def extract(
   )
   prompt_template.examples.extend(examples)
 
+  # Validate authentication parameters
+  if api_key and project:
+    raise ValueError(
+        "Both api_key and project parameters are provided. These are mutually "
+        "exclusive. Use api_key for standard Gemini API access or project for "
+        "Vertex AI access."
+    )
+
   # Generate schema constraints if enabled
   model_schema = None
   schema_constraint = None
@@ -187,30 +204,52 @@ def extract(
   # TODO: Unify schema generation.
   if (
       use_schema_constraints
-      and language_model_type == inference.GeminiLanguageModel
+      and language_model_type in (inference.GeminiLanguageModel, inference.GeminiVertexLanguageModel)
   ):
     model_schema = schema.GeminiSchema.from_examples(prompt_template.examples)
 
-  if not api_key:
-    api_key = os.environ.get("LANGEXTRACT_API_KEY")
+  # Handle authentication for different model types
+  if language_model_type == inference.GeminiVertexLanguageModel:
+    # Vertex AI authentication
+    if not project:
+      raise ValueError(
+          "Project ID must be provided for Vertex AI models via the project "
+          "parameter"
+      )
+    
+    base_lm_kwargs: dict[str, Any] = {
+        "project": project,
+        "location": location,
+        "model_id": model_id,
+        "gemini_schema": model_schema,
+        "format_type": format_type,
+        "temperature": temperature,
+        "thinking_budget": thinking_budget,
+        "constraint": schema_constraint,
+        "max_workers": max_workers,
+    }
+  else:
+    # Standard API key authentication
+    if not api_key:
+      api_key = os.environ.get("LANGEXTRACT_API_KEY")
 
-    # Currently only Gemini is supported
+    # Currently only Gemini is supported for API key access
     if not api_key and language_model_type == inference.GeminiLanguageModel:
       raise ValueError(
           "API key must be provided for cloud-hosted models via the api_key"
           " parameter or the LANGEXTRACT_API_KEY environment variable"
       )
 
-  base_lm_kwargs: dict[str, Any] = {
-      "api_key": api_key,
-      "model_id": model_id,
-      "gemini_schema": model_schema,
-      "format_type": format_type,
-      "temperature": temperature,
-      "model_url": model_url,
-      "constraint": schema_constraint,
-      "max_workers": max_workers,
-  }
+    base_lm_kwargs: dict[str, Any] = {
+        "api_key": api_key,
+        "model_id": model_id,
+        "gemini_schema": model_schema,
+        "format_type": format_type,
+        "temperature": temperature,
+        "model_url": model_url,
+        "constraint": schema_constraint,
+        "max_workers": max_workers,
+    }
 
   # Merge user-provided params which have precedence over defaults.
   base_lm_kwargs.update(language_model_params or {})

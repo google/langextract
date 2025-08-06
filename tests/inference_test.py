@@ -292,7 +292,8 @@ class TestBedrockConverseLanguageModel(absltest.TestCase):
       inference.BedrockConverseLanguageModel()
     self.assertEqual(
         str(context.exception),
-        "AWS_BEARER_TOKEN_BEDROCK not found in environment",
+        "Either AWS_BEARER_TOKEN_BEDROCK or"
+        " AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY must be set",
     )
 
   @mock.patch("boto3.client")

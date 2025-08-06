@@ -17,6 +17,9 @@
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
+- [Using OpenAI Models](#using-openai-models)
+- [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
+- [Using Amazon Bedrock Models](#using-amazon-bedrock-models)
 - [More Examples](#more-examples)
   - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
   - [Medication Extraction](#medication-extraction)
@@ -202,7 +205,7 @@ Get API keys from:
 *   [AI Studio](https://aistudio.google.com/app/apikey) for Gemini models
 *   [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview) for enterprise use
 *   [OpenAI Platform](https://platform.openai.com/api-keys) for OpenAI models
-*   [Amazon Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) for Amazon Bedrock models
+*   [Amazon Bedrock](https://docs.aws.amazon.com/sdkref/latest/guide/feature-static-credentials.html) for Amazon Bedrock models ([API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) also available)
 
 ### Setting up API key in your environment
 
@@ -257,13 +260,13 @@ result = lx.extract(
 LangExtract also supports OpenAI models. Example OpenAI configuration:
 
 ```python
-from langextract.inference import OpenAILanguageModel
+import langextract as lx
 
 result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    language_model_type=OpenAILanguageModel,
+    language_model_type=lx.inference.OpenAILanguageModel,
     model_id="gpt-4o",
     api_key=os.environ.get('OPENAI_API_KEY'),
     fence_output=True,
@@ -273,25 +276,47 @@ result = lx.extract(
 
 Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
 
-## Using Amazon Bedrock Models
+## Using Local LLMs with Ollama
 
-LangExtract also supports Amazon Bedrock models via the Converse API and Bedrock API keys. A full list of models on Bedrock supported by the Converse API can be found [here](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html). Follow [Setting up API Keys](https://github.com/google/langextract?tab=readme-ov-file#setting-up-api-key-in-your-environment) to export AWS_BEARER_TOKEN_BEDROCK and AWS_DEFAULT_REGION to your environment. Example Bedrock configuration:
+LangExtract supports local inference using Ollama, allowing you to run models without API keys:
 
 ```python
-from langextract.inference import BedrockConverseLanguageModel
+import langextract as lx
 
 result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    language_model_type=BedrockConverseLanguageModel,
+    language_model_type=lx.inference.OllamaLanguageModel,
+    model_id="gemma2:2b",  # or any Ollama model
+    model_url="http://localhost:11434",
+    fence_output=False,
+    use_schema_constraints=False
+)
+```
+
+**Quick setup:** Install Ollama from [ollama.com](https://ollama.com/), run `ollama pull gemma2:2b`, then `ollama serve`.
+
+For detailed installation, Docker setup, and examples, see [`examples/ollama/`](examples/ollama/).
+
+## Using Amazon Bedrock Models
+
+LangExtract also supports Amazon Bedrock models via the Converse API and Bedrock API keys. A full list of models on Bedrock supported by the Converse API can be found [here](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html). Follow [Setting up API Keys](https://github.com/google/langextract?tab=readme-ov-file#setting-up-api-key-in-your-environment) to export AWS_BEARER_TOKEN_BEDROCK (or [AWS access credentials](https://docs.aws.amazon.com/sdkref/latest/guide/feature-static-credentials.html)) and AWS_DEFAULT_REGION to your environment. Example Bedrock configuration:
+
+```python
+from langextract as lx
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    language_model_type=lx.inference.BedrockConverseLanguageModel,
     model_id='us.anthropic.claude-sonnet-4-20250514-v1:0',
     fence_output=True,
     use_schema_constraints=False
 )
 ```
 Note: Like OpenAI models, Bedrock models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for Bedrock models yet.
-
 
 ## More Examples
 
@@ -345,6 +370,17 @@ Or reproduce the full CI matrix locally with tox:
 ```bash
 tox  # runs pylint + pytest on Python 3.10 and 3.11
 ```
+
+### Ollama Integration Testing
+
+If you have Ollama installed locally, you can run integration tests:
+
+```bash
+# Test Ollama integration (requires Ollama running with gemma2:2b model)
+tox -e ollama-integration
+```
+
+This test will automatically detect if Ollama is available and run real inference tests.
 
 ## Development
 

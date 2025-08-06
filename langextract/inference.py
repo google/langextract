@@ -595,8 +595,6 @@ class BedrockConverseLanguageModel(BaseLanguageModel):
 
     Args:
       model_id: The Bedrock model ID to use.
-      api_key: API key for Bedrock service (set as AWS_BEARER_TOKEN_BEDROCK).
-      region: AWS region for Bedrock service.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
       max_workers: Maximum number of parallel API calls.
@@ -611,9 +609,18 @@ class BedrockConverseLanguageModel(BaseLanguageModel):
     self.max_workers = max_workers
     self._extra_kwargs = kwargs or {}
 
-    # Check if credentials are available in environment
-    if 'AWS_BEARER_TOKEN_BEDROCK' not in os.environ:
-      raise ValueError('AWS_BEARER_TOKEN_BEDROCK not found in environment')
+    # Check for either bearer token or AWS credentials
+    has_bearer_token = 'AWS_BEARER_TOKEN_BEDROCK' in os.environ
+    has_aws_creds = (
+        'AWS_ACCESS_KEY_ID' in os.environ
+        and 'AWS_SECRET_ACCESS_KEY' in os.environ
+    )
+
+    if not (has_bearer_token or has_aws_creds):
+      raise ValueError(
+          'Either AWS_BEARER_TOKEN_BEDROCK or'
+          ' AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY must be set'
+      )
 
     # Set region, defaulting to us-east-1 if not specified
     if 'AWS_DEFAULT_REGION' in os.environ:

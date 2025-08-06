@@ -202,9 +202,9 @@ def extract(
   schema_constraint = None
 
   # TODO: Unify schema generation.
-  if (
-      use_schema_constraints
-      and language_model_type in (inference.GeminiLanguageModel, inference.GeminiVertexLanguageModel)
+  if use_schema_constraints and language_model_type in (
+      inference.GeminiLanguageModel,
+      inference.GeminiVertexLanguageModel,
   ):
     model_schema = schema.GeminiSchema.from_examples(prompt_template.examples)
 
@@ -216,7 +216,7 @@ def extract(
           "Project ID must be provided for Vertex AI models via the project "
           "parameter"
       )
-    
+
     base_lm_kwargs: dict[str, Any] = {
         "project": project,
         "location": location,

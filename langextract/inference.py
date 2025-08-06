@@ -24,6 +24,7 @@ import textwrap
 from typing import Any
 
 from google import genai
+from google.genai import types
 import openai
 import requests
 from typing_extensions import override
@@ -480,7 +481,6 @@ class GeminiVertexLanguageModel(BaseLanguageModel):
 
       # Add thinking config if thinking_budget is specified
       if self.thinking_budget > 0:
-        from google.genai import types
         config['thinking_config'] = types.ThinkingConfig(
             thinking_budget=self.thinking_budget
         )

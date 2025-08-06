@@ -208,6 +208,60 @@ class TestOpenAILanguageModel(absltest.TestCase):
         n=1,
     )
 
+  @mock.patch("openai.OpenAI")
+  def test_openai_model_url(self, mock_openai_class):
+    # Test that model_url is properly passed as base_url to OpenAI client
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    custom_model_url = "https://custom-openai-endpoint.com/v1"
+    model = inference.OpenAILanguageModel(
+        api_key="test-key", model_url=custom_model_url
+    )
+
+    # Verify OpenAI client was initialized with the custom base_url
+    mock_openai_class.assert_called_once_with(
+        api_key="test-key",
+        organization=None,
+        base_url=custom_model_url,
+    )
+
+    list(model.infer(["test prompt"]))
+
+    # Verify the client was used correctly
+    mock_client.chat.completions.create.assert_called_once()
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_no_model_url(self, mock_openai_class):
+    # Test that when model_url is None, base_url is not passed to OpenAI client
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    model = inference.OpenAILanguageModel(api_key="test-key", model_url=None)
+
+    # Verify OpenAI client was initialized without base_url
+    mock_openai_class.assert_called_once_with(
+        api_key="test-key",
+        organization=None,
+    )
+
+    list(model.infer(["test prompt"]))
+
+    # Verify the client was used correctly
+    mock_client.chat.completions.create.assert_called_once()
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -407,6 +407,7 @@ class OpenAILanguageModel(BaseLanguageModel):
   model_id: str = 'gpt-4o-mini'
   api_key: str | None = None
   organization: str | None = None
+  model_url: str | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
   max_workers: int = 10
@@ -422,6 +423,7 @@ class OpenAILanguageModel(BaseLanguageModel):
       model_id: str = 'gpt-4o-mini',
       api_key: str | None = None,
       organization: str | None = None,
+      model_url: str | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float = 0.0,
       max_workers: int = 10,
@@ -433,6 +435,7 @@ class OpenAILanguageModel(BaseLanguageModel):
       model_id: The OpenAI model ID to use (e.g., 'gpt-4o-mini', 'gpt-4o').
       api_key: API key for OpenAI service.
       organization: Optional OpenAI organization ID.
+      model_url: Optional OpenAI model URL.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
       max_workers: Maximum number of parallel API calls.
@@ -442,6 +445,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     self.model_id = model_id
     self.api_key = api_key
     self.organization = organization
+    self.model_url = model_url
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
@@ -449,11 +453,19 @@ class OpenAILanguageModel(BaseLanguageModel):
 
     if not self.api_key:
       raise ValueError('API key not provided.')
-
+   
     # Initialize the OpenAI client
-    self._client = openai.OpenAI(
-        api_key=self.api_key, organization=self.organization
-    )
+    #Mandatory parameters for OpenAI client
+    client_kwargs = {
+        'api_key': self.api_key,
+        'organization': self.organization,
+    }
+
+    # Optional parameters
+    if self.model_url:
+      client_kwargs['base_url'] = self.model_url
+
+    self._client = openai.OpenAI(**client_kwargs)
 
     super().__init__(
         constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)

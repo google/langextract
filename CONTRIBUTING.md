@@ -117,8 +117,14 @@ Please fill out all sections of the template to help reviewers understand your c
 
 #### Pull Request Guidelines
 
-- **Keep PRs focused and small**: Each PR should address a single, specific change. This makes review easier and faster.
-- **Reference related issues**: Use "Fixes #123" or "Addresses #123" in your PR description to link to relevant issues.
+- **Keep PRs focused and small**: Each PR should address a single issue and contain one cohesive change. PRs are automatically labeled by size to help reviewers:
+  - **size/XS**: < 50 lines — Small fixes and documentation updates
+  - **size/S**: 50-150 lines — Typical features or bug fixes
+  - **size/M**: 150-600 lines — Larger features that remain well-scoped
+  - **size/L**: 600-1000 lines — Consider splitting into smaller PRs if possible
+  - **size/XL**: > 1000 lines — Requires strong justification and may need special review
+- **Reference related issues**: All PRs must include "Fixes #123" or "Closes #123" in the description. The linked issue should have at least 5 👍 reactions from the community and include discussion that demonstrates the importance and need for the change.
+- **No infrastructure changes**: Contributors cannot modify infrastructure files, build configuration, and core documentation. These files are protected and can only be changed by maintainers. Use `./autoformat.sh` to format code without affecting infrastructure files. In special circumstances, build configuration updates may be considered if they include discussion and evidence of robust testing, ideally with community support.
 - **Single-change commits**: A PR should typically comprise a single git commit. Squash multiple commits before submitting.
 - **Clear description**: Explain what your change does and why it's needed.
 - **Ensure all tests pass**: Check that both formatting and tests are green before requesting review.

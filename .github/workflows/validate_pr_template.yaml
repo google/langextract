@@ -1,19 +1,21 @@
 name: Validate PR template
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   check:
-    if: github.event.pull_request.draft == false   # drafts can save early
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false   # drafts can save early
     runs-on: ubuntu-latest
 
     steps:
       - name: Fail if template untouched
+        if: github.event_name == 'pull_request_target'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |

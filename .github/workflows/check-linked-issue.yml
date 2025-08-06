@@ -1,0 +1,90 @@
+name: Require linked issue with community support
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: write
+
+jobs:
+  enforce:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify linked issue
+        if: github.event_name == 'pull_request_target'
+        uses: nearform-actions/github-action-check-linked-issues@v1.2.7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment: true
+          exclude-branches: main
+          custom-body: |
+            No linked issues found. Please add "Fixes #<issue-number>" to your pull request description.
+
+            Per our [Contributing Guidelines](https://github.com/google/langextract/blob/main/CONTRIBUTING.md#pull-request-guidelines), all PRs must:
+            - Reference an issue with "Fixes #123" or "Closes #123"
+            - The linked issue should have 5+ 👍 reactions
+            - Include discussion demonstrating the importance of the change
+
+            Use GitHub automation to close the issue when this PR is merged.
+
+      - name: Check community support
+        if: github.event_name == 'pull_request_target'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Check if PR author is a maintainer
+            const prAuthor = context.payload.pull_request.user.login;
+            const { data: authorPermission } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: prAuthor
+            });
+            
+            const isMaintainer = ['admin', 'maintain'].includes(authorPermission.permission);
+            
+            const body = context.payload.pull_request.body || '';
+            const match = body.match(/(?:Fixes|Closes|Resolves)\s+#(\d+)/i);
+
+            if (!match) {
+              core.setFailed('No linked issue found');
+              return;
+            }
+
+            const issueNumber = Number(match[1]);
+            const { repository } = await github.graphql(`
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    reactionGroups {
+                      content
+                      users {
+                        totalCount
+                      }
+                    }
+                  }
+                }
+              }
+            `, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              number: issueNumber
+            });
+
+            const reactions = repository.issue.reactionGroups;
+            const thumbsUp = reactions.find(g => g.content === 'THUMBS_UP')?.users.totalCount || 0;
+
+            core.info(`Issue #${issueNumber} has ${thumbsUp} 👍 reactions`);
+
+            const REQUIRED_THUMBS_UP = 5;
+            if (thumbsUp < REQUIRED_THUMBS_UP && !isMaintainer) {
+              core.setFailed(`Issue #${issueNumber} needs at least ${REQUIRED_THUMBS_UP} 👍 reactions (currently has ${thumbsUp})`);
+            } else if (isMaintainer && thumbsUp < REQUIRED_THUMBS_UP) {
+              core.info(`Maintainer ${prAuthor} bypassing community support requirement (issue has ${thumbsUp} 👍 reactions)`);
+            }

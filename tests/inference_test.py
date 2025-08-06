@@ -16,6 +16,7 @@ import os
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 
 from langextract import data
 from langextract import inference
@@ -78,7 +79,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     }
     mock_ollama_query.return_value = gemma_response
     model = inference.OllamaLanguageModel(
-        model="gemma2:latest",
+        model_id="gemma2:latest",
         model_url="http://localhost:11434",
         structured_output_format="json",
     )
@@ -99,10 +100,16 @@ class TestOllamaLanguageModel(absltest.TestCase):
     self.assertEqual(results, expected_results)
 
 
-class TestOpenAILanguageModel(absltest.TestCase):
+class TestOpenAILanguageModelInference(parameterized.TestCase):
 
+  @parameterized.named_parameters(
+      ("without", "test-api-key", None, "gpt-4o-mini", 0.5),
+      ("with", "test-api-key", "http://127.0.0.1:9001/v1", "gpt-4o-mini", 0.5),
+  )
   @mock.patch("openai.OpenAI")
-  def test_openai_infer(self, mock_openai_class):
+  def test_openai_infer_with_parameters(
+      self, api_key, base_url, model_id, temperature, mock_openai_class
+  ):
     # Mock the OpenAI client and chat completion response
     mock_client = mock.Mock()
     mock_openai_class.return_value = mock_client
@@ -116,7 +123,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     # Create model instance
     model = inference.OpenAILanguageModel(
-        model_id="gpt-4o-mini", api_key="test-api-key", temperature=0.5
+        model_id=model_id,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=temperature,
     )
 
     # Test inference
@@ -138,7 +148,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
                 "content": "Extract name and age from: John is 30 years old",
             },
         ],
-        temperature=0.5,
+        temperature=temperature,
         max_tokens=None,
         top_p=None,
         n=1,
@@ -149,6 +159,9 @@ class TestOpenAILanguageModel(absltest.TestCase):
         inference.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')
     ]]
     self.assertEqual(results, expected_results)
+
+
+class TestOpenAILanguageModel(absltest.TestCase):
 
   def test_openai_parse_output_json(self):
     model = inference.OpenAILanguageModel(

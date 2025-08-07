@@ -15,25 +15,22 @@
 """Simple library for performing language model inference."""
 
 import abc
-from collections.abc import Iterator, Mapping, Sequence
 import concurrent.futures
 import dataclasses
 import enum
 import json
 import textwrap
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
-from google import genai
 import langfun as lf
 import requests
-from typing_extensions import override
 import yaml
+from google import genai
+from typing_extensions import override
 
-
-
-from langextract import data
-from langextract import schema
-
+from langextract import data, schema
 
 _OLLAMA_DEFAULT_MODEL_URL = 'http://localhost:11434'
 
@@ -255,17 +252,14 @@ class OllamaLanguageModel(BaseLanguageModel):
       options['num_predict'] = max_output_tokens
     if num_ctx:
       options['num_ctx'] = num_ctx
-    
+
     # Properly construct the API endpoint URL
-    from urllib.parse import urljoin, urlparse
-    
     # Validate URL to prevent SSRF attacks
     parsed_url = urlparse(model_url)
     if not parsed_url.scheme in ['http', 'https']:
       raise ValueError(f"Invalid URL scheme: {parsed_url.scheme}. Only http and https are allowed.")
     if not parsed_url.netloc:
       raise ValueError(f"Invalid URL: {model_url}. Missing hostname.")
-    
     api_endpoint = urljoin(model_url, '/api/generate')
 
     payload = {

@@ -46,9 +46,9 @@ jobs:
               repo: context.repo.repo,
               username: prAuthor
             });
-            
+
             const isMaintainer = ['admin', 'maintain'].includes(authorPermission.permission);
-            
+
             const body = context.payload.pull_request.body || '';
             const match = body.match(/(?:Fixes|Closes|Resolves)\s+#(\d+)/i);
 

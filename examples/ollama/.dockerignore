@@ -1,0 +1,35 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Ignore version control
+.git/
+.gitignore
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore virtual environments
+venv/
+env/
+.venv/
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ignore build artifacts
+build/
+dist/
+*.egg-info/

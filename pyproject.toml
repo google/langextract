@@ -18,7 +18,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "langextract"
-version = "1.0.3"
+version = "1.0.4"
 description = "LangExtract: A library for extracting structured data from language models"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -62,6 +62,10 @@ dev = [
 test = [
     "pytest>=7.4.0",
     "tomli>=2.0.0"
+]
+notebook = [
+    "ipython>=7.0.0",
+    "notebook>=6.0.0"
 ]
 
 [tool.setuptools]

@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2025 Google LLC
+# SPDX-License-Identifier: Apache-2.0
+#
+# This file contains citation metadata for LangExtract.
+# For more information visit: https://citation-file-format.github.io/
+
+cff-version: 1.2.0
+title: "LangExtract"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - given-names: Akshay
+    family-names: Goel
+    email: goelak@google.com
+    affiliation: Google LLC
+repository-code: "https://github.com/google/langextract"
+url: "https://github.com/google/langextract"
+repository: "https://github.com/google/langextract"
+abstract: "LangExtract: A library for extracting structured data from language models"
+keywords:
+  - language-models
+  - structured-data-extraction
+  - nlp
+  - machine-learning
+  - python
+license: Apache-2.0
+version: 1.0.3
+date-released: 2025-07-30

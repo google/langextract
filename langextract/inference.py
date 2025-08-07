@@ -113,13 +113,13 @@ class OllamaLanguageModel(BaseLanguageModel):
 
   def __init__(
       self,
-      model: str,
+      model_id: str,
       model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
       structured_output_format: str = 'json',
       constraint: schema.Constraint = schema.Constraint(),
       **kwargs,
   ) -> None:
-    self._model = model
+    self._model = model_id
     self._model_url = model_url
     self._structured_output_format = structured_output_format
     self._constraint = constraint
@@ -414,6 +414,7 @@ class OpenAILanguageModel(BaseLanguageModel):
 
   model_id: str = 'gpt-4o-mini'
   api_key: str | None = None
+  base_url: str | None = None
   organization: str | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
@@ -429,6 +430,7 @@ class OpenAILanguageModel(BaseLanguageModel):
       self,
       model_id: str = 'gpt-4o-mini',
       api_key: str | None = None,
+      base_url: str | None = None,
       organization: str | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float = 0.0,
@@ -440,6 +442,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     Args:
       model_id: The OpenAI model ID to use (e.g., 'gpt-4o-mini', 'gpt-4o').
       api_key: API key for OpenAI service.
+      base_url: Base URL for OpenAI service.
       organization: Optional OpenAI organization ID.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
@@ -449,6 +452,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     """
     self.model_id = model_id
     self.api_key = api_key
+    self.base_url = base_url
     self.organization = organization
     self.format_type = format_type
     self.temperature = temperature
@@ -460,7 +464,9 @@ class OpenAILanguageModel(BaseLanguageModel):
 
     # Initialize the OpenAI client
     self._client = openai.OpenAI(
-        api_key=self.api_key, organization=self.organization
+        api_key=self.api_key,
+        base_url=self.base_url,
+        organization=self.organization,
     )
 
     super().__init__(

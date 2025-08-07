@@ -63,6 +63,10 @@ test = [
     "pytest>=7.4.0",
     "tomli>=2.0.0"
 ]
+notebook = [
+    "ipython>=7.0.0",
+    "notebook>=6.0.0"
+]
 
 [tool.setuptools]
 packages = ["langextract"]

@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Fail if template untouched
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request_target'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |

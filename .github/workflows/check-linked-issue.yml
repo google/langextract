@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Verify linked issue
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request_target'
         uses: nearform-actions/github-action-check-linked-issues@v1.2.7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -34,7 +34,7 @@ jobs:
             Use GitHub automation to close the issue when this PR is merged.
 
       - name: Check community support
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request_target'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -46,9 +46,9 @@ jobs:
               repo: context.repo.repo,
               username: prAuthor
             });
-            
+
             const isMaintainer = ['admin', 'maintain'].includes(authorPermission.permission);
-            
+
             const body = context.payload.pull_request.body || '';
             const match = body.match(/(?:Fixes|Closes|Resolves)\s+#(\d+)/i);
 

@@ -95,7 +95,6 @@ class ChunkIteratorTest(absltest.TestCase):
         + "Mr\n\nBond\n\nasks why?"
     )
     tokenized_text = tokenizer.tokenize(text)
-    # To take the whole text
     chunk_interval = tokenizer.TokenInterval(
         start_index=0, end_index=len(tokenized_text.tokens)
     )
@@ -191,6 +190,33 @@ class ChunkIteratorTest(absltest.TestCase):
       next(chunk_iter)
     with self.assertRaises(StopIteration):
       next(chunk_iter)
+
+  def test_newline_at_chunk_boundary_does_not_create_empty_interval(self):
+    """Test that newlines at chunk boundaries don't create empty token intervals.
+
+    When a newline occurs exactly at a chunk boundary, the chunking algorithm
+    should not attempt to create an empty interval (where start_index == end_index).
+    This was causing a ValueError in create_token_interval().
+    """
+    text = "First sentence.\nSecond sentence that is longer.\nThird sentence."
+    tokenized_text = tokenizer.tokenize(text)
+
+    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer=20)
+    chunks = list(chunk_iter)
+
+    for chunk in chunks:
+      self.assertLess(
+          chunk.token_interval.start_index,
+          chunk.token_interval.end_index,
+          "Chunk should have non-empty interval",
+      )
+
+    expected_intervals = [(0, 3), (3, 6), (6, 9), (9, 12)]
+    actual_intervals = [
+        (chunk.token_interval.start_index, chunk.token_interval.end_index)
+        for chunk in chunks
+    ]
+    self.assertEqual(actual_intervals, expected_intervals)
 
   def test_chunk_unicode_text(self):
     text = textwrap.dedent("""\
@@ -353,7 +379,7 @@ class BatchingTest(parameterized.TestCase):
     self.assertListEqual(
         actual_batches,
         expected_batches,
-        "Batches do not match expected",
+        "Batched chunks should match expected structure",
     )
 
 
@@ -410,7 +436,7 @@ class TextAdditionalContextTest(absltest.TestCase):
     )
     chunks = list(chunk_iter)
     self.assertGreater(
-        len(chunks), 1, "Expected multiple chunks due to max_char_buffer limit"
+        len(chunks), 1, "Should create multiple chunks with small buffer"
     )
     additional_contexts = [chunk.additional_context for chunk in chunks]
     expected_additional_contexts = [self._ADDITIONAL_CONTEXT] * len(chunks)

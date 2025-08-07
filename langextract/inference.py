@@ -412,6 +412,7 @@ class OpenAILanguageModel(BaseLanguageModel):
 
   model_id: str = 'gpt-4o-mini'
   api_key: str | None = None
+  base_url: str | None = None
   organization: str | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
@@ -449,6 +450,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     """
     self.model_id = model_id
     self.api_key = api_key
+    self.base_url = base_url
     self.organization = organization
     self.format_type = format_type
     self.temperature = temperature

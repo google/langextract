@@ -4,6 +4,11 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to check (optional)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -13,12 +18,25 @@ jobs:
   size:
     runs-on: ubuntu-latest
     steps:
-      - name: Evaluate PR size
-        if: github.event_name == 'pull_request'
+      - name: Get PR data for manual trigger
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number
+        id: get_pr
         uses: actions/github-script@v7
         with:
           script: |
-            const pr = context.payload.pull_request;
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ github.event.inputs.pr_number }}
+            });
+            return pr;
+
+      - name: Evaluate PR size
+        if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request || ${{ steps.get_pr.outputs.result || '{}' }};
             const totalChanges = pr.additions + pr.deletions;
 
             core.info(`PR contains ${pr.additions} additions and ${pr.deletions} deletions (${totalChanges} total)`);

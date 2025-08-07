@@ -12,4 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-gdm/codeai/codemind/cli/GEMINI.md
+"""Base exceptions for LangExtract."""
+
+__all__ = ["LangExtractError"]
+
+
+class LangExtractError(Exception):
+  """Base exception for all LangExtract errors.
+
+  All exceptions raised by LangExtract should inherit from this class.
+  This allows users to catch all LangExtract-specific errors with a single
+  except clause.
+  """

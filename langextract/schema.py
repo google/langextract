@@ -22,7 +22,6 @@ import dataclasses
 import enum
 from typing import Any
 
-
 from langextract import data
 
 

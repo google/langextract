@@ -1,10 +1,5 @@
-# Production Dockerfile for LangExtract with libmagic support
+# Production Dockerfile for LangExtract
 FROM python:3.10-slim
-
-# Install system dependencies including libmagic
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libmagic1 \
-    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app

@@ -16,17 +16,18 @@
 
 import dataclasses
 import json
+import os
+import pathlib
 
 import pydantic
 import yaml
 
-import os
-import pathlib
 from langextract import data
+from langextract import exceptions
 from langextract import schema
 
 
-class PromptBuilderError(Exception):
+class PromptBuilderError(exceptions.LangExtractError):
   """Failure to build prompt."""
 
 

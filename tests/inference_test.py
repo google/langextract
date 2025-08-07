@@ -13,56 +13,11 @@
 # limitations under the License.
 
 from unittest import mock
-import langfun as lf
+
 from absl.testing import absltest
+
+from langextract import data
 from langextract import inference
-
-
-class TestLangFunLanguageModel(absltest.TestCase):
-  @mock.patch.object(
-      inference.lf.core.language_model, "LanguageModel", autospec=True
-  )
-  def test_langfun_infer(self, mock_lf_model):
-    mock_client_instance = mock_lf_model.return_value
-    metadata = {
-        "score": -0.004259720362824737,
-        "logprobs": None,
-        "is_cached": False,
-    }
-    source = lf.UserMessage(
-        text="What's heart in Italian?.",
-        sender="User",
-        metadata={"formatted_text": "What's heart in Italian?."},
-        tags=["lm-input"],
-    )
-    sample = lf.LMSample(
-        response=lf.AIMessage(
-            text="Cuore",
-            sender="AI",
-            metadata=metadata,
-            source=source,
-            tags=["lm-response"],
-        ),
-        score=-0.004259720362824737,
-    )
-    actual_response = lf.LMSamplingResult(
-        samples=[sample],
-    )
-
-    # Mock the sample response.
-    mock_client_instance.sample.return_value = [actual_response]
-    model = inference.LangFunLanguageModel(language_model=mock_client_instance)
-
-    batch_prompts = ["What's heart in Italian?"]
-
-    expected_results = [
-        [inference.ScoredOutput(score=-0.004259720362824737, output="Cuore")]
-    ]
-
-    results = list(model.infer(batch_prompts))
-
-    mock_client_instance.sample.assert_called_once_with(prompts=batch_prompts)
-    self.assertEqual(results, expected_results)
 
 
 class TestOllamaLanguageModel(absltest.TestCase):
@@ -137,6 +92,121 @@ class TestOllamaLanguageModel(absltest.TestCase):
         )
     ]]
     self.assertEqual(results, expected_results)
+
+
+class TestOpenAILanguageModel(absltest.TestCase):
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_infer(self, mock_openai_class):
+    # Mock the OpenAI client and chat completion response
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    # Mock response structure for v1.x API
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"name": "John", "age": 30}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    # Create model instance
+    model = inference.OpenAILanguageModel(
+        model_id="gpt-4o-mini", api_key="test-api-key", temperature=0.5
+    )
+
+    # Test inference
+    batch_prompts = ["Extract name and age from: John is 30 years old"]
+    results = list(model.infer(batch_prompts))
+
+    # Verify API was called correctly
+    mock_client.chat.completions.create.assert_called_once_with(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a helpful assistant that responds in JSON format."
+                ),
+            },
+            {
+                "role": "user",
+                "content": "Extract name and age from: John is 30 years old",
+            },
+        ],
+        temperature=0.5,
+        max_tokens=None,
+        top_p=None,
+        n=1,
+    )
+
+    # Check results
+    expected_results = [[
+        inference.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')
+    ]]
+    self.assertEqual(results, expected_results)
+
+  def test_openai_parse_output_json(self):
+    model = inference.OpenAILanguageModel(
+        api_key="test-key", format_type=data.FormatType.JSON
+    )
+
+    # Test valid JSON parsing
+    output = '{"key": "value", "number": 42}'
+    parsed = model.parse_output(output)
+    self.assertEqual(parsed, {"key": "value", "number": 42})
+
+    # Test invalid JSON
+    with self.assertRaises(ValueError) as context:
+      model.parse_output("invalid json")
+    self.assertIn("Failed to parse output as JSON", str(context.exception))
+
+  def test_openai_parse_output_yaml(self):
+    model = inference.OpenAILanguageModel(
+        api_key="test-key", format_type=data.FormatType.YAML
+    )
+
+    # Test valid YAML parsing
+    output = "key: value\nnumber: 42"
+    parsed = model.parse_output(output)
+    self.assertEqual(parsed, {"key": "value", "number": 42})
+
+    # Test invalid YAML
+    with self.assertRaises(ValueError) as context:
+      model.parse_output("invalid: yaml: bad")
+    self.assertIn("Failed to parse output as YAML", str(context.exception))
+
+  def test_openai_no_api_key_raises_error(self):
+    with self.assertRaises(ValueError) as context:
+      inference.OpenAILanguageModel(api_key=None)
+    self.assertEqual(str(context.exception), "API key not provided.")
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_temperature_zero(self, mock_openai_class):
+    # Test that temperature=0.0 is properly passed through
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    model = inference.OpenAILanguageModel(
+        api_key="test-key", temperature=0.0  # Testing zero temperature
+    )
+
+    list(model.infer(["test prompt"]))
+
+    # Verify temperature=0.0 was passed to the API
+    mock_client.chat.completions.create.assert_called_with(
+        model="gpt-4o-mini",
+        messages=mock.ANY,
+        temperature=0.0,
+        max_tokens=None,
+        top_p=None,
+        n=1,
+    )
 
 
 if __name__ == "__main__":

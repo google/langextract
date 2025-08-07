@@ -17,6 +17,7 @@
 from unittest import mock
 
 from absl.testing import absltest
+
 from langextract import data as lx_data
 from langextract import visualization
 

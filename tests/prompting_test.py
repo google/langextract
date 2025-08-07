@@ -16,6 +16,7 @@ import textwrap
 
 from absl.testing import absltest
 from absl.testing import parameterized
+
 from langextract import data
 from langextract import prompting
 from langextract import schema

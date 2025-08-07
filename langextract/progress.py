@@ -16,6 +16,7 @@
 
 from typing import Any
 import urllib.parse
+
 import tqdm
 
 # ANSI color codes for terminal output

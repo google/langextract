@@ -18,11 +18,12 @@ import textwrap
 from unittest import mock
 
 from absl.testing import absltest
-import langextract as lx
+
 from langextract import data
 from langextract import inference
 from langextract import prompting
 from langextract import schema
+import langextract as lx
 
 
 class InitTest(absltest.TestCase):
@@ -141,6 +142,7 @@ class InitTest(absltest.TestCase):
     )
 
     self.assertDataclassEqual(expected_result, actual_result)
+
 
 if __name__ == "__main__":
   absltest.main()

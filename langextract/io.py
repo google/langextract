@@ -18,23 +18,21 @@ import abc
 import dataclasses
 import json
 import os
+import pathlib
 from typing import Any, Iterator
 
 import pandas as pd
 import requests
 
-import os
-import pathlib
-import os
-import pathlib
 from langextract import data
 from langextract import data_lib
+from langextract import exceptions
 from langextract import progress
 
 DEFAULT_TIMEOUT_SECONDS = 30
 
 
-class InvalidDatasetError(Exception):
+class InvalidDatasetError(exceptions.LangExtractError):
   """Error raised when Dataset is empty or invalid."""
 
 
@@ -83,7 +81,7 @@ class Dataset(abc.ABC):
 
 def save_annotated_documents(
     annotated_documents: Iterator[data.AnnotatedDocument],
-    output_dir: pathlib.Path | None = None,
+    output_dir: pathlib.Path | str | None = None,
     output_name: str = 'data.jsonl',
     show_progress: bool = True,
 ) -> None:
@@ -92,7 +90,7 @@ def save_annotated_documents(
   Args:
     annotated_documents: Iterator over AnnotatedDocument objects to save.
     output_dir: The directory to which the JSONL file should be written.
-      Defaults to 'test_output/' if None.
+      Can be a Path object or a string. Defaults to 'test_output/' if None.
     output_name: File name for the JSONL file.
     show_progress: Whether to show a progress bar during saving.
 
@@ -102,6 +100,8 @@ def save_annotated_documents(
   """
   if output_dir is None:
     output_dir = pathlib.Path('test_output')
+  else:
+    output_dir = pathlib.Path(output_dir)
 
   output_dir.mkdir(parents=True, exist_ok=True)
 

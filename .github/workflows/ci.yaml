@@ -42,6 +42,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,test]"
 
-      - name: Run tox (lint + tests)
+      - name: Run unit tests and linting
         run: |
-          tox
+          PY_VERSION=$(echo "${{ matrix.python-version }}" | tr -d '.')
+          tox -e py${PY_VERSION},format,lint-src,lint-tests
+
+  live-api-tests:
+    needs: test
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,test]"
+
+      - name: Run live API tests
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LANGEXTRACT_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # For backward compatibility
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [[ -z "$GEMINI_API_KEY" && -z "$OPENAI_API_KEY" ]]; then
+            echo "::notice::Live API tests skipped - no provider secrets configured"
+            exit 0
+          fi
+          tox -e live-api

@@ -28,7 +28,6 @@ import enum
 import html
 import itertools
 import json
-import os
 import pathlib
 import textwrap
 
@@ -37,9 +36,29 @@ from langextract import io as _io
 
 # Fallback if IPython is not present
 try:
-  from IPython.display import HTML  # type: ignore
-except Exception:
+  from IPython import get_ipython  # type: ignore[import-not-found]
+  from IPython.display import HTML  # type: ignore[import-not-found]
+except ImportError:
+
+  def get_ipython():  # type: ignore[no-redef]
+    return None
+
   HTML = None  # pytype: disable=annotation-type-mismatch
+
+
+def _is_jupyter() -> bool:
+  """Check if we're in a Jupyter/IPython environment that can display HTML."""
+  try:
+    if get_ipython is None:
+      return False
+    ip = get_ipython()
+    if ip is None:
+      return False
+    # Simple check: if we're in IPython and NOT in a plain terminal
+    return ip.__class__.__name__ != 'TerminalInteractiveShell'
+  except Exception:
+    return False
+
 
 _PALETTE: list[str] = [
     '#D2E3FC',  # Light Blue (Primary Container)
@@ -538,7 +557,7 @@ def visualize(
     animation_speed: float = 1.0,
     show_legend: bool = True,
     gif_optimized: bool = True,
-) -> 'HTML | str':
+) -> HTML | str:
   """Visualises extraction data as animated highlighted HTML.
 
   Args:
@@ -582,7 +601,9 @@ def visualize(
         ' animate.</p></div>'
     )
     full_html = _VISUALIZATION_CSS + empty_html
-    return HTML(full_html) if HTML is not None else full_html
+    if HTML is not None and _is_jupyter():
+      return HTML(full_html)
+    return full_html
 
   color_map = _assign_colors(valid_extractions)
 
@@ -603,4 +624,6 @@ def visualize(
         'class="lx-animated-wrapper lx-gif-optimized"',
     )
 
-  return HTML(full_html) if HTML is not None else full_html
+  if HTML is not None and _is_jupyter():
+    return HTML(full_html)
+  return full_html

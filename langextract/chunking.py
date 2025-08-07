@@ -451,7 +451,9 @@ class ChunkIterator:
           curr_chunk.start_index, token_index + 1
       )
       if self._tokens_exceed_buffer(test_chunk):
-        if start_of_new_line > 0:
+        # Only break at newline if: 1) newline exists (> 0) and
+        # 2) it's after chunk start (prevents empty intervals)
+        if start_of_new_line > 0 and start_of_new_line > curr_chunk.start_index:
           # Terminate the curr_chunk at the start of the most recent newline.
           curr_chunk = create_token_interval(
               curr_chunk.start_index, start_of_new_line

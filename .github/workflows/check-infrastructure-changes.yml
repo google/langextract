@@ -1,0 +1,100 @@
+name: Protect Infrastructure Files
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  protect-infrastructure:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for infrastructure file changes
+        if: github.event_name == 'pull_request_target'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get the PR author and check if they're a maintainer
+            const prAuthor = context.payload.pull_request.user.login;
+            const { data: authorPermission } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: prAuthor
+            });
+
+            const isMaintainer = ['admin', 'maintain'].includes(authorPermission.permission);
+
+            // Get list of files changed in the PR
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number
+            });
+
+            // Check for infrastructure file changes
+            const infrastructureFiles = files.filter(file =>
+              file.filename.startsWith('.github/') ||
+              file.filename === 'pyproject.toml' ||
+              file.filename === 'tox.ini' ||
+              file.filename === '.pre-commit-config.yaml' ||
+              file.filename === '.pylintrc' ||
+              file.filename === 'Dockerfile' ||
+              file.filename === 'autoformat.sh' ||
+              file.filename === '.gitignore' ||
+              file.filename === 'CONTRIBUTING.md' ||
+              file.filename === 'LICENSE' ||
+              file.filename === 'CITATION.cff'
+            );
+
+            if (infrastructureFiles.length > 0 && !isMaintainer) {
+              // Check if changes are only formatting/whitespace
+              let hasStructuralChanges = false;
+              for (const file of infrastructureFiles) {
+                const additions = file.additions || 0;
+                const deletions = file.deletions || 0;
+                const changes = file.changes || 0;
+
+                // If file has significant changes (not just whitespace), consider it structural
+                if (additions > 5 || deletions > 5 || changes > 10) {
+                  hasStructuralChanges = true;
+                  break;
+                }
+              }
+
+              const fileList = infrastructureFiles.map(f => `  - ${f.filename} (${f.changes} changes)`).join('\n');
+
+              // Post a comment explaining the issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: `❌ **Infrastructure File Protection**\n\n` +
+                      `This PR modifies protected infrastructure files:\n\n${fileList}\n\n` +
+                      `Only repository maintainers are allowed to modify infrastructure files (including \`.github/\`, build configuration, and repository documentation).\n\n` +
+                      `**Note**: If these are only formatting changes, please:\n` +
+                      `1. Revert changes to \`.github/\` files\n` +
+                      `2. Use \`./autoformat.sh\` to format only source code directories\n` +
+                      `3. Avoid running formatters on infrastructure files\n\n` +
+                      `If structural changes are necessary:\n` +
+                      `1. Open an issue describing the needed infrastructure changes\n` +
+                      `2. A maintainer will review and implement the changes if approved\n\n` +
+                      `For more information, see our [Contributing Guidelines](https://github.com/google/langextract/blob/main/CONTRIBUTING.md).`
+              });
+
+              core.setFailed(
+                `This PR modifies ${infrastructureFiles.length} protected infrastructure file(s). ` +
+                `Only maintainers can modify these files. ` +
+                `Use ./autoformat.sh to format code without touching infrastructure.`
+              );
+            } else if (infrastructureFiles.length > 0 && isMaintainer) {
+              core.info(`PR modifies ${infrastructureFiles.length} infrastructure file(s) - allowed for maintainer ${prAuthor}`);
+            } else {
+              core.info('No infrastructure files modified');
+            }

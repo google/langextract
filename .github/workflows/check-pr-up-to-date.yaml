@@ -1,0 +1,87 @@
+# Copyright 2025 Google LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Check PR Up-to-Date
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-up-to-date:
+    runs-on: ubuntu-latest
+    # Skip for bot PRs
+    if: ${{ !contains(github.actor, '[bot]') }}
+    concurrency:
+      group: check-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Sufficient for rev-list comparison
+
+      - name: Check if PR is up-to-date with main
+        id: check
+        run: |
+          # Fetch the latest main branch
+          git fetch origin main
+
+          # Check how many commits behind main
+          BEHIND=$(git rev-list --count HEAD..origin/main)
+
+          echo "commits_behind=$BEHIND" >> $GITHUB_OUTPUT
+
+          if [ "$BEHIND" -gt 0 ]; then
+            echo "::warning::PR is $BEHIND commits behind main"
+            exit 0  # Don't fail the check, just warn
+          else
+            echo "PR is up-to-date with main"
+          fi
+
+      - name: Comment if PR needs update
+        if: ${{ steps.check.outputs.commits_behind != '0' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const behind = ${{ steps.check.outputs.commits_behind }};
+            const COMMENT_COOLDOWN_HOURS = 24;
+            const COOLDOWN_MS = COMMENT_COOLDOWN_HOURS * 60 * 60 * 1000;
+
+            // Check for recent similar comments
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              per_page: 10
+            });
+
+            const hasRecentComment = comments.some(c =>
+              c.body?.includes('commits behind `main`') &&
+              c.user?.login === 'github-actions[bot]' &&
+              new Date(c.created_at) > new Date(Date.now() - COOLDOWN_MS)
+            );
+
+            if (!hasRecentComment) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: `📊 **PR Status**: ${behind} commits behind \`main\`\n\nConsider updating your branch for the most accurate CI results:\n\n**Option 1**: Use GitHub's "Update branch" button (if available)\n\n**Option 2**: Update locally:\n\`\`\`bash\ngit fetch origin main\ngit merge origin/main\ngit push\n\`\`\`\n\n*Note: If you use a different remote name (e.g., upstream), adjust the commands accordingly.*\n\nThis ensures your changes are tested against the latest code.`
+              });
+            }

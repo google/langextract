@@ -36,8 +36,8 @@ from langextract import io as _io
 
 # Fallback if IPython is not present
 try:
-  from IPython import get_ipython  # type: ignore[import-not-found]
-  from IPython.display import HTML  # type: ignore[import-not-found]
+  from IPython import get_ipython  # type: ignore[import-not-found] # pylint: disable=import-error
+  from IPython.display import HTML  # type: ignore[import-not-found] # pylint: disable=import-error
 
   _ipython = get_ipython()
   _IN_JUPYTER = _ipython is not None and _ipython.__class__.__name__ in [

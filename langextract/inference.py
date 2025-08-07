@@ -24,7 +24,6 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-<<<<<<< HEAD
 import langfun as lf
 import openai
 import requests
@@ -63,7 +62,7 @@ class BaseLanguageModel(abc.ABC):
   """An abstract inference class for managing LLM inference.
 
   Attributes:
-    _constraint: A `Constraint` object specifying constraints for model output.
+    _constraint: A Constraint object specifying constraints for model output.
   """
 
   def __init__(self, constraint: schema.Constraint = schema.Constraint()):
@@ -160,7 +159,7 @@ class OllamaLanguageModel(BaseLanguageModel):
   ) -> Mapping[str, Any]:
     """Sends a prompt to an Ollama model and returns the generated response.
 
-    This function makes an HTTP POST request to the `/api/generate` endpoint of
+    This function makes an HTTP POST request to the /api/generate endpoint of
     an Ollama server. It can optionally load the specified model first, generate
     a response (with or without streaming), then return a parsed JSON response.
 
@@ -185,12 +184,12 @@ class OllamaLanguageModel(BaseLanguageModel):
         generation completes.
       num_threads: Number of CPU threads to use. If None, Ollama uses a default
         heuristic.
-      num_ctx: Number of context tokens allowed. If None, uses model’s default
+      num_ctx: Number of context tokens allowed. If None, uses model's default
         or config.
 
     Returns:
-      A mapping (dictionary-like) containing the server’s JSON response. For
-      non-streaming calls, the `"response"` key typically contains the entire
+      A mapping (dictionary-like) containing the server's JSON response. For
+      non-streaming calls, the "response" key typically contains the entire
       generated text.
 
     Raises:
@@ -254,7 +253,7 @@ class OllamaLanguageModel(BaseLanguageModel):
       return response.json()
     if response.status_code == 404:
       raise ValueError(
-          f"Can't find Ollama {model}. Try launching `ollama run {model}`"
+          f"Can't find Ollama {model}. Try launching ollama run {model}"
           ' from command line.'
       )
     else:
@@ -297,7 +296,7 @@ class GeminiLanguageModel(BaseLanguageModel):
       temperature: Sampling temperature.
       max_workers: Maximum number of parallel API calls.
       **kwargs: Ignored extra parameters so callers can pass a superset of
-        arguments shared across back-ends without raising ``TypeError``.
+        arguments shared across back-ends without raising `TypeError.
     """
     self.model_id = model_id
     self.api_key = api_key
@@ -446,7 +445,7 @@ class OpenAILanguageModel(BaseLanguageModel):
       temperature: Sampling temperature.
       max_workers: Maximum number of parallel API calls.
       **kwargs: Ignored extra parameters so callers can pass a superset of
-        arguments shared across back-ends without raising ``TypeError``.
+        arguments shared across back-ends without raising `TypeError.
     """
     self.model_id = model_id
     self.api_key = api_key

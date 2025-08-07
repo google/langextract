@@ -36,8 +36,8 @@ from langextract import io as _io
 
 # Fallback if IPython is not present
 try:
-  from IPython import get_ipython # type: ignore[import-not-found]
-  from IPython.display import HTML # type: ignore[import-not-found]
+  from IPython import get_ipython  # type: ignore[import-not-found]
+  from IPython.display import HTML  # type: ignore[import-not-found]
 
   _ipython = get_ipython()
   _IN_JUPYTER = _ipython is not None and _ipython.__class__.__name__ in [
@@ -627,6 +627,4 @@ def visualize(
         'class="lx-animated-wrapper lx-gif-optimized"',
     )
 
-
   return HTML(full_html) if (HTML is not None and _IN_JUPYTER) else full_html
-

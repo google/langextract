@@ -406,6 +406,7 @@ class OpenAILanguageModel(BaseLanguageModel):
 
   model_id: str = 'gpt-4o-mini'
   api_key: str | None = None
+  base_url: str | None = None
   organization: str | None = None
   openai_schema: schema.OpenAISchema | None = None
   format_type: data.FormatType = data.FormatType.JSON
@@ -422,6 +423,7 @@ class OpenAILanguageModel(BaseLanguageModel):
       self,
       model_id: str = 'gpt-4o-mini',
       api_key: str | None = None,
+      base_url: str | None = None,
       organization: str | None = None,
       openai_schema: schema.OpenAISchema | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
@@ -434,6 +436,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     Args:
       model_id: The OpenAI model ID to use (e.g., 'gpt-4o-mini', 'gpt-4o').
       api_key: API key for OpenAI service.
+      base_url: Base URL for OpenAI service.
       organization: Optional OpenAI organization ID.
       openai_schema: Optional schema for structured output.
       format_type: Output format (JSON or YAML).
@@ -444,6 +447,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     """
     self.model_id = model_id
     self.api_key = api_key
+    self.base_url = base_url
     self.organization = organization
     self.openai_schema = openai_schema
     self.format_type = format_type
@@ -463,7 +467,9 @@ class OpenAILanguageModel(BaseLanguageModel):
 
     # Initialize the OpenAI client
     self._client = openai.OpenAI(
-        api_key=self.api_key, organization=self.organization
+        api_key=self.api_key,
+        base_url=self.base_url,
+        organization=self.organization,
     )
 
     super().__init__(

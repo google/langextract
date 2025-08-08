@@ -12,19 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Base exceptions for LangExtract.
+FROM python:3.11-slim-bookworm
 
-This module defines the base exception class that all LangExtract exceptions
-inherit from. Individual modules define their own specific exceptions.
-"""
+WORKDIR /app
 
-__all__ = ["LangExtractError"]
+RUN pip install langextract
 
+COPY quickstart.py .
 
-class LangExtractError(Exception):
-  """Base exception for all LangExtract errors.
-
-  All exceptions raised by LangExtract should inherit from this class.
-  This allows users to catch all LangExtract-specific errors with a single
-  except clause.
-  """
+CMD ["python", "quickstart.py"]

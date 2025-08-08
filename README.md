@@ -17,6 +17,8 @@
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
+- [Using OpenAI Models](#using-openai-models)
+- [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
 - [More Examples](#more-examples)
   - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
   - [Medication Extraction](#medication-extraction)
@@ -256,13 +258,13 @@ result = lx.extract(
 LangExtract also supports OpenAI models. Example OpenAI configuration:
 
 ```python
-from langextract.inference import OpenAILanguageModel
+import langextract as lx
 
 result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    language_model_type=OpenAILanguageModel,
+    language_model_type=lx.inference.OpenAILanguageModel,
     model_id="gpt-4o",
     api_key=os.environ.get('OPENAI_API_KEY'),
 )
@@ -274,6 +276,29 @@ result = lx.extract(
 - Supported models: gpt-4o, gpt-4o-mini, and newer versions
 
 For YAML output or older OpenAI models, use `fence_output=True` and `use_schema_constraints=False`.
+
+## Using Local LLMs with Ollama
+
+LangExtract supports local inference using Ollama, allowing you to run models without API keys:
+
+```python
+import langextract as lx
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    language_model_type=lx.inference.OllamaLanguageModel,
+    model_id="gemma2:2b",  # or any Ollama model
+    model_url="http://localhost:11434",
+    fence_output=False,
+    use_schema_constraints=False
+)
+```
+
+**Quick setup:** Install Ollama from [ollama.com](https://ollama.com/), run `ollama pull gemma2:2b`, then `ollama serve`.
+
+For detailed installation, Docker setup, and examples, see [`examples/ollama/`](examples/ollama/).
 
 ## More Examples
 
@@ -327,6 +352,17 @@ Or reproduce the full CI matrix locally with tox:
 ```bash
 tox  # runs pylint + pytest on Python 3.10 and 3.11
 ```
+
+### Ollama Integration Testing
+
+If you have Ollama installed locally, you can run integration tests:
+
+```bash
+# Test Ollama integration (requires Ollama running with gemma2:2b model)
+tox -e ollama-integration
+```
+
+This test will automatically detect if Ollama is available and run real inference tests.
 
 ## Development
 

@@ -1,0 +1,88 @@
+# Custom Provider Plugin Example
+
+This example demonstrates how to create a custom provider plugin that extends LangExtract with your own model backend.
+
+**Note**: This is an example included in the LangExtract repository for reference. It is not part of the LangExtract package and won't be installed when you `pip install langextract`.
+
+## Structure
+
+```
+custom_provider_plugin/
+├── pyproject.toml                      # Package configuration and metadata
+├── README.md                            # This file
+├── langextract_provider_example/        # Package directory
+│   ├── __init__.py                     # Package initialization
+│   └── provider.py                     # Custom provider implementation
+└── test_example_provider.py            # Test script
+```
+
+## Key Components
+
+### Provider Implementation (`provider.py`)
+
+```python
+@lx.providers.registry.register(
+    r'^gemini',  # Pattern for model IDs this provider handles
+)
+class CustomGeminiProvider(lx.inference.BaseLanguageModel):
+    def __init__(self, model_id: str, **kwargs):
+        # Initialize your backend client
+
+    def infer(self, batch_prompts, **kwargs):
+        # Call your backend API and return results
+```
+
+### Package Configuration (`pyproject.toml`)
+
+```toml
+[project.entry-points."langextract.providers"]
+custom_gemini = "langextract_provider_example:CustomGeminiProvider"
+```
+
+This entry point allows LangExtract to automatically discover your provider.
+
+## Installation
+
+```bash
+# Navigate to this example directory first
+cd examples/custom_provider_plugin
+
+# Install in development mode
+pip install -e .
+
+# Test the provider (must be run from this directory)
+python test_example_provider.py
+```
+
+## Usage
+
+Since this example registers the same pattern as the default Gemini provider, you must explicitly specify it:
+
+```python
+import langextract as lx
+
+config = lx.factory.ModelConfig(
+    model_id="gemini-2.5-flash",
+    provider="CustomGeminiProvider",
+    provider_kwargs={"api_key": "your-api-key"}
+)
+model = lx.factory.create_model(config)
+
+result = lx.extract(
+    text_or_documents="Your text here",
+    model=model,
+    prompt_description="Extract key information"
+)
+```
+
+## Creating Your Own Provider
+
+1. Copy this example as a starting point
+2. Update the provider class name and registration pattern
+3. Replace the Gemini implementation with your own backend
+4. Update package name in `pyproject.toml`
+5. Install and test your plugin
+
+## License
+
+Apache License 2.0

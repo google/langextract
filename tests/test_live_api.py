@@ -29,7 +29,6 @@ from dotenv import load_dotenv
 import pytest
 
 import langextract as lx
-from langextract.inference import OpenAILanguageModel
 
 load_dotenv()
 
@@ -390,6 +389,37 @@ class TestLiveAPIGemini(unittest.TestCase):
   @skip_if_no_gemini
   @live_api
   @retry_on_transient_errors(max_retries=2)
+  def test_explicit_provider_gemini(self):
+    """Test using explicit provider with Gemini."""
+    # Test using provider class name
+    config = lx.factory.ModelConfig(
+        model_id="gemini-2.5-flash",
+        provider="GeminiLanguageModel",
+        provider_kwargs={
+            "api_key": GEMINI_API_KEY,
+            "temperature": 0.0,
+        },
+    )
+
+    model = lx.factory.create_model(config)
+    self.assertEqual(model.__class__.__name__, "GeminiLanguageModel")
+    self.assertEqual(model.model_id, "gemini-2.5-flash")
+
+    # Test using partial name match
+    config2 = lx.factory.ModelConfig(
+        model_id="gemini-2.5-flash",
+        provider="gemini",  # Should match GeminiLanguageModel
+        provider_kwargs={
+            "api_key": GEMINI_API_KEY,
+        },
+    )
+
+    model2 = lx.factory.create_model(config2)
+    self.assertEqual(model2.__class__.__name__, "GeminiLanguageModel")
+
+  @skip_if_no_gemini
+  @live_api
+  @retry_on_transient_errors(max_retries=2)
   def test_medication_relationship_extraction(self):
     """Test relationship extraction for medications with Gemini."""
     input_text = """
@@ -469,7 +499,6 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         text_or_documents=input_text,
         prompt_description=prompt,
         examples=examples,
-        language_model_type=OpenAILanguageModel,
         model_id=DEFAULT_OPENAI_MODEL,
         api_key=OPENAI_API_KEY,
         fence_output=True,
@@ -522,6 +551,41 @@ class TestLiveAPIOpenAI(unittest.TestCase):
   @skip_if_no_openai
   @live_api
   @retry_on_transient_errors(max_retries=2)
+  def test_explicit_provider_selection(self):
+    """Test using explicit provider parameter for disambiguation."""
+    # Test with explicit model_id and provider
+    config = lx.factory.ModelConfig(
+        model_id=DEFAULT_OPENAI_MODEL,
+        provider="OpenAILanguageModel",  # Explicit provider selection
+        provider_kwargs={
+            "api_key": OPENAI_API_KEY,
+            "fence_output": True,
+            "temperature": 0.0,
+        },
+    )
+
+    model = lx.factory.create_model(config)
+
+    # Verify we got the right provider
+    self.assertEqual(model.__class__.__name__, "OpenAILanguageModel")
+    self.assertEqual(model.model_id, DEFAULT_OPENAI_MODEL)
+
+    # Also test using provider without model_id (uses default)
+    config_default = lx.factory.ModelConfig(
+        provider="OpenAILanguageModel",
+        provider_kwargs={
+            "api_key": OPENAI_API_KEY,
+        },
+    )
+
+    model_default = lx.factory.create_model(config_default)
+    self.assertEqual(model_default.__class__.__name__, "OpenAILanguageModel")
+    # Should use the default model_id from the provider
+    self.assertEqual(model_default.model_id, "gpt-4o-mini")
+
+  @skip_if_no_openai
+  @live_api
+  @retry_on_transient_errors(max_retries=2)
   def test_medication_relationship_extraction(self):
     """Test relationship extraction for medications with OpenAI."""
     input_text = """
@@ -544,7 +608,6 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         text_or_documents=input_text,
         prompt_description=prompt,
         examples=examples,
-        language_model_type=OpenAILanguageModel,
         model_id=DEFAULT_OPENAI_MODEL,
         api_key=OPENAI_API_KEY,
         fence_output=True,

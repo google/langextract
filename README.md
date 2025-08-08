@@ -255,7 +255,7 @@ result = lx.extract(
 
 ## Using OpenAI Models
 
-LangExtract also supports OpenAI models. Example OpenAI configuration:
+LangExtract supports OpenAI models (requires optional dependency: `pip install langextract[openai]`):
 
 ```python
 import langextract as lx
@@ -264,8 +264,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    language_model_type=lx.inference.OpenAILanguageModel,
-    model_id="gpt-4o",
+    model_id="gpt-4o",  # Automatically selects OpenAI provider
     api_key=os.environ.get('OPENAI_API_KEY'),
     fence_output=True,
     use_schema_constraints=False
@@ -285,8 +284,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    language_model_type=lx.inference.OllamaLanguageModel,
-    model_id="gemma2:2b",  # or any Ollama model
+    model_id="gemma2:2b",  # Automatically selects Ollama provider
     model_url="http://localhost:11434",
     fence_output=False,
     use_schema_constraints=False
@@ -327,6 +325,15 @@ Contributions are welcome! See [CONTRIBUTING.md](https://github.com/google/lange
 with development, testing, and pull requests. You must sign a
 [Contributor License Agreement](https://cla.developers.google.com/about)
 before submitting patches.
+
+### Adding Custom Model Providers
+
+LangExtract supports custom LLM providers through a plugin system. You can add support for new models by creating an external Python package that registers with LangExtract's provider registry. This allows you to:
+- Add new model support without modifying the core library
+- Distribute your provider independently
+- Maintain custom dependencies
+
+For detailed instructions, see the [Provider System Documentation](langextract/providers/README.md).
 
 ## Testing
 

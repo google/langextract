@@ -14,7 +14,14 @@
 
 """Base exceptions for LangExtract."""
 
-__all__ = ["LangExtractError"]
+from __future__ import annotations
+
+__all__ = [
+    "LangExtractError",
+    "InferenceError",
+    "InferenceConfigError",
+    "InferenceRuntimeError",
+]
 
 
 class LangExtractError(Exception):
@@ -24,3 +31,41 @@ class LangExtractError(Exception):
   This allows users to catch all LangExtract-specific errors with a single
   except clause.
   """
+
+
+class InferenceError(LangExtractError):
+  """Base exception for inference-related errors."""
+
+
+class InferenceConfigError(InferenceError):
+  """Exception raised for configuration errors.
+
+  This includes missing API keys, invalid model IDs, or other
+  configuration-related issues that prevent model instantiation.
+  """
+
+
+class InferenceRuntimeError(InferenceError):
+  """Exception raised for runtime inference errors.
+
+  This includes API call failures, network errors, or other issues
+  that occur during inference execution.
+  """
+
+  def __init__(
+      self,
+      message: str,
+      *,
+      original: BaseException | None = None,
+      provider: str | None = None,
+  ) -> None:
+    """Initialize the runtime error.
+
+    Args:
+      message: Error message.
+      original: Original exception from the provider SDK.
+      provider: Name of the provider that raised the error.
+    """
+    super().__init__(message)
+    self.original = original
+    self.provider = provider

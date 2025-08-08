@@ -408,6 +408,7 @@ class OpenAILanguageModel(BaseLanguageModel):
   api_key: str | None = None
   base_url: str | None = None
   organization: str | None = None
+  openai_schema: schema.OpenAISchema | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
   max_workers: int = 10
@@ -424,6 +425,7 @@ class OpenAILanguageModel(BaseLanguageModel):
       api_key: str | None = None,
       base_url: str | None = None,
       organization: str | None = None,
+      openai_schema: schema.OpenAISchema | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float = 0.0,
       max_workers: int = 10,
@@ -436,6 +438,7 @@ class OpenAILanguageModel(BaseLanguageModel):
       api_key: API key for OpenAI service.
       base_url: Base URL for OpenAI service.
       organization: Optional OpenAI organization ID.
+      openai_schema: Optional schema for structured output.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
       max_workers: Maximum number of parallel API calls.
@@ -446,10 +449,18 @@ class OpenAILanguageModel(BaseLanguageModel):
     self.api_key = api_key
     self.base_url = base_url
     self.organization = organization
+    self.openai_schema = openai_schema
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
     self._extra_kwargs = kwargs or {}
+
+    # Validate that schema constraints are only used with JSON format
+    if openai_schema is not None and format_type != data.FormatType.JSON:
+      raise ValueError(
+          'OpenAI schema constraints are only supported with FormatType.JSON. '
+          'YAML format is not supported with structured outputs.'
+      )
 
     if not self.api_key:
       raise ValueError('API key not provided.')
@@ -468,29 +479,55 @@ class OpenAILanguageModel(BaseLanguageModel):
   def _process_single_prompt(self, prompt: str, config: dict) -> ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
     try:
-      # Prepare the system message for structured output
-      system_message = ''
-      if self.format_type == data.FormatType.JSON:
+      # Prepare the base parameters for the API call
+      api_params = {
+          'model': self.model_id,
+          'temperature': config.get('temperature', self.temperature),
+          'n': 1,
+      }
+
+      # Add optional parameters if provided
+      if 'max_output_tokens' in config:
+        api_params['max_tokens'] = config['max_output_tokens']
+      if 'top_p' in config:
+        api_params['top_p'] = config['top_p']
+
+      # Configure structured output if schema is provided
+      if self.openai_schema is not None:
+        # Use structured outputs with JSON schema
+        api_params['response_format'] = {
+            'type': 'json_schema',
+            'json_schema': {
+                'name': self.openai_schema.name,
+                'strict': self.openai_schema.strict,
+                'schema': self.openai_schema.schema_dict,
+            },
+        }
+        # System message for structured output
         system_message = (
-            'You are a helpful assistant that responds in JSON format.'
+            'You are a helpful assistant that extracts information in the '
+            'specified JSON format.'
         )
-      elif self.format_type == data.FormatType.YAML:
-        system_message = (
-            'You are a helpful assistant that responds in YAML format.'
-        )
+      else:
+        # Fall back to regular format-specific messages
+        system_message = ''
+        if self.format_type == data.FormatType.JSON:
+          system_message = (
+              'You are a helpful assistant that responds in JSON format.'
+          )
+        elif self.format_type == data.FormatType.YAML:
+          system_message = (
+              'You are a helpful assistant that responds in YAML format.'
+          )
+
+      # Set up messages
+      api_params['messages'] = [
+          {'role': 'system', 'content': system_message},
+          {'role': 'user', 'content': prompt},
+      ]
 
       # Create the chat completion using the v1.x client API
-      response = self._client.chat.completions.create(
-          model=self.model_id,
-          messages=[
-              {'role': 'system', 'content': system_message},
-              {'role': 'user', 'content': prompt},
-          ],
-          temperature=config.get('temperature', self.temperature),
-          max_tokens=config.get('max_output_tokens'),
-          top_p=config.get('top_p'),
-          n=1,
-      )
+      response = self._client.chat.completions.create(**api_params)
 
       # Extract the response text using the v1.x response format
       output_text = response.choices[0].message.content

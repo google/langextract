@@ -267,12 +267,15 @@ result = lx.extract(
     language_model_type=lx.inference.OpenAILanguageModel,
     model_id="gpt-4o",
     api_key=os.environ.get('OPENAI_API_KEY'),
-    fence_output=True,
-    use_schema_constraints=False
 )
 ```
 
-Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
+**OpenAI Schema Constraints:** LangExtract now supports OpenAI's structured outputs feature for JSON format. When using `use_schema_constraints=True` with OpenAI models:
+- Only `FormatType.JSON` is supported (YAML will raise an error)
+- Set `fence_output=False` for best results with schema constraints
+- Supported models: gpt-4o, gpt-4o-mini, and newer versions
+
+For YAML output or older OpenAI models, use `fence_output=True` and `use_schema_constraints=False`.
 
 ## Using Local LLMs with Ollama
 

@@ -24,6 +24,7 @@ import textwrap
 from typing import Any
 
 from google import genai
+import google.auth.credentials
 import openai
 import requests
 from typing_extensions import override
@@ -255,11 +256,15 @@ class OllamaLanguageModel(BaseLanguageModel):
 
 
 @dataclasses.dataclass(init=False)
-class GeminiLanguageModel(BaseLanguageModel):
+class GeminiLanguageModel(BaseLanguageModel):  # pylint: disable=too-many-instance-attributes
   """Language model inference using Google's Gemini API with structured output."""
 
   model_id: str = 'gemini-2.5-flash'
   api_key: str | None = None
+  vertexai: bool = False
+  credentials: google.auth.credentials.Credentials | None = None
+  project: str | None = None
+  location: str | None = None
   gemini_schema: schema.GeminiSchema | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
@@ -272,6 +277,10 @@ class GeminiLanguageModel(BaseLanguageModel):
       self,
       model_id: str = 'gemini-2.5-flash',
       api_key: str | None = None,
+      vertexai: bool = False,
+      credentials: google.auth.credentials.Credentials | None = None,
+      project: str | None = None,
+      location: str | None = None,
       gemini_schema: schema.GeminiSchema | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float = 0.0,
@@ -298,10 +307,13 @@ class GeminiLanguageModel(BaseLanguageModel):
     self.max_workers = max_workers
     self._extra_kwargs = kwargs or {}
 
-    if not self.api_key:
-      raise ValueError('API key not provided.')
-
-    self._client = genai.Client(api_key=self.api_key)
+    self._client = genai.Client(
+        api_key=self.api_key,
+        vertexai=vertexai,
+        credentials=credentials,
+        project=project,
+        location=location,
+    )
 
     super().__init__(
         constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)

@@ -24,6 +24,7 @@ import textwrap
 from typing import Any
 
 from google import genai
+from google.genai import types
 import openai
 import requests
 from typing_extensions import override
@@ -350,6 +351,176 @@ class GeminiLanguageModel(BaseLanguageModel):
       config['top_p'] = kwargs['top_p']
     if 'top_k' in kwargs:
       config['top_k'] = kwargs['top_k']
+
+    # Use parallel processing for batches larger than 1
+    if len(batch_prompts) > 1 and self.max_workers > 1:
+      with concurrent.futures.ThreadPoolExecutor(
+          max_workers=min(self.max_workers, len(batch_prompts))
+      ) as executor:
+        future_to_index = {
+            executor.submit(
+                self._process_single_prompt, prompt, config.copy()
+            ): i
+            for i, prompt in enumerate(batch_prompts)
+        }
+
+        results: list[ScoredOutput | None] = [None] * len(batch_prompts)
+        for future in concurrent.futures.as_completed(future_to_index):
+          index = future_to_index[future]
+          try:
+            results[index] = future.result()
+          except Exception as e:
+            raise InferenceOutputError(
+                f'Parallel inference error: {str(e)}'
+            ) from e
+
+        for result in results:
+          if result is None:
+            raise InferenceOutputError('Failed to process one or more prompts')
+          yield [result]
+    else:
+      # Sequential processing for single prompt or worker
+      for prompt in batch_prompts:
+        result = self._process_single_prompt(prompt, config.copy())
+        yield [result]
+
+  def parse_output(self, output: str) -> Any:
+    """Parses Gemini output as JSON or YAML.
+
+    Note: This expects raw JSON/YAML without code fences.
+    Code fence extraction is handled by resolver.py.
+    """
+    try:
+      if self.format_type == data.FormatType.JSON:
+        return json.loads(output)
+      else:
+        return yaml.safe_load(output)
+    except Exception as e:
+      raise ValueError(
+          f'Failed to parse output as {self.format_type.name}: {str(e)}'
+      ) from e
+
+
+@dataclasses.dataclass(init=False)
+class GeminiVertexLanguageModel(BaseLanguageModel):
+  """Language model inference using Google's Gemini Vertex AI with structured output."""
+
+  model_id: str = 'gemini-2.5-flash'
+  project: str | None = None
+  location: str = 'global'
+  gemini_schema: schema.GeminiSchema | None = None
+  format_type: data.FormatType = data.FormatType.JSON
+  temperature: float = 0.0
+  thinking_budget: int = 0
+  max_workers: int = 10
+  _extra_kwargs: dict[str, Any] = dataclasses.field(
+      default_factory=dict, repr=False, compare=False
+  )
+
+  def __init__(
+      self,
+      model_id: str = 'gemini-2.5-flash',
+      project: str | None = None,
+      location: str = 'global',
+      gemini_schema: schema.GeminiSchema | None = None,
+      format_type: data.FormatType = data.FormatType.JSON,
+      temperature: float = 0.0,
+      thinking_budget: int = 0,
+      max_workers: int = 10,
+      **kwargs,
+  ) -> None:
+    """Initialize the Gemini Vertex AI language model.
+
+    Args:
+      model_id: The Gemini model ID to use.
+      project: Google Cloud project ID for Vertex AI.
+      location: Google Cloud location/region for Vertex AI.
+      gemini_schema: Optional schema for structured output.
+      format_type: Output format (JSON or YAML).
+      temperature: Sampling temperature.
+      thinking_budget: Thinking budget for reasoning (0 = no thinking).
+      max_workers: Maximum number of parallel API calls.
+      **kwargs: Ignored extra parameters so callers can pass a superset of
+        arguments shared across back-ends without raising ``TypeError``.
+    """
+    self.model_id = model_id
+    self.project = project
+    self.location = location
+    self.gemini_schema = gemini_schema
+    self.format_type = format_type
+    self.temperature = temperature
+    self.thinking_budget = thinking_budget
+    self.max_workers = max_workers
+    self._extra_kwargs = kwargs or {}
+
+    if not self.project:
+      raise ValueError('Project ID not provided for Vertex AI.')
+
+    self._client = genai.Client(
+        vertexai=True,
+        project=self.project,
+        location=self.location,
+    )
+
+    super().__init__(
+        constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)
+    )
+
+  def _process_single_prompt(self, prompt: str, config: dict) -> ScoredOutput:
+    """Process a single prompt and return a ScoredOutput."""
+    try:
+      if self.gemini_schema:
+        response_schema = self.gemini_schema.schema_dict
+        mime_type = (
+            'application/json'
+            if self.format_type == data.FormatType.JSON
+            else 'application/yaml'
+        )
+        config['response_mime_type'] = mime_type
+        config['response_schema'] = response_schema
+
+      # Add thinking config if thinking_budget is specified
+      if self.thinking_budget > 0:
+        config['thinking_config'] = types.ThinkingConfig(
+            thinking_budget=self.thinking_budget
+        )
+
+      response = self._client.models.generate_content(
+          model=self.model_id, contents=prompt, config=config
+      )
+
+      return ScoredOutput(score=1.0, output=response.text)
+
+    except Exception as e:
+      raise InferenceOutputError(f'Gemini Vertex AI error: {str(e)}') from e
+
+  def infer(
+      self, batch_prompts: Sequence[str], **kwargs
+  ) -> Iterator[Sequence[ScoredOutput]]:
+    """Runs inference on a list of prompts via Gemini Vertex AI.
+
+    Args:
+      batch_prompts: A list of string prompts.
+      **kwargs: Additional generation params (temperature, top_p, top_k, etc.)
+
+    Yields:
+      Lists of ScoredOutputs.
+    """
+    config = {
+        'temperature': kwargs.get('temperature', self.temperature),
+    }
+    if 'max_output_tokens' in kwargs:
+      config['max_output_tokens'] = kwargs['max_output_tokens']
+    if 'top_p' in kwargs:
+      config['top_p'] = kwargs['top_p']
+    if 'top_k' in kwargs:
+      config['top_k'] = kwargs['top_k']
+    if 'seed' in kwargs:
+      config['seed'] = kwargs['seed']
+
+    # Add safety settings if provided
+    if 'safety_settings' in kwargs:
+      config['safety_settings'] = kwargs['safety_settings']
 
     # Use parallel processing for batches larger than 1
     if len(batch_prompts) > 1 and self.max_workers > 1:

@@ -23,7 +23,7 @@ from langextract import inference
 
 class TestOllamaLanguageModel(absltest.TestCase):
 
-  @mock.patch.object(inference.OllamaLanguageModel, "_ollama_query")
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
   def test_ollama_infer(self, mock_ollama_query):
 
     # Actuall full gemma2 response using Ollama.
@@ -133,12 +133,6 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
         model="gpt-4o-mini",
         messages=[
             {
-                "role": "system",
-                "content": (
-                    "You are a helpful assistant that responds in JSON format."
-                ),
-            },
-            {
                 "role": "user",
                 "content": "Extract name and age from: John is 30 years old",
             },
@@ -147,6 +141,7 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
         max_tokens=None,
         top_p=None,
         n=1,
+        response_format={"type": "json_object"},
     )
 
     # Check results
@@ -219,6 +214,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
         max_tokens=None,
         top_p=None,
         n=1,
+        response_format={"type": "json_object"},
     )
 
 

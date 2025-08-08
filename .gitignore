@@ -52,3 +52,5 @@ docs/_build/
 
 # OS-specific
 .DS_Store
+CLAUDE.md
+FINAL_PR_MESSAGE.md

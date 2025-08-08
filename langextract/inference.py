@@ -245,7 +245,7 @@ class GeminiLanguageModel(BaseLanguageModel):
     'Use langextract.providers.openai.OpenAILanguageModel instead. '
     'Will be removed in v2.0.0.'
 )
-class OpenAILanguageModel(BaseLanguageModel):  # pylint: disable=too-many-instance-attributes
+class OpenAILanguageModel(BaseLanguageModel):
   """Language model inference using OpenAI's API with structured output.
 
   DEPRECATED: Use langextract.providers.openai.OpenAILanguageModel instead.

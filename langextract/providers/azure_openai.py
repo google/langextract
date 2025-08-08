@@ -60,7 +60,7 @@ class AzureOpenAILanguageModel(OpenAILanguageModel):
   ) -> None:
     # Lazy import to avoid hard dependency unless provider is used
     try:
-      # pylint: disable=import-outside-toplevel
+      # pylint: disable=import-outside-toplevel,import-error
       from openai import AzureOpenAI  # type: ignore
     except Exception as exc:
       raise exceptions.InferenceConfigError(

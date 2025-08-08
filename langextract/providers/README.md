@@ -83,6 +83,10 @@ Ships with langextract, but requires extra installation:
   - Code included in package
   - Requires: `pip install langextract[openai]` to install OpenAI SDK
   - Future: May be moved to external plugin package
+- **Azure OpenAI** (`azure_openai.py`): Azure OpenAI Service
+  - Code included in package
+  - Inherits from OpenAI provider
+  - Requires: `pip install langextract[openai]` to install OpenAI SDK
 
 ### 3. External Plugins (Third-party)
 Separate packages that extend LangExtract with new providers:
@@ -162,6 +166,17 @@ import langextract as lx
 result = lx.extract(
     text="...",
     model_id="gemini-2.5-flash"
+)
+
+# Automatically selects Azure OpenAI provider
+result = lx.extract(
+    text="...",
+    model_id="azure:gpt-4o",
+    language_model_params={
+        "azure_endpoint": "https://your-resource.openai.azure.com",
+        "api_key": "your-api-key",
+        "api_version": "2024-07-01-preview"
+    }
 )
 ```
 
@@ -339,6 +354,7 @@ The factory automatically resolves API keys from environment:
 |----------|------------------------------------------|
 | Gemini   | `GEMINI_API_KEY`, `LANGEXTRACT_API_KEY` |
 | OpenAI   | `OPENAI_API_KEY`, `LANGEXTRACT_API_KEY` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` |
 | Ollama   | `OLLAMA_BASE_URL` (default: http://localhost:11434) |
 
 ## Design Principles

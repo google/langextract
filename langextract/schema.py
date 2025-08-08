@@ -156,3 +156,122 @@ class GeminiSchema(BaseSchema):
     }
 
     return cls(_schema_dict=schema_dict)
+
+
+@dataclasses.dataclass
+class OpenAISchema(BaseSchema):
+  """Schema implementation for OpenAI structured output.
+
+  Converts ExampleData objects into a JSON Schema definition
+  that OpenAI can interpret via 'response_format' with 'json_schema'.
+  """
+
+  _schema_dict: dict
+  _name: str = "langextract_extraction"
+  _strict: bool = True
+
+  @property
+  def schema_dict(self) -> dict:
+    """Returns the schema dictionary."""
+    return self._schema_dict
+
+  @schema_dict.setter
+  def schema_dict(self, schema_dict: dict) -> None:
+    """Sets the schema dictionary."""
+    self._schema_dict = schema_dict
+
+  @property
+  def name(self) -> str:
+    """Returns the schema name."""
+    return self._name
+
+  @property
+  def strict(self) -> bool:
+    """Returns whether to use strict mode."""
+    return self._strict
+
+  @classmethod
+  def from_examples(
+      cls,
+      examples_data: Sequence[data.ExampleData],
+      attribute_suffix: str = "_attributes",
+  ) -> OpenAISchema:
+    """Creates an OpenAISchema from example extractions.
+
+    Builds a JSON Schema compatible with OpenAI's structured outputs API.
+    The schema includes a top-level "extractions" array where each element
+    contains the extraction class name and attributes.
+
+    Args:
+      examples_data: A sequence of ExampleData objects containing extraction
+        classes and attributes.
+      attribute_suffix: String appended to each class name to form the
+        attributes field name (defaults to "_attributes").
+
+    Returns:
+      An OpenAISchema with internal dictionary representing the JSON constraint.
+    """
+    # Track attribute types for each category
+    extraction_categories: dict[str, dict[str, set[type]]] = {}
+    for example in examples_data:
+      for extraction in example.extractions:
+        category = extraction.extraction_class
+        if category not in extraction_categories:
+          extraction_categories[category] = {}
+
+        if extraction.attributes:
+          for attr_name, attr_value in extraction.attributes.items():
+            if attr_name not in extraction_categories[category]:
+              extraction_categories[category][attr_name] = set()
+            extraction_categories[category][attr_name].add(type(attr_value))
+
+    extraction_properties: dict[str, dict[str, Any]] = {}
+
+    for category, attrs in extraction_categories.items():
+      extraction_properties[category] = {"type": "string"}
+
+      attributes_field = f"{category}{attribute_suffix}"
+      attr_properties = {}
+
+      # If no attributes were found for this category, add a default property.
+      if not attrs:
+        attr_properties["_unused"] = {"type": "string"}
+      else:
+        for attr_name, attr_types in attrs.items():
+          # If we see list type, use array of strings
+          if list in attr_types:
+            attr_properties[attr_name] = {
+                "type": "array",
+                "items": {"type": "string"},
+            }
+          else:
+            attr_properties[attr_name] = {"type": "string"}
+
+      extraction_properties[attributes_field] = {
+          "type": "object",
+          "properties": attr_properties,
+          "additionalProperties": False,
+      }
+
+    # Create extraction item schema with required fields
+    extraction_item = {
+        "type": "object",
+        "properties": extraction_properties,
+        "required": list(extraction_properties.keys()),
+        "additionalProperties": False,
+    }
+
+    # Build the complete schema compatible with OpenAI's format
+    schema_dict = {
+        "type": "object",
+        "properties": {
+            EXTRACTIONS_KEY: {
+                "type": "array",
+                "items": extraction_item,
+            }
+        },
+        "required": [EXTRACTIONS_KEY],
+        "additionalProperties": False,
+    }
+
+    return cls(_schema_dict=schema_dict)

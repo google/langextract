@@ -180,5 +180,196 @@ class GeminiSchemaTest(parameterized.TestCase):
     self.assertEqual(actual_schema, expected_schema)
 
 
+class OpenAISchemaTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="empty_extractions",
+          examples_data=[],
+          expected_schema={
+              "type": "object",
+              "properties": {
+                  schema.EXTRACTIONS_KEY: {
+                      "type": "array",
+                      "items": {
+                          "type": "object",
+                          "properties": {},
+                          "required": [],
+                          "additionalProperties": False,
+                      },
+                  },
+              },
+              "required": [schema.EXTRACTIONS_KEY],
+              "additionalProperties": False,
+          },
+      ),
+      dict(
+          testcase_name="single_extraction_no_attributes",
+          examples_data=[
+              data.ExampleData(
+                  text="Patient has diabetes.",
+                  extractions=[
+                      data.Extraction(
+                          extraction_text="diabetes",
+                          extraction_class="condition",
+                      )
+                  ],
+              )
+          ],
+          expected_schema={
+              "type": "object",
+              "properties": {
+                  schema.EXTRACTIONS_KEY: {
+                      "type": "array",
+                      "items": {
+                          "type": "object",
+                          "properties": {
+                              "condition": {"type": "string"},
+                              "condition_attributes": {
+                                  "type": "object",
+                                  "properties": {
+                                      "_unused": {"type": "string"},
+                                  },
+                                  "additionalProperties": False,
+                              },
+                          },
+                          "required": ["condition", "condition_attributes"],
+                          "additionalProperties": False,
+                      },
+                  },
+              },
+              "required": [schema.EXTRACTIONS_KEY],
+              "additionalProperties": False,
+          },
+      ),
+      dict(
+          testcase_name="single_extraction_with_attributes",
+          examples_data=[
+              data.ExampleData(
+                  text="Patient has diabetes.",
+                  extractions=[
+                      data.Extraction(
+                          extraction_text="diabetes",
+                          extraction_class="condition",
+                          attributes={
+                              "severity": "mild",
+                              "duration": "5 years",
+                          },
+                      )
+                  ],
+              )
+          ],
+          expected_schema={
+              "type": "object",
+              "properties": {
+                  schema.EXTRACTIONS_KEY: {
+                      "type": "array",
+                      "items": {
+                          "type": "object",
+                          "properties": {
+                              "condition": {"type": "string"},
+                              "condition_attributes": {
+                                  "type": "object",
+                                  "properties": {
+                                      "severity": {"type": "string"},
+                                      "duration": {"type": "string"},
+                                  },
+                                  "additionalProperties": False,
+                              },
+                          },
+                          "required": ["condition", "condition_attributes"],
+                          "additionalProperties": False,
+                      },
+                  },
+              },
+              "required": [schema.EXTRACTIONS_KEY],
+              "additionalProperties": False,
+          },
+      ),
+      dict(
+          testcase_name="extraction_with_list_attribute",
+          examples_data=[
+              data.ExampleData(
+                  text="Patient has multiple conditions.",
+                  extractions=[
+                      data.Extraction(
+                          extraction_text="conditions",
+                          extraction_class="diagnosis",
+                          attributes={
+                              "conditions": ["diabetes", "hypertension"]
+                          },
+                      )
+                  ],
+              )
+          ],
+          expected_schema={
+              "type": "object",
+              "properties": {
+                  schema.EXTRACTIONS_KEY: {
+                      "type": "array",
+                      "items": {
+                          "type": "object",
+                          "properties": {
+                              "diagnosis": {"type": "string"},
+                              "diagnosis_attributes": {
+                                  "type": "object",
+                                  "properties": {
+                                      "conditions": {
+                                          "type": "array",
+                                          "items": {"type": "string"},
+                                      },
+                                  },
+                                  "additionalProperties": False,
+                              },
+                          },
+                          "required": ["diagnosis", "diagnosis_attributes"],
+                          "additionalProperties": False,
+                      },
+                  },
+              },
+              "required": [schema.EXTRACTIONS_KEY],
+              "additionalProperties": False,
+          },
+      ),
+  )
+  def test_from_examples_constructs_expected_schema(
+      self, examples_data, expected_schema
+  ):
+    openai_schema = schema.OpenAISchema.from_examples(examples_data)
+    actual_schema = openai_schema.schema_dict
+    self.assertEqual(actual_schema, expected_schema)
+
+  def test_openai_schema_properties(self):
+    # Test default properties
+    openai_schema = schema.OpenAISchema({})
+    self.assertEqual(openai_schema.name, "langextract_extraction")
+    self.assertTrue(openai_schema.strict)
+
+  def test_openai_schema_custom_suffix(self):
+    # Test with custom attribute suffix
+    examples_data = [
+        data.ExampleData(
+            text="Test",
+            extractions=[
+                data.Extraction(
+                    extraction_text="test",
+                    extraction_class="entity",
+                    attributes={"value": "test"},
+                )
+            ],
+        )
+    ]
+    openai_schema = schema.OpenAISchema.from_examples(
+        examples_data, attribute_suffix="_props"
+    )
+
+    # Check that custom suffix is used
+    items_props = openai_schema.schema_dict["properties"][
+        schema.EXTRACTIONS_KEY
+    ]["items"]["properties"]
+    self.assertIn("entity_props", items_props)
+    self.assertNotIn("entity_attributes", items_props)
+
+
 if __name__ == "__main__":
   absltest.main()

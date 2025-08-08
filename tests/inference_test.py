@@ -19,6 +19,7 @@ from absl.testing import parameterized
 
 from langextract import data
 from langextract import inference
+from langextract import schema
 
 
 class TestOllamaLanguageModel(absltest.TestCase):
@@ -216,9 +217,120 @@ class TestOpenAILanguageModel(absltest.TestCase):
         model="gpt-4o-mini",
         messages=mock.ANY,
         temperature=0.0,
-        max_tokens=None,
-        top_p=None,
         n=1,
+    )
+
+  def test_openai_schema_constraints_json(self):
+    # Test that schema constraints are only allowed with JSON format
+    test_schema = schema.OpenAISchema._schema_dict = {
+        "type": "object",
+        "properties": {"test": {"type": "string"}},
+    }
+    openai_schema = schema.OpenAISchema(test_schema)
+
+    # This should work - JSON format with schema
+    model = inference.OpenAILanguageModel(
+        api_key="test-key",
+        format_type=data.FormatType.JSON,
+        openai_schema=openai_schema,
+    )
+    self.assertEqual(model.openai_schema, openai_schema)
+
+  def test_openai_schema_constraints_yaml_raises_error(self):
+    # Test that schema constraints with YAML format raise an error
+    test_schema = schema.OpenAISchema._schema_dict = {
+        "type": "object",
+        "properties": {"test": {"type": "string"}},
+    }
+    openai_schema = schema.OpenAISchema(test_schema)
+
+    with self.assertRaises(ValueError) as context:
+      inference.OpenAILanguageModel(
+          api_key="test-key",
+          format_type=data.FormatType.YAML,
+          openai_schema=openai_schema,
+      )
+
+    self.assertIn(
+        "OpenAI schema constraints are only supported with FormatType.JSON",
+        str(context.exception),
+    )
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_with_schema_constraints(self, mock_openai_class):
+    # Mock the OpenAI client and chat completion response
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    # Mock response structure
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(
+            message=mock.Mock(
+                content=(
+                    '{"extractions": [{"name": "John", "age_attributes":'
+                    ' {"value": "30"}}]}'
+                )
+            )
+        )
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    # Create OpenAI schema
+    examples = [
+        data.ExampleData(
+            text="Alice is 25 years old",
+            extractions=[
+                data.Extraction(
+                    extraction_class="name",
+                    extraction_text="Alice",
+                    attributes={"type": "String"},
+                ),
+                data.Extraction(
+                    extraction_class="age",
+                    extraction_text="25",
+                    attributes={"type": "Integer"},
+                ),
+            ],
+        )
+    ]
+    openai_schema = schema.OpenAISchema.from_examples(examples)
+
+    # Create model instance with schema
+    model = inference.OpenAILanguageModel(
+        model_id="gpt-4o-mini",
+        api_key="test-api-key",
+        openai_schema=openai_schema,
+        temperature=0.5,
+    )
+
+    # Test inference
+    batch_prompts = ["Extract name and age from: John is 30 years old"]
+    results = list(model.infer(batch_prompts))
+
+    # Verify we got results
+    self.assertEqual(len(results), 1)
+    self.assertEqual(len(results[0]), 1)
+
+    # Verify API was called with schema constraints
+    call_args = mock_client.chat.completions.create.call_args
+    self.assertEqual(call_args[1]["model"], "gpt-4o-mini")
+    self.assertEqual(call_args[1]["temperature"], 0.5)
+    self.assertIn("response_format", call_args[1])
+    self.assertEqual(call_args[1]["response_format"]["type"], "json_schema")
+    self.assertIn("json_schema", call_args[1]["response_format"])
+    self.assertEqual(
+        call_args[1]["response_format"]["json_schema"]["name"],
+        "langextract_extraction",
+    )
+    self.assertTrue(call_args[1]["response_format"]["json_schema"]["strict"])
+
+    # Verify system message for structured output
+    messages = call_args[1]["messages"]
+    self.assertEqual(
+        messages[0]["content"],
+        "You are a helpful assistant that extracts information in the specified"
+        " JSON format.",
     )
 
 

@@ -19,6 +19,7 @@
 - [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
 - [Using OpenAI Models](#using-openai-models)
 - [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
+- [Using Amazon Bedrock Models](#using-amazon-bedrock-models)
 - [More Examples](#more-examples)
   - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
   - [Medication Extraction](#medication-extraction)
@@ -192,7 +193,7 @@ docker run --rm -e LANGEXTRACT_API_KEY="your-api-key" langextract python your_sc
 
 ## API Key Setup for Cloud Models
 
-When using LangExtract with cloud-hosted models (like Gemini or OpenAI), you'll need to
+When using LangExtract with cloud-hosted models (like Gemini, OpenAI, or Amazon Bedrock), you'll need to
 set up an API key. On-device models don't require an API key. For developers
 using local LLMs, LangExtract offers built-in support for Ollama and can be
 extended to other third-party APIs by updating the inference endpoints.
@@ -204,6 +205,7 @@ Get API keys from:
 *   [AI Studio](https://aistudio.google.com/app/apikey) for Gemini models
 *   [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview) for enterprise use
 *   [OpenAI Platform](https://platform.openai.com/api-keys) for OpenAI models
+*   [Amazon Bedrock](https://docs.aws.amazon.com/sdkref/latest/guide/feature-static-credentials.html) for Amazon Bedrock models ([API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) also available)
 
 ### Setting up API key in your environment
 
@@ -296,6 +298,25 @@ result = lx.extract(
 **Quick setup:** Install Ollama from [ollama.com](https://ollama.com/), run `ollama pull gemma2:2b`, then `ollama serve`.
 
 For detailed installation, Docker setup, and examples, see [`examples/ollama/`](examples/ollama/).
+
+## Using Amazon Bedrock Models
+
+LangExtract also supports Amazon Bedrock models via the Converse API and Bedrock API keys. A full list of models on Bedrock supported by the Converse API can be found [here](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html). Follow [Setting up API Keys](https://github.com/google/langextract?tab=readme-ov-file#setting-up-api-key-in-your-environment) to export AWS_BEARER_TOKEN_BEDROCK (or [AWS access credentials](https://docs.aws.amazon.com/sdkref/latest/guide/feature-static-credentials.html)) and AWS_DEFAULT_REGION to your environment. Example Bedrock configuration:
+
+```python
+from langextract as lx
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    language_model_type=lx.inference.BedrockConverseLanguageModel,
+    model_id='us.anthropic.claude-sonnet-4-20250514-v1:0',
+    fence_output=True,
+    use_schema_constraints=False
+)
+```
+Note: Like OpenAI models, Bedrock models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for Bedrock models yet.
 
 ## More Examples
 

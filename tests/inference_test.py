@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from unittest import mock
 
 from absl.testing import absltest
@@ -19,6 +20,10 @@ from absl.testing import parameterized
 
 from langextract import data
 from langextract import inference
+
+# Mock boto3 for tests
+with mock.patch.dict("sys.modules", {"boto3": mock.MagicMock()}):
+  pass
 
 
 class TestOllamaLanguageModel(absltest.TestCase):
@@ -219,6 +224,144 @@ class TestOpenAILanguageModel(absltest.TestCase):
         max_tokens=None,
         top_p=None,
         n=1,
+    )
+
+
+class TestBedrockConverseLanguageModel(absltest.TestCase):
+
+  @mock.patch("boto3.client")
+  @mock.patch.dict("os.environ", {"AWS_BEARER_TOKEN_BEDROCK": "test-token"})
+  def test_bedrock_converse_infer(self, mock_boto3_client):
+    mock_client = mock.Mock()
+    mock_boto3_client.return_value = mock_client
+
+    mock_response = {
+        "output": {
+            "message": {"content": [{"text": '{"name": "John", "age": 30}'}]}
+        }
+    }
+    mock_client.converse.return_value = mock_response
+
+    model = inference.BedrockConverseLanguageModel(
+        model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        temperature=0.5,
+    )
+
+    batch_prompts = ["Extract name and age from: John is 30 years old"]
+    results = list(model.infer(batch_prompts))
+
+    mock_client.converse.assert_called_once_with(
+        modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        system=[{
+            "text": "You are a helpful assistant that responds in JSON format."
+        }],
+        messages=[{
+            "role": "user",
+            "content": [
+                {"text": "Extract name and age from: John is 30 years old"}
+            ],
+        }],
+        inferenceConfig={
+            "temperature": 0.5,
+        },
+    )
+
+    expected_results = [[
+        inference.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')
+    ]]
+    self.assertEqual(results, expected_results)
+
+  @mock.patch.dict("os.environ", {"AWS_BEARER_TOKEN_BEDROCK": "test-token"})
+  def test_bedrock_converse_parse_output_json(self):
+    model = inference.BedrockConverseLanguageModel(
+        format_type=data.FormatType.JSON
+    )
+
+    output = '{"key": "value", "number": 42}'
+    parsed = model.parse_output(output)
+    self.assertEqual(parsed, {"key": "value", "number": 42})
+
+    with self.assertRaises(ValueError) as context:
+      model.parse_output("invalid json")
+    self.assertIn("Failed to parse output as JSON", str(context.exception))
+
+  @mock.patch.dict("os.environ", {"AWS_BEARER_TOKEN_BEDROCK": "test-token"})
+  def test_bedrock_converse_parse_output_yaml(self):
+    model = inference.BedrockConverseLanguageModel(
+        format_type=data.FormatType.YAML
+    )
+
+    output = "key: value\nnumber: 42"
+    parsed = model.parse_output(output)
+    self.assertEqual(parsed, {"key": "value", "number": 42})
+
+    with self.assertRaises(ValueError) as context:
+      model.parse_output("invalid: yaml: bad")
+    self.assertIn("Failed to parse output as YAML", str(context.exception))
+
+  @mock.patch.dict("os.environ", {}, clear=True)
+  def test_bedrock_converse_no_api_key_raises_error(self):
+    with self.assertRaises(ValueError) as context:
+      inference.BedrockConverseLanguageModel()
+    self.assertEqual(
+        str(context.exception),
+        "Either AWS_BEARER_TOKEN_BEDROCK or"
+        " AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY must be set",
+    )
+
+  @mock.patch("boto3.client")
+  @mock.patch.dict("os.environ", {"AWS_BEARER_TOKEN_BEDROCK": "test-token"})
+  def test_bedrock_converse_temperature_zero(self, mock_boto3_client):
+    mock_client = mock.Mock()
+    mock_boto3_client.return_value = mock_client
+
+    mock_response = {
+        "output": {"message": {"content": [{"text": '{"result": "test"}'}]}}
+    }
+    mock_client.converse.return_value = mock_response
+
+    model = inference.BedrockConverseLanguageModel(temperature=0.0)
+
+    list(model.infer(["test prompt"]))
+
+    mock_client.converse.assert_called_with(
+        modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        system=[{
+            "text": "You are a helpful assistant that responds in JSON format."
+        }],
+        messages=mock.ANY,
+        inferenceConfig={
+            "temperature": 0.0,
+        },
+    )
+
+  @mock.patch("boto3.client")
+  @mock.patch.dict("os.environ", {"AWS_BEARER_TOKEN_BEDROCK": "test-token"})
+  def test_bedrock_converse_with_optional_params(self, mock_boto3_client):
+    mock_client = mock.Mock()
+    mock_boto3_client.return_value = mock_client
+
+    mock_response = {
+        "output": {"message": {"content": [{"text": '{"result": "test"}'}]}}
+    }
+    mock_client.converse.return_value = mock_response
+
+    model = inference.BedrockConverseLanguageModel(temperature=0.7)
+
+    # Test with max_output_tokens and top_p provided
+    list(model.infer(["test prompt"], max_output_tokens=100, top_p=0.9))
+
+    mock_client.converse.assert_called_with(
+        modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        system=[{
+            "text": "You are a helpful assistant that responds in JSON format."
+        }],
+        messages=mock.ANY,
+        inferenceConfig={
+            "temperature": 0.7,
+            "maxTokens": 100,
+            "topP": 0.9,
+        },
     )
 
 

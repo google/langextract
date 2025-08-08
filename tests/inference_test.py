@@ -86,6 +86,8 @@ class TestOllamaLanguageModel(absltest.TestCase):
         model="gemma2:latest",
         structured_output_format="json",
         model_url="http://localhost:11434",
+        num_ctx=2048,
+        keep_alive=5 * 60,  # Ollama default keep alive time
     )
     expected_results = [[
         inference.ScoredOutput(

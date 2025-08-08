@@ -117,12 +117,16 @@ class OllamaLanguageModel(BaseLanguageModel):
       model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
       structured_output_format: str = 'json',
       constraint: schema.Constraint = schema.Constraint(),
+      num_ctx: int = 2048,
+      keep_alive: int = 5 * 60,  # seconds
       **kwargs,
   ) -> None:
     self._model = model_id
     self._model_url = model_url
     self._structured_output_format = structured_output_format
     self._constraint = constraint
+    self._num_ctx = num_ctx
+    self._keep_alive = keep_alive
     self._extra_kwargs = kwargs or {}
     super().__init__(constraint=constraint)
 
@@ -136,6 +140,8 @@ class OllamaLanguageModel(BaseLanguageModel):
           model=self._model,
           structured_output_format=self._structured_output_format,
           model_url=self._model_url,
+          num_ctx=self._num_ctx,
+          keep_alive=self._keep_alive,
       )
       # No score for Ollama. Default to 1.0
       yield [ScoredOutput(score=1.0, output=response['response'])]
@@ -434,7 +440,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     Args:
       model_id: The OpenAI model ID to use (e.g., 'gpt-4o-mini', 'gpt-4o').
       api_key: API key for OpenAI service.
-      base_url: Base URL for OpenAI service.
+      base_url: Optional base URL for OpenAI API (e.g., "https://api.openai.com/v1" for OpenAI, "https://api.anthropic.com/v1/" for Claude).
       organization: Optional OpenAI organization ID.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
@@ -449,6 +455,7 @@ class OpenAILanguageModel(BaseLanguageModel):
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
+    self.base_url = base_url
     self._extra_kwargs = kwargs or {}
 
     if not self.api_key:
@@ -457,8 +464,8 @@ class OpenAILanguageModel(BaseLanguageModel):
     # Initialize the OpenAI client
     self._client = openai.OpenAI(
         api_key=self.api_key,
-        base_url=self.base_url,
         organization=self.organization,
+        base_url=self.base_url,
     )
 
     super().__init__(

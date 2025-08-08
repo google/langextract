@@ -82,4 +82,9 @@ try:
 except ImportError:
   pass
 
+try:
+  from langextract.providers import azure_openai  # noqa: F401
+except ImportError:
+  pass
+
 __all__ = ["registry", "load_plugins_once"]

@@ -40,6 +40,7 @@ dependencies = [
     "pydantic>=1.8.0",
     "python-dotenv>=0.19.0",
     "PyYAML>=6.0",
+    "regex>=2022.1.18"
     "requests>=2.25.0",
     "tqdm>=4.64.0",
     "typing-extensions>=4.0.0"

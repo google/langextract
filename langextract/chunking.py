@@ -22,10 +22,10 @@ inference on.
 
 from collections.abc import Iterable, Iterator, Sequence
 import dataclasses
-import re
 
 from absl import logging
 import more_itertools
+import regex as re
 
 from langextract import data
 from langextract import exceptions

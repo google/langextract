@@ -333,25 +333,25 @@ class BatchingTest(parameterized.TestCase):
               ),
               chunking.TextChunk(
                   token_interval=tokenizer.TokenInterval(
-                      start_index=7, end_index=8
+                      start_index=7, end_index=10
                   ),
                   document=_SAMPLE_DOCUMENT,
               ),
               chunking.TextChunk(
                   token_interval=tokenizer.TokenInterval(
-                      start_index=8, end_index=12
+                      start_index=10, end_index=14
                   ),
                   document=_SAMPLE_DOCUMENT,
               ),
               chunking.TextChunk(
                   token_interval=tokenizer.TokenInterval(
-                      start_index=12, end_index=17
+                      start_index=14, end_index=19
                   ),
                   document=_SAMPLE_DOCUMENT,
               ),
               chunking.TextChunk(
                   token_interval=tokenizer.TokenInterval(
-                      start_index=17, end_index=20
+                      start_index=19, end_index=22
                   ),
                   document=_SAMPLE_DOCUMENT,
               ),

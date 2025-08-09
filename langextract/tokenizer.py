@@ -26,9 +26,9 @@ model to represent tokens during inference.
 from collections.abc import Sequence, Set
 import dataclasses
 import enum
-import re
 
 from absl import logging
+import regex as re
 
 from langextract import exceptions
 
@@ -133,11 +133,11 @@ class TokenizedText:
 
 
 # Regex patterns for tokenization.
-_LETTERS_PATTERN = r"[A-Za-z]+"
-_DIGITS_PATTERN = r"[0-9]+"
-_SYMBOLS_PATTERN = r"[^A-Za-z0-9\s]+"
+_LETTERS_PATTERN = r"\p{L}+"
+_DIGITS_PATTERN = r"\p{N}+"
+_SYMBOLS_PATTERN = r"[^\p{L}\p{N}\s]+"
 _END_OF_SENTENCE_PATTERN = re.compile(r"[.?!]$")
-_SLASH_ABBREV_PATTERN = r"[A-Za-z0-9]+(?:/[A-Za-z0-9]+)+"
+_SLASH_ABBREV_PATTERN = r"(?:{_LETTERS_PATTERN}|{_DIGITS_PATTERN})(?:/(?:{_LETTERS_PATTERN}|{_DIGITS_PATTERN}))+"
 
 _TOKEN_PATTERN = re.compile(
     rf"{_SLASH_ABBREV_PATTERN}|{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_SYMBOLS_PATTERN}"

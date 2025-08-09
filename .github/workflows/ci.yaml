@@ -133,6 +133,48 @@ jobs:
           fi
           tox -e live-api
 
+  plugin-integration-test:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect provider-related changes
+        id: provider-changes
+        uses: tj-actions/changed-files@v46
+        with:
+          files: |
+            langextract/providers/**
+            langextract/factory.py
+            langextract/inference.py
+            tests/provider_plugin_test.py
+            pyproject.toml
+            .github/workflows/ci.yaml
+
+      - name: Skip if no provider changes
+        if: steps.provider-changes.outputs.any_changed == 'false'
+        run: |
+          echo "No provider-related changes detected – skipping plugin integration test."
+          exit 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install tox
+
+      - name: Run plugin smoke test
+        run: tox -e plugin-smoke
+
+      - name: Run plugin integration test
+        run: tox -e plugin-integration
+
   ollama-integration-test:
     needs: test
     runs-on: ubuntu-latest

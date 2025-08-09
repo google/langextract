@@ -92,6 +92,8 @@ python_functions = "test_*"
 addopts = "-ra"
 markers = [
     "live_api: marks tests as requiring live API access",
+    "requires_pip: marks tests that perform pip install/uninstall operations",
+    "integration: marks integration tests that test multiple components together",
 ]
 
 [tool.pyink]

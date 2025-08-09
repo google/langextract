@@ -69,27 +69,42 @@ def load_plugins_once() -> None:
     _PLUGINS_LOADED = True
     return
 
-  _PLUGINS_LOADED = True
-
   try:
     entry_points_group = metadata.entry_points(group="langextract.providers")
   except Exception as exc:
     logging.debug("No third-party provider entry points found: %s", exc)
     return
 
+  # Set flag after successful entry point query to avoid disabling discovery
+  # on transient failures during enumeration.
+  _PLUGINS_LOADED = True
+
   for entry_point in entry_points_group:
     try:
       provider = entry_point.load()
-
+      # Validate provider subclasses but don't auto-register - plugins must
+      # use their own @register decorators to control patterns.
       if isinstance(provider, type):
-        registry.register(entry_point.name)(provider)
-        logging.info(
-            "Registered third-party provider from entry point: %s",
-            entry_point.name,
-        )
+        # pylint: disable=import-outside-toplevel
+        # Late import to avoid circular dependency
+        from langextract import inference
+
+        if issubclass(provider, inference.BaseLanguageModel):
+          logging.info(
+              "Loaded third-party provider class from entry point: %s",
+              entry_point.name,
+          )
+        else:
+          logging.warning(
+              "Entry point %s returned non-provider class %r; ignoring",
+              entry_point.name,
+              provider,
+          )
       else:
+        # Module import triggers decorator execution
         logging.debug(
-            "Loaded provider module from entry point: %s", entry_point.name
+            "Loaded provider module/object from entry point: %s",
+            entry_point.name,
         )
     except Exception as exc:
       logging.warning(

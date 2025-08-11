@@ -204,6 +204,16 @@ def extract(
         stacklevel=2,
     )
 
+  if use_schema_constraints and (model or config):
+    warnings.warn(
+        "The 'use_schema_constraints' parameter is ignored when 'model' or"
+        " 'config' is provided. To use schema constraints, include them"
+        " directly in your config's provider_kwargs (e.g., 'gemini_schema' for"
+        " Gemini models).",
+        UserWarning,
+        stacklevel=2,
+    )
+
   if not model and not config:
     # Generate schema constraints if enabled
     model_schema = None
@@ -239,7 +249,10 @@ def extract(
     )
 
   if not model:
-    assert config, "Could not determine model configuration"
+    if not config:
+      raise RuntimeError(
+          "Internal error: Failed to determine model configuration"
+      )
     model = factory.create_model(config)
 
   resolver_defaults = {

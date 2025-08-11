@@ -167,6 +167,62 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     mock_create_model.assert_called_once_with(mock_config)
     self.assertEqual(result, "ok")
 
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.factory.create_model")
+  def test_use_schema_constraints_warns_with_config(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that use_schema_constraints emits warning when used with config."""
+    config = factory.ModelConfig(
+        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test-key"}
+    )
+
+    mock_model = mock.MagicMock()
+    mock_create_model.return_value = mock_model
+    mock_annotator = mock_annotator_cls.return_value
+    mock_annotator.annotate_text.return_value = "ok"
+
+    with self.assertWarns(UserWarning) as cm:
+      result = lx.extract(
+          text_or_documents="text",
+          prompt_description=self.description,
+          examples=self.examples,
+          config=config,
+          use_schema_constraints=True,
+      )
+
+    self.assertIn("use_schema_constraints", str(cm.warning))
+    self.assertIn("ignored", str(cm.warning))
+    mock_create_model.assert_called_once()
+    called_config = mock_create_model.call_args[0][0]
+    self.assertEqual(called_config.model_id, "gemini-2.5-flash")
+    self.assertNotIn("gemini_schema", called_config.provider_kwargs)
+    self.assertEqual(result, "ok")
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.factory.create_model")
+  def test_use_schema_constraints_warns_with_model(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that use_schema_constraints emits warning when used with model."""
+    provided_model = mock.MagicMock()
+    mock_annotator = mock_annotator_cls.return_value
+    mock_annotator.annotate_text.return_value = "ok"
+
+    with self.assertWarns(UserWarning) as cm:
+      result = lx.extract(
+          text_or_documents="text",
+          prompt_description=self.description,
+          examples=self.examples,
+          model=provided_model,
+          use_schema_constraints=True,
+      )
+
+    self.assertIn("use_schema_constraints", str(cm.warning))
+    self.assertIn("ignored", str(cm.warning))
+    mock_create_model.assert_not_called()
+    self.assertEqual(result, "ok")
+
 
 if __name__ == "__main__":
   absltest.main()

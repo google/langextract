@@ -279,13 +279,15 @@ LangExtract supports local inference using Ollama, allowing you to run models wi
 
 ```python
 import langextract as lx
-
+from langextract import inference
+ 
 result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
     model_id="gemma2:2b",  # Automatically selects Ollama provider
     model_url="http://localhost:11434",
+    language_model_type=inference.OllamaLanguageModel
     fence_output=False,
     use_schema_constraints=False
 )

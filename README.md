@@ -279,7 +279,6 @@ LangExtract supports local inference using Ollama, allowing you to run models wi
 
 ```python
 import langextract as lx
-from langextract import inference
 
 result = lx.extract(
     text_or_documents=input_text,

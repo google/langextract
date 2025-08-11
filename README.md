@@ -20,7 +20,7 @@
 - [Using OpenAI Models](#using-openai-models)
 - [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
 - [More Examples](#more-examples)
-  - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
+  - [_Romeo and Juliet_ Full Text Extraction](#romeo-and-juliet-full-text-extraction)
   - [Medication Extraction](#medication-extraction)
   - [Radiology Report Structuring: RadExtract](#radiology-report-structuring-radextract)
 - [Contributing](#contributing)
@@ -144,7 +144,7 @@ result = lx.extract(
 )
 ```
 
-This approach can extract hundreds of entities from full novels while maintaining high accuracy. The interactive visualization seamlessly handles large result sets, making it easy to explore hundreds of entities from the output JSONL file. **[See the full *Romeo and Juliet* extraction example →](https://github.com/google/langextract/blob/main/docs/examples/longer_text_example.md)** for detailed results and performance insights.
+This approach can extract hundreds of entities from full novels while maintaining high accuracy. The interactive visualization seamlessly handles large result sets, making it easy to explore hundreds of entities from the output JSONL file. **[See the full _Romeo and Juliet_ extraction example →](https://github.com/google/langextract/blob/main/docs/examples/longer_text_example.md)** for detailed results and performance insights.
 
 ## Installation
 
@@ -154,7 +154,7 @@ This approach can extract hundreds of entities from full novels while maintainin
 pip install langextract
 ```
 
-*Recommended for most users. For isolated environments, consider using a virtual environment:*
+_Recommended for most users. For isolated environments, consider using a virtual environment:_
 
 ```bash
 python -m venv langextract_env
@@ -166,8 +166,7 @@ pip install langextract
 
 LangExtract uses modern Python packaging with `pyproject.toml` for dependency management:
 
-*Installing with `-e` puts the package in development mode, allowing you to modify the code without reinstalling.*
-
+_Installing with `-e` puts the package in development mode, allowing you to modify the code without reinstalling._
 
 ```bash
 git clone https://github.com/google/langextract.git
@@ -201,9 +200,9 @@ extended to other third-party APIs by updating the inference endpoints.
 
 Get API keys from:
 
-*   [AI Studio](https://aistudio.google.com/app/apikey) for Gemini models
-*   [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview) for enterprise use
-*   [OpenAI Platform](https://platform.openai.com/api-keys) for OpenAI models
+- [AI Studio](https://aistudio.google.com/app/apikey) for Gemini models
+- [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview) for enterprise use
+- [OpenAI Platform](https://platform.openai.com/api-keys) for OpenAI models
 
 ### Setting up API key in your environment
 
@@ -228,6 +227,7 @@ echo '.env' >> .gitignore
 ```
 
 In your Python code:
+
 ```python
 import langextract as lx
 
@@ -286,6 +286,7 @@ result = lx.extract(
     examples=examples,
     model_id="gemma2:2b",  # Automatically selects Ollama provider
     model_url="http://localhost:11434",
+    language_model_type=inference.OllamaLanguageModel,
     fence_output=False,
     use_schema_constraints=False
 )
@@ -299,11 +300,11 @@ For detailed installation, Docker setup, and examples, see [`examples/ollama/`](
 
 Additional examples of LangExtract in action:
 
-### *Romeo and Juliet* Full Text Extraction
+### _Romeo and Juliet_ Full Text Extraction
 
-LangExtract can process complete documents directly from URLs. This example demonstrates extraction from the full text of *Romeo and Juliet* from Project Gutenberg (147,843 characters), showing parallel processing, sequential extraction passes, and performance optimization for long document processing.
+LangExtract can process complete documents directly from URLs. This example demonstrates extraction from the full text of _Romeo and Juliet_ from Project Gutenberg (147,843 characters), showing parallel processing, sequential extraction passes, and performance optimization for long document processing.
 
-**[View *Romeo and Juliet* Full Text Example →](https://github.com/google/langextract/blob/main/docs/examples/longer_text_example.md)**
+**[View _Romeo and Juliet_ Full Text Example →](https://github.com/google/langextract/blob/main/docs/examples/longer_text_example.md)**
 
 ### Medication Extraction
 
@@ -329,6 +330,7 @@ before submitting patches.
 ### Adding Custom Model Providers
 
 LangExtract supports custom LLM providers through a plugin system. You can add support for new models by creating an external Python package that registers with LangExtract's provider registry. This allows you to:
+
 - Add new model support without modifying the core library
 - Distribute your provider independently
 - Maintain custom dependencies
@@ -386,6 +388,7 @@ pyink langextract tests --config pyproject.toml
 ### Pre-commit Hooks
 
 For automatic formatting checks:
+
 ```bash
 pre-commit install  # One-time setup
 pre-commit run --all-files  # Manual run

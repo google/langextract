@@ -26,8 +26,32 @@ from absl import logging
 
 from langextract.providers import registry
 
-# Track whether plugins have been loaded
+# Track provider loading for lazy initialization
 _PLUGINS_LOADED = False
+_BUILTINS_LOADED = False
+
+
+def load_builtins_once() -> None:
+  """Load built-in providers to register their patterns.
+
+  Idempotent function that ensures provider patterns are available
+  for model resolution.
+  """
+  global _BUILTINS_LOADED  # pylint: disable=global-statement
+  if _BUILTINS_LOADED:
+    return
+
+  # pylint: disable=import-outside-toplevel
+  from langextract.providers import gemini  # noqa: F401
+  from langextract.providers import ollama  # noqa: F401
+
+  try:
+    from langextract.providers import openai  # noqa: F401
+  except ImportError:
+    logging.debug("OpenAI provider not available (optional dependency)")
+  # pylint: enable=import-outside-toplevel
+
+  _BUILTINS_LOADED = True
 
 
 def load_plugins_once() -> None:
@@ -73,13 +97,4 @@ def load_plugins_once() -> None:
       )
 
 
-# pylint: disable=wrong-import-position
-from langextract.providers import gemini  # noqa: F401
-from langextract.providers import ollama  # noqa: F401
-
-try:
-  from langextract.providers import openai  # noqa: F401
-except ImportError:
-  pass
-
-__all__ = ["registry", "load_plugins_once"]
+__all__ = ["registry", "load_plugins_once", "load_builtins_once"]

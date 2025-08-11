@@ -27,6 +27,7 @@ import typing
 
 from langextract import exceptions
 from langextract import inference
+from langextract import providers
 from langextract.providers import registry
 
 
@@ -107,6 +108,9 @@ def create_model(config: ModelConfig) -> inference.BaseLanguageModel:
     if config.provider:
       provider_class = registry.resolve_provider(config.provider)
     else:
+      # Load providers before pattern matching
+      providers.load_builtins_once()
+      providers.load_plugins_once()
       provider_class = registry.resolve(config.model_id)
   except (ModuleNotFoundError, ImportError) as e:
     raise exceptions.InferenceConfigError(

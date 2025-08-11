@@ -121,6 +121,7 @@ def resolve(model_id: str) -> type[inference.BaseLanguageModel]:
   # pylint: disable=import-outside-toplevel
   from langextract import providers
 
+  providers.load_builtins_once()
   providers.load_plugins_once()
 
   sorted_entries = sorted(_ENTRIES, key=lambda e: e.priority, reverse=True)
@@ -154,6 +155,7 @@ def resolve_provider(provider_name: str) -> type[inference.BaseLanguageModel]:
   # pylint: disable=import-outside-toplevel
   from langextract import providers
 
+  providers.load_builtins_once()
   providers.load_plugins_once()
 
   for entry in _ENTRIES:

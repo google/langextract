@@ -210,6 +210,34 @@ class FactoryTest(absltest.TestCase):
 
     self.assertEqual(model.base_url, "http://custom:11434")
 
+  def test_ollama_models_select_without_api_keys(self):
+    """Test that Ollama models resolve without API keys or explicit type."""
+
+    @registry.register(
+        r"^llama", r"^gemma", r"^mistral", r"^qwen", priority=100
+    )
+    class FakeOllamaProvider(inference.BaseLanguageModel):
+
+      def __init__(self, model_id, **kwargs):
+        self.model_id = model_id
+        super().__init__()
+
+      def infer(self, batch_prompts, **kwargs):
+        return [[inference.ScoredOutput(score=1.0, output="test")]]
+
+      def infer_batch(self, prompts, batch_size=32):
+        return self.infer(prompts)
+
+    test_models = ["llama3", "gemma2:2b", "mistral:7b", "qwen3:0.6b"]
+
+    for model_id in test_models:
+      with self.subTest(model_id=model_id):
+        with mock.patch.dict(os.environ, {}, clear=True):
+          config = factory.ModelConfig(model_id=model_id)
+          model = factory.create_model(config)
+          self.assertIsInstance(model, FakeOllamaProvider)
+          self.assertEqual(model.model_id, model_id)
+
   def test_model_config_fields_are_immutable(self):
     """ModelConfig fields should not be modifiable after creation."""
     config = factory.ModelConfig(

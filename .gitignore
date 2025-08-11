@@ -49,6 +49,117 @@ docs/_build/
 .idea/
 .vscode/
 *.swp
+*.swo
+*~
+.*.swp
+.*.swo
 
 # OS-specific
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+# Development tools & environments
+.python-version
+.pytype/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.ruff_cache/
+*.sage.py
+.hypothesis/
+.scrapy
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+profile_default/
+ipython_config.py
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+*.sqlite3
+db.sqlite3
+db.sqlite3-journal
+logs/
+*.pid
+
+# Security and secrets
+*.key
+*.pem
+*.crt
+*.csr
+.env.local
+.env.production
+.env.*.local
+secrets/
+credentials/
+
+# AI tooling
+CLAUDE.md
+.claude/settings.local.json
+.aider.chat.history.*
+.aider.input.history
+.gemini/
+GEMINI.md
+
+# Package managers
+pip-log.txt
+pip-delete-this-directory.txt
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Local development
+local_settings.py
+instance/
+.webassets-cache
+.sass-cache/
+*.css.map
+*.js.map
+.dev/
+
+# Temporary files
+tmp/
+temp/
+cache/
+*.tmp
+*.bak
+*.backup
+*.orig
+.~lock.*#
+
+# Archives
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+*.dmg
+*.iso
+*.jar
+
+# Media files
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mp3
+*.wav
+*.ogg

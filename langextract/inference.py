@@ -15,18 +15,15 @@
 """Simple library for performing language model inference."""
 
 import abc
-from collections.abc import Iterator, Mapping, Sequence
-import concurrent.futures
+from collections.abc import Iterator, Sequence
 import dataclasses
 import enum
 import json
 import textwrap
 from typing import Any
 
-from google import genai
-import openai
-import requests
-from typing_extensions import override
+from absl import logging
+from typing_extensions import deprecated
 import yaml
 
 from langextract import data
@@ -44,10 +41,11 @@ class ScoredOutput:
   output: str | None = None
 
   def __str__(self) -> str:
+    score_str = '-' if self.score is None else f'{self.score:.2f}'
     if self.output is None:
-      return f'Score: {self.score:.2f}\nOutput: None'
+      return f'Score: {score_str}\nOutput: None'
     formatted_lines = textwrap.indent(self.output, prefix='  ')
-    return f'Score: {self.score:.2f}\nOutput:\n{formatted_lines}'
+    return f'Score: {score_str}\nOutput:\n{formatted_lines}'
 
 
 class InferenceOutputError(exceptions.LangExtractError):
@@ -91,486 +89,209 @@ class BaseLanguageModel(abc.ABC):
       score.
     """
 
+  def infer_batch(
+      self, prompts: Sequence[str], batch_size: int = 32  # pylint: disable=unused-argument
+  ) -> list[list[ScoredOutput]]:
+    """Batch inference with configurable batch size.
+
+    This is a convenience method that collects all results from infer().
+
+    Args:
+      prompts: List of prompts to process.
+      batch_size: Batch size (currently unused, for future optimization).
+
+    Returns:
+      List of lists of ScoredOutput objects.
+    """
+    results = []
+    for output in self.infer(prompts):
+      results.append(list(output))
+    return results
+
+  def parse_output(self, output: str) -> Any:
+    """Parses model output as JSON or YAML.
+
+    Note: This expects raw JSON/YAML without code fences.
+    Code fence extraction is handled by resolver.py.
+
+    Args:
+      output: Raw output string from the model.
+
+    Returns:
+      Parsed Python object (dict or list).
+
+    Raises:
+      ValueError: If output cannot be parsed as JSON or YAML.
+    """
+    # Check if we have a format_type attribute (providers should set this)
+    format_type = getattr(self, 'format_type', data.FormatType.JSON)
+
+    try:
+      if format_type == data.FormatType.JSON:
+        return json.loads(output)
+      else:
+        return yaml.safe_load(output)
+    except Exception as e:
+      raise ValueError(
+          f'Failed to parse output as {format_type.name}: {str(e)}'
+      ) from e
+
 
 class InferenceType(enum.Enum):
   ITERATIVE = 'iterative'
   MULTIPROCESS = 'multiprocess'
 
 
-@dataclasses.dataclass(init=False)
+@deprecated(
+    'Use langextract.providers.ollama.OllamaLanguageModel instead. '
+    'Will be removed in v2.0.0.'
+)
 class OllamaLanguageModel(BaseLanguageModel):
-  """Language model inference class using Ollama based host."""
+  """Language model inference class using Ollama based host.
 
-  _model: str
-  _model_url: str
-  _structured_output_format: str
-  _constraint: schema.Constraint = dataclasses.field(
-      default_factory=schema.Constraint, repr=False, compare=False
-  )
-  _extra_kwargs: dict[str, Any] = dataclasses.field(
-      default_factory=dict, repr=False, compare=False
-  )
+  DEPRECATED: Use langextract.providers.ollama.OllamaLanguageModel instead.
+  This class is kept for backward compatibility only.
+  """
 
-  def __init__(
-      self,
-      model_id: str,
-      model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
-      structured_output_format: str = 'json',
-      constraint: schema.Constraint = schema.Constraint(),
-      num_ctx: int = 2048,
-      keep_alive: int = 5 * 60,  # seconds
-      **kwargs,
-  ) -> None:
-    self._model = model_id
-    self._model_url = model_url
-    self._structured_output_format = structured_output_format
-    self._constraint = constraint
-    self._num_ctx = num_ctx
-    self._keep_alive = keep_alive
-    self._extra_kwargs = kwargs or {}
-    super().__init__(constraint=constraint)
+  def __init__(self, **kwargs):
+    """Initialize the Ollama language model (deprecated)."""
+    logging.warning(
+        'OllamaLanguageModel from langextract.inference is deprecated. '
+        'Use langextract.providers.ollama.OllamaLanguageModel instead.'
+    )
 
-  @override
+    # pylint: disable=import-outside-toplevel
+    from langextract.providers import ollama  # Avoid circular import
+
+    # Convert old parameter names to new ones
+    if 'model' in kwargs:
+      kwargs['model_id'] = kwargs.pop('model')
+
+    if 'structured_output_format' in kwargs:
+      format_str = kwargs.pop('structured_output_format')
+      kwargs['format_type'] = (
+          data.FormatType.JSON if format_str == 'json' else data.FormatType.YAML
+      )
+
+    self._impl = ollama.OllamaLanguageModel(**kwargs)
+    self._model = self._impl._model
+    self._model_url = self._impl._model_url
+    self.format_type = (
+        self._impl.format_type
+    )  # Changed from _structured_output_format
+    self._constraint = self._impl._constraint
+    self._extra_kwargs = self._impl._extra_kwargs
+
+    super().__init__(constraint=self._impl._constraint)
+
+  def _ollama_query(self, **kwargs):
+    """Backward compatibility method."""
+    return self._impl._ollama_query(**kwargs)  # pylint: disable=protected-access
+
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
   ) -> Iterator[Sequence[ScoredOutput]]:
-    for prompt in batch_prompts:
-      response = self._ollama_query(
-          prompt=prompt,
-          model=self._model,
-          structured_output_format=self._structured_output_format,
-          model_url=self._model_url,
-          num_ctx=self._num_ctx,
-          keep_alive=self._keep_alive,
-      )
-      # No score for Ollama. Default to 1.0
-      yield [ScoredOutput(score=1.0, output=response['response'])]
+    """Delegate to new provider."""
+    return self._impl.infer(batch_prompts, **kwargs)
 
-  def _ollama_query(
-      self,
-      prompt: str,
-      model: str = 'gemma2:latest',
-      temperature: float = 0.8,
-      seed: int | None = None,
-      top_k: int | None = None,
-      max_output_tokens: int | None = None,
-      structured_output_format: str | None = None,  # like 'json'
-      system: str = '',
-      raw: bool = False,
-      model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
-      timeout: int = 30,  # seconds
-      keep_alive: int = 5 * 60,  # if loading, keep model up for 5 minutes.
-      num_threads: int | None = None,
-      num_ctx: int = 2048,
-  ) -> Mapping[str, Any]:
-    """Sends a prompt to an Ollama model and returns the generated response.
-
-    This function makes an HTTP POST request to the `/api/generate` endpoint of
-    an Ollama server. It can optionally load the specified model first, generate
-    a response (with or without streaming), then return a parsed JSON response.
-
-    Args:
-      prompt: The text prompt to send to the model.
-      model: The name of the model to use, e.g. "gemma2:latest".
-      temperature: Sampling temperature. Higher values produce more diverse
-        output.
-      seed: Seed for reproducible generation. If None, random seed is used.
-      top_k: The top-K parameter for sampling.
-      max_output_tokens: Maximum tokens to generate. If None, the model's
-        default is used.
-      structured_output_format: If set to "json" or a JSON schema dict, requests
-        structured outputs from the model. See Ollama documentation for details.
-      system: A system prompt to override any system-level instructions.
-      raw: If True, bypasses any internal prompt templating; you provide the
-        entire raw prompt.
-      model_url: The base URL for the Ollama server, typically
-        "http://localhost:11434".
-      timeout: Timeout (in seconds) for the HTTP request.
-      keep_alive: How long (in seconds) the model remains loaded after
-        generation completes.
-      num_threads: Number of CPU threads to use. If None, Ollama uses a default
-        heuristic.
-      num_ctx: Number of context tokens allowed. If None, uses model’s default
-        or config.
-
-    Returns:
-      A mapping (dictionary-like) containing the server’s JSON response. For
-      non-streaming calls, the `"response"` key typically contains the entire
-      generated text.
-
-    Raises:
-      ValueError: If the server returns a 404 (model not found) or any non-OK
-      status code other than 200. Also raised on read timeouts or other request
-      exceptions.
-    """
-    options = {'keep_alive': keep_alive}
-    if seed:
-      options['seed'] = seed
-    if temperature:
-      options['temperature'] = temperature
-    if top_k:
-      options['top_k'] = top_k
-    if num_threads:
-      options['num_thread'] = num_threads
-    if max_output_tokens:
-      options['num_predict'] = max_output_tokens
-    if num_ctx:
-      options['num_ctx'] = num_ctx
-    model_url = model_url + '/api/generate'
-
-    payload = {
-        'model': model,
-        'prompt': prompt,
-        'system': system,
-        'stream': False,
-        'raw': raw,
-        'format': structured_output_format,
-        'options': options,
-    }
-    try:
-      response = requests.post(
-          model_url,
-          headers={
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-          },
-          json=payload,
-          timeout=timeout,
-      )
-    except requests.exceptions.RequestException as e:
-      if isinstance(e, requests.exceptions.ReadTimeout):
-        msg = (
-            f'Ollama Model timed out (timeout={timeout},'
-            f' num_threads={num_threads})'
-        )
-        raise ValueError(msg) from e
-      raise e
-
-    response.encoding = 'utf-8'
-    if response.status_code == 200:
-      return response.json()
-    if response.status_code == 404:
-      raise ValueError(
-          f"Can't find Ollama {model}. Try launching `ollama run {model}`"
-          ' from command line.'
-      )
-    else:
-      raise ValueError(
-          f'Ollama model failed with status code {response.status_code}.'
-      )
+  def parse_output(self, output: str) -> Any:
+    """Delegate to new provider."""
+    return self._impl.parse_output(output)
 
 
-@dataclasses.dataclass(init=False)
+@deprecated(
+    'Use langextract.providers.gemini.GeminiLanguageModel instead. '
+    'Will be removed in v2.0.0.'
+)
 class GeminiLanguageModel(BaseLanguageModel):
-  """Language model inference using Google's Gemini API with structured output."""
+  """Language model inference using Google's Gemini API with structured output.
 
-  model_id: str = 'gemini-2.5-flash'
-  api_key: str | None = None
-  gemini_schema: schema.GeminiSchema | None = None
-  format_type: data.FormatType = data.FormatType.JSON
-  temperature: float = 0.0
-  max_workers: int = 10
-  _extra_kwargs: dict[str, Any] = dataclasses.field(
-      default_factory=dict, repr=False, compare=False
-  )
+  DEPRECATED: Use langextract.providers.gemini.GeminiLanguageModel instead.
+  This class is kept for backward compatibility only.
+  """
 
-  def __init__(
-      self,
-      model_id: str = 'gemini-2.5-flash',
-      api_key: str | None = None,
-      gemini_schema: schema.GeminiSchema | None = None,
-      format_type: data.FormatType = data.FormatType.JSON,
-      temperature: float = 0.0,
-      max_workers: int = 10,
-      **kwargs,
-  ) -> None:
-    """Initialize the Gemini language model.
-
-    Args:
-      model_id: The Gemini model ID to use.
-      api_key: API key for Gemini service.
-      gemini_schema: Optional schema for structured output.
-      format_type: Output format (JSON or YAML).
-      temperature: Sampling temperature.
-      max_workers: Maximum number of parallel API calls.
-      **kwargs: Ignored extra parameters so callers can pass a superset of
-        arguments shared across back-ends without raising ``TypeError``.
-    """
-    self.model_id = model_id
-    self.api_key = api_key
-    self.gemini_schema = gemini_schema
-    self.format_type = format_type
-    self.temperature = temperature
-    self.max_workers = max_workers
-    self._extra_kwargs = kwargs or {}
-
-    if not self.api_key:
-      raise ValueError('API key not provided.')
-
-    self._client = genai.Client(api_key=self.api_key)
-
-    super().__init__(
-        constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)
+  def __init__(self, **kwargs):
+    """Initialize the Gemini language model (deprecated)."""
+    logging.warning(
+        'GeminiLanguageModel from langextract.inference is deprecated. '
+        'Use langextract.providers.gemini.GeminiLanguageModel instead.'
     )
 
-  def _process_single_prompt(self, prompt: str, config: dict) -> ScoredOutput:
-    """Process a single prompt and return a ScoredOutput."""
-    try:
-      if self.gemini_schema:
-        response_schema = self.gemini_schema.schema_dict
-        mime_type = (
-            'application/json'
-            if self.format_type == data.FormatType.JSON
-            else 'application/yaml'
-        )
-        config['response_mime_type'] = mime_type
-        config['response_schema'] = response_schema
+    # pylint: disable=import-outside-toplevel
+    from langextract.providers import gemini  # Avoid circular import
 
-      response = self._client.models.generate_content(
-          model=self.model_id, contents=prompt, config=config
-      )
+    self._impl = gemini.GeminiLanguageModel(**kwargs)
+    self.model_id = self._impl.model_id
+    self.api_key = self._impl.api_key
+    self.gemini_schema = self._impl.gemini_schema
+    self.format_type = self._impl.format_type
+    self.temperature = self._impl.temperature
+    self.max_workers = self._impl.max_workers
 
-      return ScoredOutput(score=1.0, output=response.text)
-
-    except Exception as e:
-      raise InferenceOutputError(f'Gemini API error: {str(e)}') from e
+    super().__init__(constraint=self._impl._constraint)
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
   ) -> Iterator[Sequence[ScoredOutput]]:
-    """Runs inference on a list of prompts via Gemini's API.
-
-    Args:
-      batch_prompts: A list of string prompts.
-      **kwargs: Additional generation params (temperature, top_p, top_k, etc.)
-
-    Yields:
-      Lists of ScoredOutputs.
-    """
-    config = {
-        'temperature': kwargs.get('temperature', self.temperature),
-    }
-    if 'max_output_tokens' in kwargs:
-      config['max_output_tokens'] = kwargs['max_output_tokens']
-    if 'top_p' in kwargs:
-      config['top_p'] = kwargs['top_p']
-    if 'top_k' in kwargs:
-      config['top_k'] = kwargs['top_k']
-
-    # Use parallel processing for batches larger than 1
-    if len(batch_prompts) > 1 and self.max_workers > 1:
-      with concurrent.futures.ThreadPoolExecutor(
-          max_workers=min(self.max_workers, len(batch_prompts))
-      ) as executor:
-        future_to_index = {
-            executor.submit(
-                self._process_single_prompt, prompt, config.copy()
-            ): i
-            for i, prompt in enumerate(batch_prompts)
-        }
-
-        results: list[ScoredOutput | None] = [None] * len(batch_prompts)
-        for future in concurrent.futures.as_completed(future_to_index):
-          index = future_to_index[future]
-          try:
-            results[index] = future.result()
-          except Exception as e:
-            raise InferenceOutputError(
-                f'Parallel inference error: {str(e)}'
-            ) from e
-
-        for result in results:
-          if result is None:
-            raise InferenceOutputError('Failed to process one or more prompts')
-          yield [result]
-    else:
-      # Sequential processing for single prompt or worker
-      for prompt in batch_prompts:
-        result = self._process_single_prompt(prompt, config.copy())
-        yield [result]
+    """Delegate to new provider."""
+    return self._impl.infer(batch_prompts, **kwargs)
 
   def parse_output(self, output: str) -> Any:
-    """Parses Gemini output as JSON or YAML.
+    """Delegate to new provider."""
+    return self._impl.parse_output(output)
 
-    Note: This expects raw JSON/YAML without code fences.
-    Code fence extraction is handled by resolver.py.
-    """
+
+@deprecated(
+    'Use langextract.providers.openai.OpenAILanguageModel instead. '
+    'Will be removed in v2.0.0.'
+)
+class OpenAILanguageModel(BaseLanguageModel):  # pylint: disable=too-many-instance-attributes
+  """Language model inference using OpenAI's API with structured output.
+
+  DEPRECATED: Use langextract.providers.openai.OpenAILanguageModel instead.
+  This class is kept for backward compatibility only.
+  """
+
+  def __init__(self, **kwargs):
+    """Initialize the OpenAI language model (deprecated)."""
+    logging.warning(
+        'OpenAILanguageModel from langextract.inference is deprecated. '
+        'Use langextract.providers.openai.OpenAILanguageModel instead.'
+    )
+
+    # pylint: disable=import-outside-toplevel
+    from langextract.providers import openai  # Avoid circular import
+
     try:
-      if self.format_type == data.FormatType.JSON:
-        return json.loads(output)
-      else:
-        return yaml.safe_load(output)
-    except Exception as e:
+      self._impl = openai.OpenAILanguageModel(**kwargs)
+    except exceptions.InferenceConfigError as e:
+      # Convert to ValueError for backward compatibility
       raise ValueError(
-          f'Failed to parse output as {self.format_type.name}: {str(e)}'
+          str(e).replace(
+              'API key not provided for OpenAI.', 'API key not provided.'
+          )
       ) from e
+    self.model_id = self._impl.model_id
+    self.api_key = self._impl.api_key
+    self.base_url = self._impl.base_url
+    self.organization = self._impl.organization
+    self.format_type = self._impl.format_type
+    self.temperature = self._impl.temperature
+    self.max_workers = self._impl.max_workers
+    self._client = self._impl._client
 
+    self._process_single_prompt = (
+        self._impl._process_single_prompt
+    )  # For test compatibility
 
-@dataclasses.dataclass(init=False)
-class OpenAILanguageModel(BaseLanguageModel):
-  """Language model inference using OpenAI's API with structured output."""
-
-  model_id: str = 'gpt-4o-mini'
-  api_key: str | None = None
-  base_url: str | None = None
-  organization: str | None = None
-  format_type: data.FormatType = data.FormatType.JSON
-  temperature: float = 0.0
-  max_workers: int = 10
-  _client: openai.OpenAI | None = dataclasses.field(
-      default=None, repr=False, compare=False
-  )
-  _extra_kwargs: dict[str, Any] = dataclasses.field(
-      default_factory=dict, repr=False, compare=False
-  )
-
-  def __init__(
-      self,
-      model_id: str = 'gpt-4o-mini',
-      api_key: str | None = None,
-      base_url: str | None = None,
-      organization: str | None = None,
-      format_type: data.FormatType = data.FormatType.JSON,
-      temperature: float = 0.0,
-      max_workers: int = 10,
-      **kwargs,
-  ) -> None:
-    """Initialize the OpenAI language model.
-
-    Args:
-      model_id: The OpenAI model ID to use (e.g., 'gpt-4o-mini', 'gpt-4o').
-      api_key: API key for OpenAI service.
-      base_url: Optional base URL for OpenAI API (e.g., "https://api.openai.com/v1" for OpenAI, "https://api.anthropic.com/v1/" for Claude).
-      organization: Optional OpenAI organization ID.
-      format_type: Output format (JSON or YAML).
-      temperature: Sampling temperature.
-      max_workers: Maximum number of parallel API calls.
-      **kwargs: Ignored extra parameters so callers can pass a superset of
-        arguments shared across back-ends without raising ``TypeError``.
-    """
-    self.model_id = model_id
-    self.api_key = api_key
-    self.base_url = base_url
-    self.organization = organization
-    self.format_type = format_type
-    self.temperature = temperature
-    self.max_workers = max_workers
-    self.base_url = base_url
-    self._extra_kwargs = kwargs or {}
-
-    if not self.api_key:
-      raise ValueError('API key not provided.')
-
-    # Initialize the OpenAI client
-    self._client = openai.OpenAI(
-        api_key=self.api_key,
-        organization=self.organization,
-        base_url=self.base_url,
-    )
-
-    super().__init__(
-        constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)
-    )
-
-  def _process_single_prompt(self, prompt: str, config: dict) -> ScoredOutput:
-    """Process a single prompt and return a ScoredOutput."""
-    try:
-      # Prepare the system message for structured output
-      system_message = ''
-      if self.format_type == data.FormatType.JSON:
-        system_message = (
-            'You are a helpful assistant that responds in JSON format.'
-        )
-      elif self.format_type == data.FormatType.YAML:
-        system_message = (
-            'You are a helpful assistant that responds in YAML format.'
-        )
-
-      # Create the chat completion using the v1.x client API
-      response = self._client.chat.completions.create(
-          model=self.model_id,
-          messages=[
-              {'role': 'system', 'content': system_message},
-              {'role': 'user', 'content': prompt},
-          ],
-          temperature=config.get('temperature', self.temperature),
-          max_tokens=config.get('max_output_tokens'),
-          top_p=config.get('top_p'),
-          n=1,
-      )
-
-      # Extract the response text using the v1.x response format
-      output_text = response.choices[0].message.content
-
-      return ScoredOutput(score=1.0, output=output_text)
-
-    except Exception as e:
-      raise InferenceOutputError(f'OpenAI API error: {str(e)}') from e
+    super().__init__(constraint=self._impl._constraint)
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
   ) -> Iterator[Sequence[ScoredOutput]]:
-    """Runs inference on a list of prompts via OpenAI's API.
-
-    Args:
-      batch_prompts: A list of string prompts.
-      **kwargs: Additional generation params (temperature, top_p, etc.)
-
-    Yields:
-      Lists of ScoredOutputs.
-    """
-    config = {
-        'temperature': kwargs.get('temperature', self.temperature),
-    }
-    if 'max_output_tokens' in kwargs:
-      config['max_output_tokens'] = kwargs['max_output_tokens']
-    if 'top_p' in kwargs:
-      config['top_p'] = kwargs['top_p']
-
-    # Use parallel processing for batches larger than 1
-    if len(batch_prompts) > 1 and self.max_workers > 1:
-      with concurrent.futures.ThreadPoolExecutor(
-          max_workers=min(self.max_workers, len(batch_prompts))
-      ) as executor:
-        future_to_index = {
-            executor.submit(
-                self._process_single_prompt, prompt, config.copy()
-            ): i
-            for i, prompt in enumerate(batch_prompts)
-        }
-
-        results: list[ScoredOutput | None] = [None] * len(batch_prompts)
-        for future in concurrent.futures.as_completed(future_to_index):
-          index = future_to_index[future]
-          try:
-            results[index] = future.result()
-          except Exception as e:
-            raise InferenceOutputError(
-                f'Parallel inference error: {str(e)}'
-            ) from e
-
-        for result in results:
-          if result is None:
-            raise InferenceOutputError('Failed to process one or more prompts')
-          yield [result]
-    else:
-      # Sequential processing for single prompt or worker
-      for prompt in batch_prompts:
-        result = self._process_single_prompt(prompt, config.copy())
-        yield [result]
+    """Delegate to new provider."""
+    return self._impl.infer(batch_prompts, **kwargs)
 
   def parse_output(self, output: str) -> Any:
-    """Parses OpenAI output as JSON or YAML.
-
-    Note: This expects raw JSON/YAML without code fences.
-    Code fence extraction is handled by resolver.py.
-    """
-    try:
-      if self.format_type == data.FormatType.JSON:
-        return json.loads(output)
-      else:
-        return yaml.safe_load(output)
-    except Exception as e:
-      raise ValueError(
-          f'Failed to parse output as {self.format_type.name}: {str(e)}'
-      ) from e
+    """Delegate to new provider."""
+    return self._impl.parse_output(output)

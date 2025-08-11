@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-import os
 from typing import Any, cast, Type, TypeVar
 import warnings
 
@@ -26,9 +25,11 @@ import dotenv
 from langextract import annotation
 from langextract import data
 from langextract import exceptions
+from langextract import factory
 from langextract import inference
 from langextract import io
 from langextract import prompting
+from langextract import providers
 from langextract import resolver
 from langextract import schema
 from langextract import visualization
@@ -39,9 +40,11 @@ __all__ = [
     "annotation",
     "data",
     "exceptions",
+    "factory",
     "inference",
     "io",
     "prompting",
+    "providers",
     "resolver",
     "schema",
     "visualization",
@@ -53,6 +56,10 @@ LanguageModelT = TypeVar("LanguageModelT", bound=inference.BaseLanguageModel)
 visualize = visualization.visualize
 
 # Load environment variables from .env file
+# NOTE: This behavior will be changed to opt-in in v2.0.0
+# Libraries typically should not auto-load .env files, but this is kept
+# for backward compatibility. Users can set environment variables directly
+# or use python-dotenv explicitly in their own code.
 dotenv.load_dotenv()
 
 
@@ -191,23 +198,24 @@ def extract(
   ):
     model_schema = schema.GeminiSchema.from_examples(prompt_template.examples)
 
-  if not api_key:
-    api_key = os.environ.get("LANGEXTRACT_API_KEY")
+  # Handle backward compatibility for language_model_type parameter
+  if language_model_type != inference.GeminiLanguageModel:
+    warnings.warn(
+        "The 'language_model_type' parameter is deprecated and will be removed"
+        " in a future version. The provider is now automatically selected based"
+        " on the model_id.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
-    # Currently only Gemini is supported
-    if not api_key and language_model_type == inference.GeminiLanguageModel:
-      raise ValueError(
-          "API key must be provided for cloud-hosted models via the api_key"
-          " parameter or the LANGEXTRACT_API_KEY environment variable"
-      )
-
+  # Use factory to create the language model
   base_lm_kwargs: dict[str, Any] = {
       "api_key": api_key,
-      "model_id": model_id,
       "gemini_schema": model_schema,
       "format_type": format_type,
       "temperature": temperature,
       "model_url": model_url,
+      "base_url": model_url,  # Support both parameter names for Ollama
       "constraint": schema_constraint,
       "max_workers": max_workers,
   }
@@ -215,9 +223,15 @@ def extract(
   # Merge user-provided params which have precedence over defaults.
   base_lm_kwargs.update(language_model_params or {})
 
+  # Filter out None values
   filtered_kwargs = {k: v for k, v in base_lm_kwargs.items() if v is not None}
 
-  language_model = language_model_type(**filtered_kwargs)
+  # Create model using factory
+  # Providers are loaded lazily by the registry on first resolve
+  config = factory.ModelConfig(
+      model_id=model_id, provider_kwargs=filtered_kwargs
+  )
+  language_model = factory.create_model(config)
 
   resolver_defaults = {
       "fence_output": fence_output,

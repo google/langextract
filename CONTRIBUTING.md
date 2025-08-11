@@ -105,7 +105,14 @@ For full testing across Python versions:
 tox  # runs pylint + pytest on Python 3.10 and 3.11
 ```
 
-### 5. Submit Your Pull Request
+### 5. Adding Custom Model Providers
+
+If you want to add support for a new LLM provider, please refer to the [Provider System Documentation](langextract/providers/README.md). The recommended approach is to create an external plugin package rather than modifying the core library. This allows for:
+- Independent versioning and releases
+- Faster iteration without core review cycles
+- Custom dependencies without affecting core users
+
+### 6. Submit Your Pull Request
 
 All submissions, including submissions by project members, require review. We
 use [GitHub pull requests](https://docs.github.com/articles/about-pull-requests)

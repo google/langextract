@@ -23,7 +23,7 @@ from langextract import inference
 
 class TestOllamaLanguageModel(absltest.TestCase):
 
-  @mock.patch.object(inference.OllamaLanguageModel, "_ollama_query")
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
   def test_ollama_infer(self, mock_ollama_query):
 
     # Actuall full gemma2 response using Ollama.
@@ -131,6 +131,7 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
     results = list(model.infer(batch_prompts))
 
     # Verify API was called correctly
+    # Note: The new implementation adds a system message for JSON format
     mock_client.chat.completions.create.assert_called_once_with(
         model="gpt-4o-mini",
         messages=[

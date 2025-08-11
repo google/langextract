@@ -83,6 +83,8 @@ def extract(
     debug: bool = True,
     model_url: str | None = None,
     extraction_passes: int = 1,
+    config: factory.ModelConfig | None = None,
+    model: inference.BaseLanguageModel | None = None,
 ) -> data.AnnotatedDocument | Iterable[data.AnnotatedDocument]:
   """Extracts structured information from text.
 
@@ -106,6 +108,7 @@ def extract(
         monitor usage with small test runs to estimate costs.
       model_id: The model ID to use for extraction.
       language_model_type: The type of language model to use for inference.
+        DEPRECATED in favor of `model_id`, `config` and `model`.
       format_type: The format type for the output (JSON or YAML).
       max_char_buffer: Max number of characters for inference.
       temperature: The sampling temperature for generation. Higher values (e.g.,
@@ -146,6 +149,10 @@ def extract(
         for overlaps). WARNING: Each additional pass reprocesses tokens,
         potentially increasing API costs. For example, extraction_passes=3
         reprocesses tokens 3x.
+      config: Model configuration to use for extraction (favored over
+        `model_id` and `language_model_type`.)
+      model: Model to use for extraction (favored over `config`, `model_id` and
+        `language_model_type`.)
 
   Returns:
       An AnnotatedDocument with the extracted information when input is a
@@ -187,51 +194,53 @@ def extract(
   )
   prompt_template.examples.extend(examples)
 
-  # Generate schema constraints if enabled
-  model_schema = None
-  schema_constraint = None
-
-  # TODO: Unify schema generation.
-  if (
-      use_schema_constraints
-      and language_model_type == inference.GeminiLanguageModel
-  ):
-    model_schema = schema.GeminiSchema.from_examples(prompt_template.examples)
-
   # Handle backward compatibility for language_model_type parameter
   if language_model_type != inference.GeminiLanguageModel:
     warnings.warn(
         "The 'language_model_type' parameter is deprecated and will be removed"
         " in a future version. The provider is now automatically selected based"
-        " on the model_id.",
+        " on the 'model_id' or by the 'config' and/or 'model' parameters.",
         DeprecationWarning,
         stacklevel=2,
     )
 
-  # Use factory to create the language model
-  base_lm_kwargs: dict[str, Any] = {
-      "api_key": api_key,
-      "gemini_schema": model_schema,
-      "format_type": format_type,
-      "temperature": temperature,
-      "model_url": model_url,
-      "base_url": model_url,  # Support both parameter names for Ollama
-      "constraint": schema_constraint,
-      "max_workers": max_workers,
-  }
+  if not model and not config:
+    # Generate schema constraints if enabled
+    model_schema = None
 
-  # Merge user-provided params which have precedence over defaults.
-  base_lm_kwargs.update(language_model_params or {})
+    # TODO: Unify schema generation.
+    if (
+        use_schema_constraints
+        and language_model_type == inference.GeminiLanguageModel
+    ):
+      model_schema = schema.GeminiSchema.from_examples(prompt_template.examples)
 
-  # Filter out None values
-  filtered_kwargs = {k: v for k, v in base_lm_kwargs.items() if v is not None}
+    # Use factory to create the language model
+    base_lm_kwargs: dict[str, Any] = {
+        "api_key": api_key,
+        "gemini_schema": model_schema,
+        "format_type": format_type,
+        "temperature": temperature,
+        "model_url": model_url,
+        "base_url": model_url,  # Support both parameter names for Ollama
+        "max_workers": max_workers,
+    }
 
-  # Create model using factory
-  # Providers are loaded lazily by the registry on first resolve
-  config = factory.ModelConfig(
-      model_id=model_id, provider_kwargs=filtered_kwargs
-  )
-  language_model = factory.create_model(config)
+    # Merge user-provided params which have precedence over defaults.
+    base_lm_kwargs.update(language_model_params or {})
+
+    # Filter out None values
+    filtered_kwargs = {k: v for k, v in base_lm_kwargs.items() if v is not None}
+
+    # Create model using factory
+    # Providers are loaded lazily by the registry on first resolve
+    config = factory.ModelConfig(
+        model_id=model_id, provider_kwargs=filtered_kwargs
+    )
+
+  if not model:
+    assert config, "Could not determine model configuration"
+    model = factory.create_model(config)
 
   resolver_defaults = {
       "fence_output": fence_output,
@@ -244,7 +253,7 @@ def extract(
   res = resolver.Resolver(**resolver_defaults)
 
   annotator = annotation.Annotator(
-      language_model=language_model,
+      language_model=model,
       prompt_template=prompt_template,
       format_type=format_type,
       fence_output=fence_output,

@@ -24,7 +24,6 @@ from langextract import inference
 from langextract import prompting
 from langextract import schema
 import langextract as lx
-from langextract.providers import gemini
 
 
 class InitTest(absltest.TestCase):

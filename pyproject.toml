@@ -71,7 +71,7 @@ notebook = [
 ]
 
 [tool.setuptools]
-packages = ["langextract", "langextract.providers"]
+packages = ["langextract", "langextract.providers", "langextract.providers.schemas"]
 include-package-data = false
 
 [tool.setuptools.exclude-package-data]

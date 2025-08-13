@@ -117,6 +117,7 @@ class AbstractResolver(abc.ABC):
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       accept_match_lesser: bool = True,
+      **kwargs,
   ) -> Iterator[data.Extraction]:
     """Aligns extractions with source text, setting token/char intervals and alignment status.
 
@@ -143,6 +144,7 @@ class AbstractResolver(abc.ABC):
         (0-1).
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
         status).
+      **kwargs: Additional keyword arguments for provider-specific alignment.
 
     Yields:
       Aligned extractions with updated token intervals and alignment status.
@@ -245,6 +247,7 @@ class Resolver(AbstractResolver):
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       accept_match_lesser: bool = True,
+      **kwargs,
   ) -> Iterator[data.Extraction]:
     """Aligns annotated extractions with source text.
 
@@ -264,6 +267,7 @@ class Resolver(AbstractResolver):
         alignment.
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
         status).
+      **kwargs: Additional parameters.
 
     Yields:
         Iterator on aligned extractions.

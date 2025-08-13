@@ -19,6 +19,8 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Iterator, Sequence
 
+from langextract_provider_example import schema as custom_schema
+
 import langextract as lx
 
 
@@ -30,9 +32,9 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
   """Example custom LangExtract provider implementation.
 
   This demonstrates how to create a custom provider for LangExtract
-  that can intercept and handle model requests. This example uses
-  Gemini as the backend, but you would replace this with your own
-  API or model implementation.
+  that can intercept and handle model requests. This example wraps
+  the actual Gemini API to show how custom schemas integrate, but you
+  would replace the Gemini calls with your own API or model implementation.
 
   Note: Since this registers the same pattern as the default Gemini provider,
   you must explicitly specify this provider when creating a model:
@@ -47,6 +49,8 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
   model_id: str
   api_key: str | None
   temperature: float
+  response_schema: dict[str, Any] | None = None
+  enable_structured_output: bool = False
   _client: Any = dataclasses.field(repr=False, compare=False)
 
   def __init__(
@@ -77,6 +81,12 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
     self.api_key = api_key
     self.temperature = temperature
 
+    # Schema kwargs from CustomProviderSchema.to_provider_config()
+    self.response_schema = kwargs.get('response_schema')
+    self.enable_structured_output = kwargs.get(
+        'enable_structured_output', False
+    )
+
     # Store any additional kwargs for potential use
     self._extra_kwargs = kwargs
 
@@ -88,6 +98,18 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
     self._client = genai.Client(api_key=self.api_key)
 
     super().__init__()
+
+  @classmethod
+  def get_schema_class(cls) -> type[lx.schema.BaseSchema] | None:
+    """Return our custom schema class.
+
+    This allows LangExtract to use our custom schema implementation
+    when use_schema_constraints=True is specified.
+
+    Returns:
+      Our custom schema class that will be used to generate constraints.
+    """
+    return custom_schema.CustomProviderSchema
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs: Any
@@ -109,6 +131,13 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
     for key in ['max_output_tokens', 'top_p', 'top_k']:
       if key in kwargs:
         config[key] = kwargs[key]
+
+    # Apply schema constraints if configured
+    if self.response_schema and self.enable_structured_output:
+      # For Gemini, this ensures the model outputs JSON matching our schema
+      # Adapt this section based on your actual provider's API requirements
+      config['response_schema'] = self.response_schema
+      config['response_mime_type'] = 'application/json'
 
     for prompt in batch_prompts:
       try:

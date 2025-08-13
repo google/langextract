@@ -12,7 +12,8 @@ custom_provider_plugin/
 ├── README.md                            # This file
 ├── langextract_provider_example/        # Package directory
 │   ├── __init__.py                     # Package initialization
-│   └── provider.py                     # Custom provider implementation
+│   ├── provider.py                     # Custom provider implementation
+│   └── schema.py                       # Custom schema implementation (optional)
 └── test_example_provider.py            # Test script
 ```
 
@@ -40,6 +41,51 @@ custom_gemini = "langextract_provider_example:CustomGeminiProvider"
 ```
 
 This entry point allows LangExtract to automatically discover your provider.
+
+### Custom Schema Support (`schema.py`)
+
+Providers can optionally implement custom schemas for structured output:
+
+**Flow:** Examples → `from_examples()` → `to_provider_config()` → Provider kwargs → Inference
+
+```python
+class CustomProviderSchema(lx.schema.BaseSchema):
+    @classmethod
+    def from_examples(cls, examples_data, attribute_suffix="_attributes"):
+        # Analyze examples to find patterns
+        # Build schema based on extraction classes and attributes seen
+        return cls(schema_dict)
+
+    def to_provider_config(self):
+        # Convert schema to provider kwargs
+        return {
+            "response_schema": self._schema_dict,
+            "enable_structured_output": True
+        }
+
+    @property
+    def supports_strict_mode(self):
+        # True = valid JSON output, no markdown fences needed
+        return True
+```
+
+Then in your provider:
+
+```python
+class CustomProvider(lx.inference.BaseLanguageModel):
+    @classmethod
+    def get_schema_class(cls):
+        return CustomProviderSchema  # Tell LangExtract about your schema
+
+    def __init__(self, **kwargs):
+        # Receive schema config in kwargs when use_schema_constraints=True
+        self.response_schema = kwargs.get('response_schema')
+
+    def infer(self, batch_prompts, **kwargs):
+        # Use schema during API calls
+        if self.response_schema:
+            config['response_schema'] = self.response_schema
+```
 
 ## Installation
 

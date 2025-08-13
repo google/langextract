@@ -47,6 +47,26 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
       default_factory=dict, repr=False, compare=False
   )
 
+  @classmethod
+  def get_schema_class(cls) -> type[schema.BaseSchema] | None:
+    """Return the GeminiSchema class for structured output support.
+
+    Returns:
+      The GeminiSchema class that supports strict schema constraints.
+    """
+    return schema.GeminiSchema
+
+  def apply_schema(self, schema_instance: schema.BaseSchema | None) -> None:
+    """Apply a schema instance to this provider.
+
+    Args:
+      schema_instance: The schema instance to apply, or None to clear.
+    """
+    super().apply_schema(schema_instance)
+    # Keep provider behavior consistent with legacy path
+    if isinstance(schema_instance, schema.GeminiSchema):
+      self.gemini_schema = schema_instance
+
   def __init__(
       self,
       model_id: str = 'gemini-2.5-flash',
@@ -69,8 +89,10 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
       max_workers: Maximum number of parallel API calls.
       fence_output: Whether to wrap output in markdown fences (ignored,
         Gemini handles this based on schema).
-      **kwargs: Ignored extra parameters so callers can pass a superset of
-        arguments shared across back-ends without raising ``TypeError``.
+      **kwargs: Additional Gemini API parameters. Only allowlisted keys are
+        forwarded to the API (response_schema, response_mime_type, tools,
+        safety_settings, stop_sequences, candidate_count, system_instruction).
+        See https://ai.google.dev/api/generate-content for details.
     """
     try:
       # pylint: disable=import-outside-toplevel
@@ -86,10 +108,19 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
-    self.fence_output = (
-        fence_output  # Store but may not use depending on schema
-    )
-    self._extra_kwargs = kwargs or {}
+    self.fence_output = fence_output
+    api_config_keys = {
+        'response_schema',
+        'response_mime_type',
+        'tools',
+        'safety_settings',
+        'stop_sequences',
+        'candidate_count',
+        'system_instruction',
+    }
+    self._extra_kwargs = {
+        k: v for k, v in (kwargs or {}).items() if k in api_config_keys
+    }
 
     if not self.api_key:
       raise exceptions.InferenceConfigError('API key not provided for Gemini.')
@@ -105,15 +136,17 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
   ) -> inference.ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
     try:
+      if self._extra_kwargs:
+        config.update(self._extra_kwargs)
       if self.gemini_schema:
-        response_schema = self.gemini_schema.schema_dict
-        mime_type = (
-            'application/json'
-            if self.format_type == data.FormatType.JSON
-            else 'application/yaml'
-        )
-        config['response_mime_type'] = mime_type
-        config['response_schema'] = response_schema
+        # Gemini structured output only supports JSON
+        if self.format_type != data.FormatType.JSON:
+          raise exceptions.InferenceConfigError(
+              'Gemini structured output only supports JSON format. '
+              'Set format_type=JSON or use_schema_constraints=False.'
+          )
+        config.setdefault('response_mime_type', 'application/json')
+        config.setdefault('response_schema', self.gemini_schema.schema_dict)
 
       response = self._client.models.generate_content(
           model=self.model_id, contents=prompt, config=config  # type: ignore[arg-type]

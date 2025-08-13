@@ -37,7 +37,6 @@ class InitTest(absltest.TestCase):
 
     input_text = "Patient takes Aspirin 100mg every morning."
 
-    # Create a mock model instance
     mock_model = mock.MagicMock()
     mock_model.infer.return_value = [[
         inference.ScoredOutput(
@@ -65,10 +64,10 @@ class InitTest(absltest.TestCase):
         )
     ]]
 
-    # Make factory return our mock model
+    mock_model.requires_fence_output = True
     mock_create_model.return_value = mock_model
 
-    mock_gemini_schema.return_value = None  # No live endpoint to process schema
+    mock_gemini_schema.return_value = None
 
     expected_result = data.AnnotatedDocument(
         document_id=None,
@@ -137,9 +136,56 @@ class InitTest(absltest.TestCase):
     mock_create_model.assert_called_once()
     mock_model.infer.assert_called_once_with(
         batch_prompts=[prompt_generator.render(input_text)],
+        max_workers=10,  # Default value from extract()
     )
 
     self.assertDataclassEqual(expected_result, actual_result)
+
+  @mock.patch.object(schema.GeminiSchema, "from_examples", autospec=True)
+  @mock.patch("langextract.factory.create_model")
+  def test_extract_custom_params_reach_inference(
+      self, mock_create_model, mock_gemini_schema
+  ):
+    """Sanity check that custom parameters reach the inference layer."""
+    input_text = "Test text"
+
+    mock_model = mock.MagicMock()
+    mock_model.infer.return_value = [[
+        inference.ScoredOutput(
+            output='```json\n{"extractions": []}\n```',
+            score=0.9,
+        )
+    ]]
+
+    mock_model.requires_fence_output = True
+    mock_create_model.return_value = mock_model
+    mock_gemini_schema.return_value = None
+
+    mock_examples = [
+        lx.data.ExampleData(
+            text="Example",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="test",
+                    extraction_text="example",
+                ),
+            ],
+        )
+    ]
+
+    lx.extract(
+        text_or_documents=input_text,
+        prompt_description="Test extraction",
+        examples=mock_examples,
+        api_key="test_key",
+        max_workers=5,
+        fence_output=True,
+        use_schema_constraints=False,
+    )
+
+    mock_model.infer.assert_called_once()
+    _, kwargs = mock_model.infer.call_args
+    self.assertEqual(kwargs.get("max_workers"), 5)
 
 
 if __name__ == "__main__":

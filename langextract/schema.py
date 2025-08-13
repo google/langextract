@@ -24,6 +24,8 @@ from typing import Any
 
 from langextract import data
 
+EXTRACTIONS_KEY = "extractions"  # Shared key for extraction arrays in JSON/YAML
+
 
 class ConstraintType(enum.Enum):
   """Enumeration of constraint types."""
@@ -31,7 +33,7 @@ class ConstraintType(enum.Enum):
   NONE = "none"
 
 
-# TODO: Remove and decouple Constraint and ConstraintType from Schema class.
+# TODO(v2.0.0): Remove and decouple Constraint and ConstraintType from Schema class.
 @dataclasses.dataclass
 class Constraint:
   """Represents a constraint for model output decoding.
@@ -41,9 +43,6 @@ class Constraint:
   """
 
   constraint_type: ConstraintType = ConstraintType.NONE
-
-
-EXTRACTIONS_KEY = "extractions"
 
 
 class BaseSchema(abc.ABC):
@@ -58,101 +57,115 @@ class BaseSchema(abc.ABC):
   ) -> BaseSchema:
     """Factory method to build a schema instance from example data."""
 
+  @abc.abstractmethod
+  def to_provider_config(self) -> dict[str, Any]:
+    """Convert schema to provider-specific configuration.
 
-@dataclasses.dataclass
-class GeminiSchema(BaseSchema):
-  """Schema implementation for Gemini structured output.
-
-  Converts ExampleData objects into an OpenAPI/JSON-schema definition
-  that Gemini can interpret via 'response_schema'.
-  """
-
-  _schema_dict: dict
+    Returns:
+      Dictionary of provider kwargs (e.g., response_schema for Gemini).
+      Should be a pure data mapping with no side effects.
+    """
 
   @property
-  def schema_dict(self) -> dict:
-    """Returns the schema dictionary."""
-    return self._schema_dict
+  @abc.abstractmethod
+  def supports_strict_mode(self) -> bool:
+    """Whether the provider emits valid output without needing Markdown fences.
 
-  @schema_dict.setter
-  def schema_dict(self, schema_dict: dict) -> None:
-    """Sets the schema dictionary."""
-    self._schema_dict = schema_dict
+    Returns:
+      True when the provider will emit syntactically valid JSON (or other
+      machine-parseable format) without needing Markdown fences. This says
+      nothing about attribute-level schema enforcement. False otherwise.
+    """
+
+  def sync_with_provider_kwargs(self, kwargs: dict[str, Any]) -> None:
+    """Hook to update schema state based on provider kwargs.
+
+    This allows schemas to adjust their behavior based on caller overrides.
+    For example, FormatModeSchema uses this to sync its format when the caller
+    overrides it, ensuring supports_strict_mode stays accurate.
+
+    Default implementation does nothing. Override if your schema needs to
+    respond to provider kwargs.
+
+    Args:
+      kwargs: The effective provider kwargs after merging.
+    """
+
+
+class FormatModeSchema(BaseSchema):
+  """Generic schema for providers that support format modes (JSON/YAML).
+
+  This schema doesn't enforce structure, only output format. Useful for
+  providers that can guarantee syntactically valid JSON or YAML but don't
+  support field-level constraints.
+  """
+
+  def __init__(self, format_mode: str = "json"):
+    """Initialize with a format mode.
+
+    Args:
+      format_mode: The output format ("json", "yaml", etc.).
+    """
+    self._format = format_mode
 
   @classmethod
   def from_examples(
       cls,
       examples_data: Sequence[data.ExampleData],
       attribute_suffix: str = "_attributes",
-  ) -> GeminiSchema:
-    """Creates a GeminiSchema from example extractions.
+  ) -> FormatModeSchema:
+    """Create a FormatModeSchema instance.
 
-    Builds a JSON-based schema with a top-level "extractions" array. Each
-    element in that array is an object containing the extraction class name
-    and an accompanying "<class>_attributes" object for its attributes.
+    Since format mode doesn't use examples for constraints, this
+    simply returns a JSON-mode instance.
 
     Args:
-      examples_data: A sequence of ExampleData objects containing extraction
-        classes and attributes.
-      attribute_suffix: String appended to each class name to form the
-        attributes field name (defaults to "_attributes").
+      examples_data: Ignored (kept for interface compatibility).
+      attribute_suffix: Ignored (kept for interface compatibility).
 
     Returns:
-      A GeminiSchema with internal dictionary represents the JSON constraint.
+      A FormatModeSchema configured for JSON output.
     """
-    # Track attribute types for each category
-    extraction_categories: dict[str, dict[str, set[type]]] = {}
-    for example in examples_data:
-      for extraction in example.extractions:
-        category = extraction.extraction_class
-        if category not in extraction_categories:
-          extraction_categories[category] = {}
+    return cls(format_mode="json")
 
-        if extraction.attributes:
-          for attr_name, attr_value in extraction.attributes.items():
-            if attr_name not in extraction_categories[category]:
-              extraction_categories[category][attr_name] = set()
-            extraction_categories[category][attr_name].add(type(attr_value))
+  def to_provider_config(self) -> dict[str, Any]:
+    """Convert to provider configuration.
 
-    extraction_properties: dict[str, dict[str, Any]] = {}
+    Returns:
+      Dictionary with format parameter.
+    """
+    return {"format": self._format}
 
-    for category, attrs in extraction_categories.items():
-      extraction_properties[category] = {"type": "string"}
+  @property
+  def supports_strict_mode(self) -> bool:
+    """Whether the format guarantees valid output without fences.
 
-      attributes_field = f"{category}{attribute_suffix}"
-      attr_properties = {}
+    Returns:
+      True for JSON (guaranteed valid syntax), False for YAML/others.
+    """
+    return self._format == "json"
 
-      # If no attributes were found for this category, add a default property.
-      if not attrs:
-        attr_properties["_unused"] = {"type": "string"}
-      else:
-        for attr_name, attr_types in attrs.items():
-          # If we see list type, use array of strings
-          if list in attr_types:
-            attr_properties[attr_name] = {
-                "type": "array",
-                "items": {"type": "string"},
-            }
-          else:
-            attr_properties[attr_name] = {"type": "string"}
+  def sync_with_provider_kwargs(self, kwargs: dict[str, Any]) -> None:
+    """Update format based on provider kwargs.
 
-      extraction_properties[attributes_field] = {
-          "type": "object",
-          "properties": attr_properties,
-          "nullable": True,
-      }
+    Args:
+      kwargs: The effective provider kwargs after merging.
+    """
+    if "format" in kwargs:
+      self._format = kwargs["format"]
 
-    extraction_schema = {
-        "type": "object",
-        "properties": extraction_properties,
-    }
 
-    schema_dict = {
-        "type": "object",
-        "properties": {
-            EXTRACTIONS_KEY: {"type": "array", "items": extraction_schema}
-        },
-        "required": [EXTRACTIONS_KEY],
-    }
+# TODO(v2.0.0): Remove GeminiSchema re-export
+# pylint: disable=wrong-import-position,cyclic-import
+from langextract.providers.schemas import gemini as gemini_schema
 
-    return cls(_schema_dict=schema_dict)
+GeminiSchema = gemini_schema.GeminiSchema
+
+__all__ = [
+    "BaseSchema",
+    "FormatModeSchema",
+    "Constraint",
+    "ConstraintType",
+    "GeminiSchema",
+    "EXTRACTIONS_KEY",
+]

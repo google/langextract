@@ -199,7 +199,7 @@ from langextract import factory
 
 # Specify both model and provider (useful when multiple providers support same model)
 config = factory.ModelConfig(
-    model_id="llama3.2:1b",
+    model_id="gemma2:2b",
     provider="OllamaLanguageModel",  # Explicitly use Ollama
     provider_kwargs={
         "model_url": "http://localhost:11434"

@@ -56,12 +56,10 @@ class ProgressTest(unittest.TestCase):
 
   def test_model_info_extraction(self):
     """Test extracting model info from objects."""
-    # Test with model_id
     mock_model = mock.MagicMock()
     mock_model.model_id = "gemini-1.5-pro"
     self.assertEqual(progress.get_model_info(mock_model), "gemini-1.5-pro")
 
-    # Test with no attributes
     mock_model = mock.MagicMock()
     del mock_model.model_id
     del mock_model.model_url

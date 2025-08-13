@@ -17,6 +17,7 @@
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
+- [Adding Custom Model Providers](#adding-custom-model-providers)
 - [Using OpenAI Models](#using-openai-models)
 - [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
 - [More Examples](#more-examples)
@@ -253,6 +254,22 @@ result = lx.extract(
 )
 ```
 
+## Adding Custom Model Providers
+
+LangExtract supports custom LLM providers via a lightweight plugin system. You can add support for new models without changing core code.
+
+- Add new model support independently of the core library
+- Distribute your provider as a separate Python package
+- Keep custom dependencies isolated
+- Override or extend built-in providers via priority-based resolution
+
+See the detailed guide in [Provider System Documentation](langextract/providers/README.md) to learn how to:
+
+- Register a provider with `@registry.register(...)`
+- Publish an entry point for discovery
+- Optionally provide a schema with `get_schema_class()` for structured output
+- Integrate with the factory via `create_model(...)`
+
 ## Using OpenAI Models
 
 LangExtract supports OpenAI models (requires optional dependency: `pip install langextract[openai]`):
@@ -274,7 +291,6 @@ result = lx.extract(
 Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
 
 ## Using Local LLMs with Ollama
-
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:
 
 ```python
@@ -326,14 +342,7 @@ with development, testing, and pull requests. You must sign a
 [Contributor License Agreement](https://cla.developers.google.com/about)
 before submitting patches.
 
-### Adding Custom Model Providers
 
-LangExtract supports custom LLM providers through a plugin system. You can add support for new models by creating an external Python package that registers with LangExtract's provider registry. This allows you to:
-- Add new model support without modifying the core library
-- Distribute your provider independently
-- Maintain custom dependencies
-
-For detailed instructions, see the [Provider System Documentation](langextract/providers/README.md).
 
 ## Testing
 

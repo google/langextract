@@ -33,7 +33,6 @@ def main():
     print("Set GEMINI_API_KEY or LANGEXTRACT_API_KEY to test")
     return
 
-  # Create model using explicit provider selection
   config = lx.factory.ModelConfig(
       model_id="gemini-2.5-flash",
       provider="CustomGeminiProvider",

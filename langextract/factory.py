@@ -87,20 +87,42 @@ def _kwargs_with_environment_defaults(
   return resolved
 
 
-def create_model(config: ModelConfig) -> inference.BaseLanguageModel:
+def create_model(
+    config: ModelConfig,
+    examples: typing.Sequence[typing.Any] | None = None,
+    use_schema_constraints: bool = False,
+    fence_output: bool | None = None,
+    return_fence_output: bool = False,
+) -> inference.BaseLanguageModel | tuple[inference.BaseLanguageModel, bool]:
   """Create a language model instance from configuration.
 
   Args:
     config: Model configuration with optional model_id and/or provider.
+    examples: Optional examples for schema generation (if use_schema_constraints=True).
+    use_schema_constraints: Whether to apply schema constraints from examples.
+    fence_output: Explicit fence output preference. If None, computed from schema.
+    return_fence_output: If True, also return computed fence_output value.
 
   Returns:
     An instantiated language model provider.
+    If return_fence_output=True: Tuple of (model, model.requires_fence_output).
 
   Raises:
     ValueError: If neither model_id nor provider is specified.
     ValueError: If no provider is registered for the model_id.
     InferenceConfigError: If provider instantiation fails.
   """
+  if use_schema_constraints or fence_output is not None:
+    model = _create_model_with_schema(
+        config=config,
+        examples=examples,
+        use_schema_constraints=use_schema_constraints,
+        fence_output=fence_output,
+    )
+    if return_fence_output:
+      return model, model.requires_fence_output
+    return model
+
   if not config.model_id and not config.provider:
     raise ValueError("Either model_id or provider must be specified")
 
@@ -129,7 +151,10 @@ def create_model(config: ModelConfig) -> inference.BaseLanguageModel:
     kwargs["model_id"] = model_id
 
   try:
-    return provider_class(**kwargs)
+    model = provider_class(**kwargs)
+    if return_fence_output:
+      return model, model.requires_fence_output
+    return model
   except (ValueError, TypeError) as e:
     raise exceptions.InferenceConfigError(
         f"Failed to create provider {provider_class.__name__}: {e}"
@@ -155,3 +180,70 @@ def create_model_from_id(
       model_id=model_id, provider=provider, provider_kwargs=provider_kwargs
   )
   return create_model(config)
+
+
+def _create_model_with_schema(
+    config: ModelConfig,
+    examples: typing.Sequence[typing.Any] | None = None,
+    use_schema_constraints: bool = True,
+    fence_output: bool | None = None,
+) -> inference.BaseLanguageModel:
+  """Internal helper to create a model with optional schema constraints.
+
+  This function creates a language model and optionally configures it with
+  schema constraints derived from the provided examples. It also computes
+  appropriate fence defaulting based on the schema's capabilities.
+
+  Args:
+    config: Model configuration with model_id and/or provider.
+    examples: Optional sequence of ExampleData for schema generation.
+    use_schema_constraints: Whether to generate and apply schema constraints.
+    fence_output: Whether to wrap output in markdown fences. If None,
+      will be computed based on schema's supports_strict_mode.
+
+  Returns:
+    A model instance with fence_output configured appropriately.
+  """
+
+  if config.provider:
+    provider_class = registry.resolve_provider(config.provider)
+  else:
+    providers.load_builtins_once()
+    providers.load_plugins_once()
+    provider_class = registry.resolve(config.model_id)
+
+  schema_instance = None
+  if use_schema_constraints and examples:
+    schema_class = provider_class.get_schema_class()
+    if schema_class is not None:
+      schema_instance = schema_class.from_examples(examples)
+
+  if schema_instance:
+    kwargs = schema_instance.to_provider_config()
+    kwargs.update(config.provider_kwargs)
+  else:
+    kwargs = dict(config.provider_kwargs)
+
+  if schema_instance:
+    schema_instance.sync_with_provider_kwargs(kwargs)
+
+  # Add environment defaults
+  model_id = config.model_id
+  kwargs = _kwargs_with_environment_defaults(
+      model_id or config.provider or "", kwargs
+  )
+
+  if model_id:
+    kwargs["model_id"] = model_id
+
+  try:
+    model = provider_class(**kwargs)
+  except (ValueError, TypeError) as e:
+    raise exceptions.InferenceConfigError(
+        f"Failed to create provider {provider_class.__name__}: {e}"
+    ) from e
+
+  model.apply_schema(schema_instance)
+  model.set_fence_output(fence_output)
+
+  return model

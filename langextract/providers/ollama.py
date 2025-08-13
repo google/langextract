@@ -63,13 +63,22 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
       default_factory=dict, repr=False, compare=False
   )
 
+  @classmethod
+  def get_schema_class(cls) -> type[schema.BaseSchema] | None:
+    """Return the FormatModeSchema class for JSON output support.
+
+    Returns:
+      The FormatModeSchema class that enables JSON mode (non-strict).
+    """
+    return schema.FormatModeSchema
+
   def __init__(
       self,
       model_id: str,
       model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
-      base_url: str | None = None,  # Support both model_url and base_url
+      base_url: str | None = None,  # Alias for model_url
       format_type: data.FormatType | None = None,
-      structured_output_format: str | None = None,  # Deprecated parameter
+      structured_output_format: str | None = None,  # Deprecated
       constraint: schema.Constraint = schema.Constraint(),
       **kwargs,
   ) -> None:
@@ -89,9 +98,8 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
     # Handle deprecated structured_output_format parameter
     if structured_output_format is not None:
       warnings.warn(
-          "The 'structured_output_format' parameter is deprecated and will be"
-          " removed in v2.0.0. Use 'format_type' instead with"
-          ' data.FormatType.JSON or data.FormatType.YAML.',
+          "'structured_output_format' is deprecated and will be removed in "
+          "v2.0.0. Use 'format_type' instead.",
           DeprecationWarning,
           stacklevel=2,
       )
@@ -102,6 +110,12 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
             if structured_output_format == 'json'
             else data.FormatType.YAML
         )
+
+    fmt = kwargs.pop('format', None)
+    if format_type is None and fmt in ('json', 'yaml'):
+      format_type = (
+          data.FormatType.JSON if fmt == 'json' else data.FormatType.YAML
+      )
 
     # Default to JSON if neither parameter was provided
     if format_type is None:
@@ -161,6 +175,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
       keep_alive: int = 5 * 60,
       num_threads: int | None = None,
       num_ctx: int = 2048,
+      **kwargs,  # pylint: disable=unused-argument
   ) -> Mapping[str, Any]:
     """Sends a prompt to an Ollama model and returns the generated response.
 
@@ -263,8 +278,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
       return response.json()
     if response.status_code == 404:
       raise exceptions.InferenceConfigError(
-          f"Can't find Ollama {model}. Try launching `ollama run {model}`"
-          ' from command line.'
+          f"Can't find Ollama {model}. Try: ollama run {model}"
       )
     else:
       msg = f'Bad status code from Ollama: {response.status_code}'

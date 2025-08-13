@@ -134,12 +134,10 @@ class RegistryTest(absltest.TestCase):
     entries = registry.list_entries()
     self.assertEqual(len(entries), 2)
 
-    # Check first entry
     patterns1, priority1 = entries[0]
     self.assertEqual(patterns1, ["^test1"])
     self.assertEqual(priority1, 5)
 
-    # Check second entry
     patterns2, priority2 = entries[1]
     self.assertEqual(set(patterns2), {"^test2", "^test3"})
     self.assertEqual(priority2, 10)

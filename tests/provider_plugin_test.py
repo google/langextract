@@ -261,6 +261,105 @@ class PluginSmokeTest(absltest.TestCase):
     cls_by_partial = lx.providers.registry.resolve_provider("resolveme")
     self.assertEqual(cls_by_partial.__name__, "ResolveMePlease")
 
+  def test_plugin_with_custom_schema(self):
+    """Test that a plugin can provide its own schema implementation."""
+
+    class TestPluginSchema(lx.schema.BaseSchema):
+      """Test schema implementation."""
+
+      def __init__(self, config):
+        self._config = config
+
+      @classmethod
+      def from_examples(cls, examples_data, attribute_suffix="_attributes"):
+        return cls({"generated": True, "count": len(examples_data)})
+
+      def to_provider_config(self):
+        return {"custom_schema": self._config}
+
+      @property
+      def supports_strict_mode(self):
+        return True
+
+    def _ep_load():
+      @lx.providers.registry.register(r"^custom-schema-test")
+      class SchemaTestProvider(lx.inference.BaseLanguageModel):
+
+        def __init__(self, model_id=None, **kwargs):
+          super().__init__()
+          self.model_id = model_id
+          self.schema_config = kwargs.get("custom_schema")
+
+        @classmethod
+        def get_schema_class(cls):
+          return TestPluginSchema
+
+        def infer(self, batch_prompts, **kwargs):
+          output = (
+              f"Schema={self.schema_config}"
+              if self.schema_config
+              else "No schema"
+          )
+          return [[lx.inference.ScoredOutput(score=1.0, output=output)]]
+
+      return SchemaTestProvider
+
+    ep = types.SimpleNamespace(
+        name="schema_test",
+        group="langextract.providers",
+        value="test:SchemaTestProvider",
+        load=_ep_load,
+    )
+
+    with mock.patch.object(
+        metadata,
+        "entry_points",
+        side_effect=lambda **kw: [ep]
+        if kw.get("group") == "langextract.providers"
+        else [],
+    ):
+      lx.providers.load_plugins_once()
+
+    provider_cls = lx.providers.registry.resolve("custom-schema-test-v1")
+    self.assertEqual(
+        provider_cls.get_schema_class().__name__,
+        "TestPluginSchema",
+        "Plugin should provide custom schema class",
+    )
+
+    examples = [
+        lx.data.ExampleData(
+            text="Test",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="test",
+                    extraction_text="test text",
+                )
+            ],
+        )
+    ]
+
+    config = lx.factory.ModelConfig(model_id="custom-schema-test-v1")
+    model = lx.factory._create_model_with_schema(
+        config=config,
+        examples=examples,
+        use_schema_constraints=True,
+        fence_output=None,
+    )
+
+    self.assertIsNotNone(
+        model.schema_config,
+        "Model should have schema config applied",
+    )
+    self.assertTrue(
+        model.schema_config["generated"],
+        "Schema should be generated from examples",
+    )
+    self.assertFalse(
+        model.requires_fence_output,
+        "Schema supports strict mode, no fences needed",
+    )
+
 
 class PluginE2ETest(absltest.TestCase):
   """End-to-end test with actual pip installation.
@@ -268,6 +367,108 @@ class PluginE2ETest(absltest.TestCase):
   This test is expensive and only runs when explicitly requested
   via tox -e plugin-e2e or in CI when provider files change.
   """
+
+  def test_plugin_with_schema_e2e(self):
+    """Test that a plugin with custom schema works end-to-end with extract()."""
+
+    class TestPluginSchema(lx.schema.BaseSchema):
+      """Test schema implementation."""
+
+      def __init__(self, config):
+        self._config = config
+
+      @classmethod
+      def from_examples(cls, examples_data, attribute_suffix="_attributes"):
+        return cls({"generated": True, "count": len(examples_data)})
+
+      def to_provider_config(self):
+        return {"custom_schema": self._config}
+
+      @property
+      def supports_strict_mode(self):
+        return True
+
+    def _ep_load():
+      @lx.providers.registry.register(r"^e2e-schema-test")
+      class SchemaE2EProvider(lx.inference.BaseLanguageModel):
+
+        def __init__(self, model_id=None, **kwargs):
+          super().__init__()
+          self.model_id = model_id
+          self.schema_config = kwargs.get("custom_schema")
+
+        @classmethod
+        def get_schema_class(cls):
+          return TestPluginSchema
+
+        def infer(self, batch_prompts, **kwargs):
+          # Return a mock extraction that includes schema info
+          if self.schema_config:
+            output = (
+                '{"extractions": [{"entity": "test", '
+                '"entity_attributes": {"schema": "applied"}}]}'
+            )
+          else:
+            output = '{"extractions": []}'
+          return [[lx.inference.ScoredOutput(score=1.0, output=output)]]
+
+      return SchemaE2EProvider
+
+    ep = types.SimpleNamespace(
+        name="schema_e2e",
+        group="langextract.providers",
+        value="test:SchemaE2EProvider",
+        load=_ep_load,
+    )
+
+    # Clear and set up registry
+    lx.providers.registry.clear()
+    lx.providers._PLUGINS_LOADED = False
+    self.addCleanup(lx.providers.registry.clear)
+    self.addCleanup(setattr, lx.providers, "_PLUGINS_LOADED", False)
+
+    with mock.patch.object(
+        metadata,
+        "entry_points",
+        side_effect=lambda **kw: [ep]
+        if kw.get("group") == "langextract.providers"
+        else [],
+    ):
+      lx.providers.load_plugins_once()
+
+      # Test with extract() using schema constraints
+      examples = [
+          lx.data.ExampleData(
+              text="Find entities",
+              extractions=[
+                  lx.data.Extraction(
+                      extraction_class="entity",
+                      extraction_text="example",
+                      attributes={"type": "test"},
+                  )
+              ],
+          )
+      ]
+
+      result = lx.extract(
+          text_or_documents="Test text for extraction",
+          prompt_description="Extract entities",
+          examples=examples,
+          model_id="e2e-schema-test-v1",
+          use_schema_constraints=True,
+          fence_output=False,  # Schema supports strict mode
+      )
+
+      # Verify we got results
+      self.assertIsInstance(result, lx.data.AnnotatedDocument)
+      self.assertIsNotNone(result.extractions)
+      self.assertGreater(len(result.extractions), 0)
+
+      # Verify the schema was applied by checking the extraction
+      extraction = result.extractions[0]
+      self.assertEqual(extraction.extraction_class, "entity")
+      self.assertIn("schema", extraction.attributes)
+      self.assertEqual(extraction.attributes["schema"], "applied")
 
   @pytest.mark.requires_pip
   @pytest.mark.integration
@@ -294,16 +495,39 @@ class PluginE2ETest(absltest.TestCase):
 
         USED_BY_EXTRACT = False
 
+        class TestPipSchema(lx.schema.BaseSchema):
+            '''Test schema for pip provider.'''
+
+            def __init__(self, config):
+                self._config = config
+
+            @classmethod
+            def from_examples(cls, examples_data, attribute_suffix="_attributes"):
+                return cls({"pip_schema": True, "examples": len(examples_data)})
+
+            def to_provider_config(self):
+                return {"schema_config": self._config}
+
+            @property
+            def supports_strict_mode(self):
+                return True
+
         @lx.providers.registry.register(r'^test-pip-model', priority=50)
         class TestPipProvider(lx.inference.BaseLanguageModel):
             def __init__(self, model_id, **kwargs):
                 super().__init__()
                 self.model_id = model_id
+                self.schema_config = kwargs.get("schema_config", {})
+
+            @classmethod
+            def get_schema_class(cls):
+                return TestPipSchema
 
             def infer(self, batch_prompts, **kwargs):
                 global USED_BY_EXTRACT
                 USED_BY_EXTRACT = True
-                return [[lx.inference.ScoredOutput(score=1.0, output="pip test response")]]
+                schema_info = "with_schema" if self.schema_config else "no_schema"
+                return [[lx.inference.ScoredOutput(score=1.0, output=f"pip test response: {schema_info}")]]
       """))
 
       (pkg_dir / "pyproject.toml").write_text(textwrap.dedent(f"""
@@ -357,20 +581,46 @@ class PluginE2ETest(absltest.TestCase):
 
           lx.providers.load_plugins_once()
 
-          # Test via factory.create_model
+          # Test 1: Basic usage without schema
           cfg = lx.factory.ModelConfig(model_id="test-pip-model-123")
           model = lx.factory.create_model(cfg)
           result = model.infer(["test prompt"])
-          assert result[0][0].output == "pip test response", f"Got: {{result[0][0].output}}"
+          assert "no_schema" in result[0][0].output, f"Got: {{result[0][0].output}}"
 
-          # Verify the plugin is resolvable via the registry
-          resolved = lx.providers.registry.resolve("test-pip-model-xyz")
-          assert resolved.__name__ == "TestPipProvider", "Plugin should be resolvable"
+          # Test 2: With schema constraints
+          examples = [
+              lx.data.ExampleData(
+                  text="test",
+                  extractions=[
+                      lx.data.Extraction(
+                          extraction_class="test",
+                          extraction_text="test",
+                      )
+                  ],
+              )
+          ]
+
+          cfg2 = lx.factory.ModelConfig(model_id="test-pip-model-456")
+          model2 = lx.factory._create_model_with_schema(
+              config=cfg2,
+              examples=examples,
+              use_schema_constraints=True,
+              fence_output=None,
+          )
+          result2 = model2.infer(["test prompt"])
+          assert "with_schema" in result2[0][0].output, f"Got: {{result2[0][0].output}}"
+          assert model2.requires_fence_output == False, "Schema supports strict mode, should not need fences"
+
+          # Test 3: Verify schema class is available
+          provider_cls = lx.providers.registry.resolve("test-pip-model-xyz")
+          assert provider_cls.__name__ == "TestPipProvider", "Plugin should be resolvable"
+          schema_cls = provider_cls.get_schema_class()
+          assert schema_cls.__name__ == "TestPipSchema", f"Schema class should be TestPipSchema, got {{schema_cls.__name__}}"
 
           from {pkg_name}.provider import USED_BY_EXTRACT
           assert USED_BY_EXTRACT, "Provider infer() was not called"
 
-          print("SUCCESS: Plugin test passed")
+          print("SUCCESS: Plugin test with schema passed")
         """))
 
         result = subprocess.run(

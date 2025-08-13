@@ -71,6 +71,50 @@ class BaseLanguageModel(abc.ABC):
         constraint.
     """
     self._constraint = constraint
+    self._schema: schema.BaseSchema | None = None
+    self._fence_output_override: bool | None = None
+
+  @classmethod
+  def get_schema_class(cls) -> type[schema.BaseSchema] | None:
+    """Return the schema class this provider supports."""
+    return None
+
+  def apply_schema(self, schema_instance: schema.BaseSchema | None) -> None:
+    """Apply a schema instance to this provider.
+
+    Optional method that providers can override to store the schema instance
+    for runtime use. The default implementation stores it as _schema.
+
+    Args:
+      schema_instance: The schema instance to apply, or None to clear.
+    """
+    self._schema = schema_instance
+
+  def set_fence_output(self, fence_output: bool | None) -> None:
+    """Set explicit fence output preference.
+
+    Args:
+      fence_output: True to force fences, False to disable, None for auto.
+    """
+    if not hasattr(self, '_fence_output_override'):
+      self._fence_output_override = None
+    self._fence_output_override = fence_output
+
+  @property
+  def requires_fence_output(self) -> bool:
+    """Whether this model requires fence output for parsing.
+
+    Uses explicit override if set, otherwise computes from schema.
+    Returns True if no schema or schema doesn't support strict mode.
+    """
+    if (
+        hasattr(self, '_fence_output_override')
+        and self._fence_output_override is not None
+    ):
+      return self._fence_output_override
+    if not hasattr(self, '_schema') or self._schema is None:
+      return True
+    return not self._schema.supports_strict_mode
 
   @abc.abstractmethod
   def infer(
@@ -245,7 +289,7 @@ class GeminiLanguageModel(BaseLanguageModel):
     'Use langextract.providers.openai.OpenAILanguageModel instead. '
     'Will be removed in v2.0.0.'
 )
-class OpenAILanguageModel(BaseLanguageModel):  # pylint: disable=too-many-instance-attributes
+class OpenAILanguageModel(BaseLanguageModel):
   """Language model inference using OpenAI's API with structured output.
 
   DEPRECATED: Use langextract.providers.openai.OpenAILanguageModel instead.

@@ -35,7 +35,7 @@ class TokenizerTest(parameterized.TestCase):
           token_type=actual.token_type,
           first_token_after_newline=actual.first_token_after_newline,
       )
-      self.assertDataclassEqual(
+      self.assertEqual(
           expected,
           actual,
           msg=f"Token mismatch at index {i}",
@@ -117,6 +117,166 @@ class TokenizerTest(parameterized.TestCase):
           input_text="",
           expected_tokens=[],
       ),
+      dict(
+          testcase_name="numbers_with_slash",
+          input_text="Patient BP was 120/80 mmHg.",
+          expected_tokens=[
+              tokenizer.Token(index=0, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(index=1, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(index=2, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(index=3, token_type=tokenizer.TokenType.NUMBER),
+              tokenizer.Token(
+                  index=4, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=5, token_type=tokenizer.TokenType.NUMBER),
+              tokenizer.Token(index=6, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=7, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+          ],
+      ),
+      dict(
+          testcase_name="decimals_and_alphanum_units",
+          input_text="Temp 98.6°F and dosage 50mg daily.",
+          expected_tokens=[
+              tokenizer.Token(
+                  index=0, token_type=tokenizer.TokenType.WORD
+              ),  # Temp
+              tokenizer.Token(
+                  index=1, token_type=tokenizer.TokenType.NUMBER
+              ),  # 98
+              tokenizer.Token(
+                  index=2, token_type=tokenizer.TokenType.PUNCTUATION
+              ),  # .
+              tokenizer.Token(
+                  index=3, token_type=tokenizer.TokenType.NUMBER
+              ),  # 6
+              tokenizer.Token(
+                  index=4, token_type=tokenizer.TokenType.PUNCTUATION
+              ),  # °
+              tokenizer.Token(
+                  index=5, token_type=tokenizer.TokenType.WORD
+              ),  # F
+              tokenizer.Token(
+                  index=6, token_type=tokenizer.TokenType.WORD
+              ),  # and
+              tokenizer.Token(
+                  index=7, token_type=tokenizer.TokenType.WORD
+              ),  # dosage
+              tokenizer.Token(
+                  index=8, token_type=tokenizer.TokenType.NUMBER
+              ),  # 50
+              tokenizer.Token(
+                  index=9, token_type=tokenizer.TokenType.WORD
+              ),  # mg
+              tokenizer.Token(
+                  index=10, token_type=tokenizer.TokenType.WORD
+              ),  # daily
+              tokenizer.Token(
+                  index=11, token_type=tokenizer.TokenType.PUNCTUATION
+              ),  # .
+          ],
+      ),
+      dict(
+          testcase_name="japanese_text",
+          input_text="これはテストです。",
+          expected_tokens=[
+              tokenizer.Token(index=0, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=1, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+          ],
+      ),
+      dict(
+          testcase_name="cjk_slash_abbreviation",
+          input_text="患者の血圧は120/80です。",
+          expected_tokens=[
+              tokenizer.Token(index=0, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(index=1, token_type=tokenizer.TokenType.NUMBER),
+              tokenizer.Token(
+                  index=2, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=3, token_type=tokenizer.TokenType.NUMBER),
+              tokenizer.Token(index=4, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=5, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+          ],
+      ),
+      dict(
+          testcase_name="devanagari_hindi_split",
+          input_text="नमस्ते दुनिया, मेरा स्कोर १००/१०० है।",
+          expected_tokens=[
+              tokenizer.Token(index=0, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=1, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=2, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=3, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=4, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=5, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=6, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=7, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=8, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=9, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=10, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=11, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=12, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=13, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=14, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=15, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=16, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=17, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=18, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(index=19, token_type=tokenizer.TokenType.NUMBER),
+              tokenizer.Token(
+                  index=20, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=21, token_type=tokenizer.TokenType.NUMBER),
+              tokenizer.Token(index=22, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=23, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+          ],
+      ),
+      dict(
+          testcase_name="arabic_text",
+          input_text="مرحبا بالعالم! درجة الحرارة ٢٥.٥ درجة.",
+          expected_tokens=[
+              tokenizer.Token(index=0, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(index=1, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=2, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=3, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(index=4, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(index=5, token_type=tokenizer.TokenType.NUMBER),
+              tokenizer.Token(
+                  index=6, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+              tokenizer.Token(index=7, token_type=tokenizer.TokenType.NUMBER),
+              tokenizer.Token(index=8, token_type=tokenizer.TokenType.WORD),
+              tokenizer.Token(
+                  index=9, token_type=tokenizer.TokenType.PUNCTUATION
+              ),
+          ],
+      ),
   )
   def test_tokenize_various_inputs(self, input_text, expected_tokens):
     tokenized = tokenizer.tokenize(input_text)
@@ -131,32 +291,20 @@ class TokenizerTest(parameterized.TestCase):
     tokenized = tokenizer.tokenize(input_text)
 
     expected_tokens = [
-        tokenizer.Token(
-            index=0,
-            token_type=tokenizer.TokenType.WORD,
-        ),
-        tokenizer.Token(
-            index=1,
-            token_type=tokenizer.TokenType.NUMBER,
-        ),
+        tokenizer.Token(index=0, token_type=tokenizer.TokenType.WORD),
+        tokenizer.Token(index=1, token_type=tokenizer.TokenType.NUMBER),
         tokenizer.Token(
             index=2,
             token_type=tokenizer.TokenType.WORD,
             first_token_after_newline=True,
         ),
-        tokenizer.Token(
-            index=3,
-            token_type=tokenizer.TokenType.NUMBER,
-        ),
+        tokenizer.Token(index=3, token_type=tokenizer.TokenType.NUMBER),
         tokenizer.Token(
             index=4,
             token_type=tokenizer.TokenType.WORD,
             first_token_after_newline=True,
         ),
-        tokenizer.Token(
-            index=5,
-            token_type=tokenizer.TokenType.NUMBER,
-        ),
+        tokenizer.Token(index=5, token_type=tokenizer.TokenType.NUMBER),
     ]
 
     self.assertTokenListEqual(
@@ -257,7 +405,7 @@ class SentenceRangeTest(parameterized.TestCase):
               Blood pressure was 160/90 and patient was recommended to
               Atenolol 50 mg daily."""),
           start_pos=0,
-          expected_interval=(0, 9),
+          expected_interval=(0, 11),
       ),
   )
   def test_partial_sentence_range(

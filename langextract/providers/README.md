@@ -2,6 +2,11 @@
 
 This directory contains the provider system for LangExtract, which enables support for different Large Language Model (LLM) backends.
 
+**Quick Start**: Use the [provider plugin generator script](../../scripts/create_provider_plugin.py) to create a new provider in minutes:
+```bash
+python scripts/create_provider_plugin.py MyProvider --with-schema
+```
+
 ## Architecture Overview
 
 The provider system uses a **registry pattern** with **automatic discovery**:

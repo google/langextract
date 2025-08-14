@@ -4,6 +4,12 @@ This example demonstrates how to create a custom provider plugin that extends La
 
 **Note**: This is an example included in the LangExtract repository for reference. It is not part of the LangExtract package and won't be installed when you `pip install langextract`.
 
+**Automated Creation**: Instead of manually copying this example, use the [provider plugin generator script](../../scripts/create_provider_plugin.py):
+```bash
+python scripts/create_provider_plugin.py MyProvider --with-schema
+```
+This will create a complete plugin structure with all boilerplate code ready for customization.
+
 ## Structure
 
 ```

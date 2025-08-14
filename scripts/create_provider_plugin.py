@@ -519,6 +519,65 @@ Apache License 2.0
   print("✓ Created README.md with usage examples")
 
 
+def create_gitignore(base_dir: Path) -> None:
+  """Create .gitignore file with Python-specific entries."""
+  gitignore_content = textwrap.dedent("""\
+        # Python
+        __pycache__/
+        *.py[cod]
+        *$py.class
+        *.so
+
+        # Distribution / packaging
+        build/
+        dist/
+        *.egg-info/
+        .eggs/
+        *.egg
+
+        # Virtual environments
+        .env
+        .venv
+        env/
+        venv/
+        ENV/
+
+        # Testing & coverage
+        .pytest_cache/
+        .tox/
+        htmlcov/
+        .coverage
+        .coverage.*
+
+        # Type checking
+        .mypy_cache/
+        .dmypy.json
+        dmypy.json
+        .pytype/
+
+        # IDEs
+        .idea/
+        .vscode/
+        *.swp
+        *.swo
+
+        # OS-specific
+        .DS_Store
+        Thumbs.db
+
+        # Logs
+        *.log
+
+        # Temp files
+        *.tmp
+        *.bak
+        *.backup
+    """)
+
+  (base_dir / ".gitignore").write_text(gitignore_content, encoding="utf-8")
+  print("✓ Created .gitignore file with Python-specific entries")
+
+
 def create_license(base_dir: Path) -> None:
   """Create LICENSE file."""
   license_content = textwrap.dedent("""\
@@ -701,6 +760,7 @@ def create_plugin(
       base_dir, args.provider_name, package_name, patterns, args.with_schema
   )
   create_readme(base_dir, args.provider_name, package_name, patterns)
+  create_gitignore(base_dir)
   create_license(base_dir)
 
   return base_dir

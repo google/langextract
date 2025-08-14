@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-import os
 from typing import Any, cast, Type, TypeVar
 import warnings
 
@@ -26,9 +25,11 @@ import dotenv
 from langextract import annotation
 from langextract import data
 from langextract import exceptions
+from langextract import factory
 from langextract import inference
 from langextract import io
 from langextract import prompting
+from langextract import providers
 from langextract import resolver
 from langextract import schema
 from langextract import visualization
@@ -39,9 +40,11 @@ __all__ = [
     "annotation",
     "data",
     "exceptions",
+    "factory",
     "inference",
     "io",
     "prompting",
+    "providers",
     "resolver",
     "schema",
     "visualization",
@@ -52,7 +55,7 @@ LanguageModelT = TypeVar("LanguageModelT", bound=inference.BaseLanguageModel)
 # Set up visualization helper at the top level (lx.visualize).
 visualize = visualization.visualize
 
-# Load environment variables from .env file
+# Auto-load .env for backward compatibility (will be opt-in in v2.0.0)
 dotenv.load_dotenv()
 
 
@@ -65,8 +68,8 @@ def extract(
     language_model_type: Type[LanguageModelT] = inference.GeminiLanguageModel,
     format_type: data.FormatType = data.FormatType.JSON,
     max_char_buffer: int = 1000,
-    temperature: float = 0.5,
-    fence_output: bool = False,
+    temperature: float | None = None,
+    fence_output: bool | None = None,
     use_schema_constraints: bool = True,
     batch_length: int = 10,
     max_workers: int = 10,
@@ -76,6 +79,8 @@ def extract(
     debug: bool = True,
     model_url: str | None = None,
     extraction_passes: int = 1,
+    config: factory.ModelConfig | None = None,
+    model: inference.BaseLanguageModel | None = None,
 ) -> data.AnnotatedDocument | Iterable[data.AnnotatedDocument]:
   """Extracts structured information from text.
 
@@ -97,18 +102,26 @@ def extract(
         multiple times. Note that max_workers improves processing speed without
         additional token costs. Refer to your API provider's pricing details and
         monitor usage with small test runs to estimate costs.
-      model_id: The model ID to use for extraction.
-      language_model_type: The type of language model to use for inference.
+      model_id: The model ID to use for extraction (e.g., 'gemini-2.5-flash').
+        If your model ID is not recognized or you need to use a custom provider,
+        use the 'config' parameter with factory.ModelConfig to specify the
+        provider explicitly.
+      language_model_type: [DEPRECATED] The type of language model to use for
+        inference. Warning triggers when value differs from the legacy default
+        (GeminiLanguageModel). This parameter will be removed in v2.0.0. Use
+        the model, config, or model_id parameters instead.
       format_type: The format type for the output (JSON or YAML).
       max_char_buffer: Max number of characters for inference.
-      temperature: The sampling temperature for generation. Higher values (e.g.,
-        0.5) can improve performance with schema constraints on some models by
-        reducing repetitive outputs. Defaults to 0.5.
+      temperature: The sampling temperature for generation. When None (default),
+        uses the model's default temperature. Set to 0.0 for deterministic output
+        or higher values for more variation.
       fence_output: Whether to expect/generate fenced output (```json or
         ```yaml). When True, the model is prompted to generate fenced output and
-        the resolver expects it. When False, raw JSON/YAML is expected. If your
-        model utilizes schema constraints, this can generally be set to False
-        unless the constraint also accounts for code fence delimiters.
+        the resolver expects it. When False, raw JSON/YAML is expected. When None,
+        automatically determined based on provider schema capabilities: if a schema
+        is applied and supports_strict_mode is True, defaults to False; otherwise
+        True. If your model utilizes schema constraints, this can generally be set
+        to False unless the constraint also accounts for code fence delimiters.
       use_schema_constraints: Whether to generate schema constraints for models.
         For supported models, this enables structured outputs. Defaults to True.
       batch_length: Number of text chunks processed per batch. Higher values
@@ -129,7 +142,9 @@ def extract(
         Suffix for keys containing extraction attributes. Default is
         "_attributes".
       language_model_params: Additional parameters for the language model.
-      debug: Whether to populate debug fields.
+      debug: Whether to enable debug logging. When True, enables detailed logging
+        of function calls, arguments, return values, and timing for the langextract
+        namespace. Note: Debug logging remains enabled for the process once activated.
       model_url: Endpoint URL for self-hosted or on-prem models. Only forwarded
         when the selected `language_model_type` accepts this argument.
       extraction_passes: Number of sequential extraction attempts to improve
@@ -139,6 +154,11 @@ def extract(
         for overlaps). WARNING: Each additional pass reprocesses tokens,
         potentially increasing API costs. For example, extraction_passes=3
         reprocesses tokens 3x.
+      config: Model configuration to use for extraction. Takes precedence over
+        model_id, api_key, and language_model_type parameters. When both model
+        and config are provided, model takes precedence.
+      model: Pre-configured language model to use for extraction. Takes
+        precedence over all other parameters including config.
 
   Returns:
       An AnnotatedDocument with the extracted information when input is a
@@ -156,19 +176,17 @@ def extract(
         " one ExampleData object with sample extractions."
     )
 
-  if use_schema_constraints and fence_output:
-    warnings.warn(
-        "When `use_schema_constraints` is True and `fence_output` is True, "
-        "ensure that your schema constraint includes the code fence "
-        "delimiters, or set `fence_output` to False.",
-        UserWarning,
-    )
+  if debug:
+    # pylint: disable=import-outside-toplevel
+    from langextract import debug_utils
+
+    debug_utils.configure_debug_logging()
 
   if max_workers is not None and batch_length < max_workers:
     warnings.warn(
-        f"batch_length ({batch_length}) is less than max_workers"
-        f" ({max_workers}). Only {batch_length} workers will be used. For"
-        " optimal parallelization, set batch_length >= max_workers.",
+        f"batch_length ({batch_length}) < max_workers ({max_workers}). "
+        f"Only {batch_length} workers will be used. "
+        "Set batch_length >= max_workers for optimal parallelization.",
         UserWarning,
     )
 
@@ -180,44 +198,77 @@ def extract(
   )
   prompt_template.examples.extend(examples)
 
-  # Generate schema constraints if enabled
-  model_schema = None
-  schema_constraint = None
+  language_model = None
 
-  # TODO: Unify schema generation.
-  if (
-      use_schema_constraints
-      and language_model_type == inference.GeminiLanguageModel
-  ):
-    model_schema = schema.GeminiSchema.from_examples(prompt_template.examples)
-
-  if not api_key:
-    api_key = os.environ.get("LANGEXTRACT_API_KEY")
-
-    # Currently only Gemini is supported
-    if not api_key and language_model_type == inference.GeminiLanguageModel:
-      raise ValueError(
-          "API key must be provided for cloud-hosted models via the api_key"
-          " parameter or the LANGEXTRACT_API_KEY environment variable"
+  if model:
+    language_model = model
+    if fence_output is not None:
+      language_model.set_fence_output(fence_output)
+    if use_schema_constraints:
+      warnings.warn(
+          "'use_schema_constraints' is ignored when 'model' is provided. "
+          "The model should already be configured with schema constraints.",
+          UserWarning,
+          stacklevel=2,
+      )
+  elif config:
+    if use_schema_constraints:
+      warnings.warn(
+          "With 'config', schema constraints are still applied via examples. "
+          "Or pass explicit schema in config.provider_kwargs.",
+          UserWarning,
+          stacklevel=2,
       )
 
-  base_lm_kwargs: dict[str, Any] = {
-      "api_key": api_key,
-      "model_id": model_id,
-      "gemini_schema": model_schema,
-      "format_type": format_type,
-      "temperature": temperature,
-      "model_url": model_url,
-      "constraint": schema_constraint,
-      "max_workers": max_workers,
-  }
+    language_model = factory.create_model(
+        config=config,
+        examples=prompt_template.examples if use_schema_constraints else None,
+        use_schema_constraints=use_schema_constraints,
+        fence_output=fence_output,
+    )
+  else:
+    if language_model_type != inference.GeminiLanguageModel:
+      warnings.warn(
+          "'language_model_type' is deprecated and will be removed in v2.0.0. "
+          "Use model, config, or model_id parameters instead.",
+          DeprecationWarning,
+          stacklevel=2,
+      )
 
-  # Merge user-provided params which have precedence over defaults.
-  base_lm_kwargs.update(language_model_params or {})
+    base_lm_kwargs: dict[str, Any] = {
+        "api_key": api_key,
+        "format_type": format_type,
+        "temperature": temperature,
+        "model_url": model_url,
+        "base_url": model_url,
+        "max_workers": max_workers,
+    }
 
-  filtered_kwargs = {k: v for k, v in base_lm_kwargs.items() if v is not None}
+    # TODO(v2.0.0): Remove gemini_schema parameter
+    if "gemini_schema" in (language_model_params or {}):
+      warnings.warn(
+          "'gemini_schema' is deprecated. Schema constraints are now "
+          "automatically handled. This parameter will be ignored.",
+          DeprecationWarning,
+          stacklevel=2,
+      )
+      language_model_params = dict(language_model_params or {})
+      language_model_params.pop("gemini_schema", None)
 
-  language_model = language_model_type(**filtered_kwargs)
+    base_lm_kwargs.update(language_model_params or {})
+    filtered_kwargs = {k: v for k, v in base_lm_kwargs.items() if v is not None}
+    config = factory.ModelConfig(
+        model_id=model_id, provider_kwargs=filtered_kwargs
+    )
+
+    language_model = factory.create_model(
+        config=config,
+        examples=prompt_template.examples if use_schema_constraints else None,
+        use_schema_constraints=use_schema_constraints,
+        fence_output=fence_output,
+    )
+
+  fence_output = language_model.requires_fence_output
 
   resolver_defaults = {
       "fence_output": fence_output,
@@ -245,6 +296,7 @@ def extract(
         additional_context=additional_context,
         debug=debug,
         extraction_passes=extraction_passes,
+        max_workers=max_workers,
     )
   else:
     documents = cast(Iterable[data.Document], text_or_documents)
@@ -255,4 +307,5 @@ def extract(
         batch_length=batch_length,
         debug=debug,
         extraction_passes=extraction_passes,
+        max_workers=max_workers,
     )

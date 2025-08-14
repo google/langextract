@@ -127,7 +127,7 @@ class QAPromptGenerator:
       else:
         answer = formatted_content.strip()
     elif self.format_type == data.FormatType.JSON:
-      formatted_content = json.dumps(data_dict, indent=2)
+      formatted_content = json.dumps(data_dict, indent=2, ensure_ascii=False)
       if self.fence_output:
         answer = f"```json\n{formatted_content.strip()}\n```"
       else:

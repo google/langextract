@@ -20,7 +20,64 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import data
+from langextract import inference
 from langextract import schema
+
+
+class BaseSchemaTest(absltest.TestCase):
+  """Tests for BaseSchema abstract class."""
+
+  def test_abstract_methods_required(self):
+    """Test that BaseSchema cannot be instantiated directly."""
+    with self.assertRaises(TypeError):
+      schema.BaseSchema()  # pylint: disable=abstract-class-instantiated
+
+  def test_subclass_must_implement_all_methods(self):
+    """Test that subclasses must implement all abstract methods."""
+
+    class IncompleteSchema(schema.BaseSchema):
+
+      @classmethod
+      def from_examples(cls, examples_data, attribute_suffix="_attributes"):
+        return cls()
+
+      # Missing to_provider_config and supports_strict_mode
+
+    with self.assertRaises(TypeError):
+      IncompleteSchema()  # pylint: disable=abstract-class-instantiated
+
+
+class BaseLanguageModelSchemaTest(absltest.TestCase):
+  """Tests for BaseLanguageModel schema methods."""
+
+  def test_get_schema_class_returns_none_by_default(self):
+    """Test that get_schema_class returns None by default."""
+
+    class TestModel(inference.BaseLanguageModel):
+
+      def infer(self, batch_prompts, **kwargs):
+        yield []
+
+    self.assertIsNone(TestModel.get_schema_class())
+
+  def test_apply_schema_stores_instance(self):
+    """Test that apply_schema stores the schema instance."""
+
+    class TestModel(inference.BaseLanguageModel):
+
+      def infer(self, batch_prompts, **kwargs):
+        yield []
+
+    model = TestModel()
+
+    mock_schema = mock.Mock(spec=schema.BaseSchema)
+
+    model.apply_schema(mock_schema)
+
+    self.assertEqual(model._schema, mock_schema)
+
+    model.apply_schema(None)
+    self.assertIsNone(model._schema)
 
 
 class GeminiSchemaTest(parameterized.TestCase):
@@ -178,6 +235,46 @@ class GeminiSchemaTest(parameterized.TestCase):
     gemini_schema = schema.GeminiSchema.from_examples(examples_data)
     actual_schema = gemini_schema.schema_dict
     self.assertEqual(actual_schema, expected_schema)
+
+  def test_to_provider_config_returns_response_schema(self):
+    """Test that to_provider_config returns the correct provider kwargs."""
+    examples_data = [
+        data.ExampleData(
+            text="Test text",
+            extractions=[
+                data.Extraction(
+                    extraction_class="test_class",
+                    extraction_text="test extraction",
+                )
+            ],
+        )
+    ]
+
+    gemini_schema = schema.GeminiSchema.from_examples(examples_data)
+    provider_config = gemini_schema.to_provider_config()
+
+    # Should contain response_schema key
+    self.assertIn("response_schema", provider_config)
+    self.assertEqual(
+        provider_config["response_schema"], gemini_schema.schema_dict
+    )
+
+  def test_supports_strict_mode_returns_true(self):
+    """Test that GeminiSchema supports strict mode."""
+    examples_data = [
+        data.ExampleData(
+            text="Test text",
+            extractions=[
+                data.Extraction(
+                    extraction_class="test_class",
+                    extraction_text="test extraction",
+                )
+            ],
+        )
+    ]
+
+    gemini_schema = schema.GeminiSchema.from_examples(examples_data)
+    self.assertTrue(gemini_schema.supports_strict_mode)
 
 
 if __name__ == "__main__":

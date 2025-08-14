@@ -12,19 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Base exceptions for LangExtract.
+"""Example custom provider plugin for LangExtract."""
 
-This module defines the base exception class that all LangExtract exceptions
-inherit from. Individual modules define their own specific exceptions.
-"""
+from langextract_provider_example.provider import CustomGeminiProvider
 
-__all__ = ["LangExtractError"]
-
-
-class LangExtractError(Exception):
-  """Base exception for all LangExtract errors.
-
-  All exceptions raised by LangExtract should inherit from this class.
-  This allows users to catch all LangExtract-specific errors with a single
-  except clause.
-  """
+__all__ = ["CustomGeminiProvider"]
+__version__ = "0.1.0"

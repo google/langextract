@@ -18,6 +18,7 @@
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
+- [Adding Custom Model Providers](#adding-custom-model-providers)
 - [Using OpenAI Models](#using-openai-models)
 - [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
 - [More Examples](#more-examples)
@@ -260,9 +261,25 @@ result = lx.extract(
 )
 ```
 
+## Adding Custom Model Providers
+
+LangExtract supports custom LLM providers via a lightweight plugin system. You can add support for new models without changing core code.
+
+- Add new model support independently of the core library
+- Distribute your provider as a separate Python package
+- Keep custom dependencies isolated
+- Override or extend built-in providers via priority-based resolution
+
+See the detailed guide in [Provider System Documentation](langextract/providers/README.md) to learn how to:
+
+- Register a provider with `@registry.register(...)`
+- Publish an entry point for discovery
+- Optionally provide a schema with `get_schema_class()` for structured output
+- Integrate with the factory via `create_model(...)`
+
 ## Using OpenAI Models
 
-LangExtract also supports OpenAI models. Example OpenAI configuration:
+LangExtract supports OpenAI models (requires optional dependency: `pip install langextract[openai]`):
 
 ```python
 import langextract as lx
@@ -271,8 +288,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    language_model_type=lx.inference.OpenAILanguageModel,
-    model_id="gpt-4o",
+    model_id="gpt-4o",  # Automatically selects OpenAI provider
     api_key=os.environ.get('OPENAI_API_KEY'),
     fence_output=True,
     use_schema_constraints=False
@@ -282,7 +298,6 @@ result = lx.extract(
 Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
 
 ## Using Local LLMs with Ollama
-
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:
 
 ```python
@@ -292,8 +307,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    language_model_type=lx.inference.OllamaLanguageModel,
-    model_id="gemma2:2b",  # or any Ollama model
+    model_id="gemma2:2b",  # Automatically selects Ollama provider
     model_url="http://localhost:11434",
     fence_output=False,
     use_schema_constraints=False
@@ -334,6 +348,8 @@ Contributions are welcome! See [CONTRIBUTING.md](https://github.com/google/lange
 with development, testing, and pull requests. You must sign a
 [Contributor License Agreement](https://cla.developers.google.com/about)
 before submitting patches.
+
+
 
 ## Testing
 

@@ -17,6 +17,7 @@
 
 import argparse
 import os
+import sys
 
 import langextract as lx
 
@@ -36,8 +37,10 @@ def run_extraction(model_id="gemma2:2b", temperature=0.3):
           extractions=[
               lx.data.Extraction(
                   extraction_class="author_details",
-                  # extraction_text includes full context with ellipsis for clarity
-                  extraction_text="J.R.R. Tolkien was an English writer...",
+                  extraction_text=(
+                      "J.R.R. Tolkien was an English writer, best known for"
+                      " high-fantasy."
+                  ),
                   attributes={
                       "name": "J.R.R. Tolkien",
                       "genre": "high-fantasy",
@@ -47,24 +50,50 @@ def run_extraction(model_id="gemma2:2b", temperature=0.3):
       )
   ]
 
+  # Option 1: Use ModelConfig for explicit configuration
+  # This gives you full control over provider-specific settings
+  model_config = lx.factory.ModelConfig(
+      model_id=model_id,
+      provider_kwargs={
+          "model_url": os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+          "format_type": lx.data.FormatType.JSON,
+          "temperature": temperature,
+      },
+  )
+
   result = lx.extract(
       text_or_documents=input_text,
       prompt_description=prompt,
       examples=examples,
-      language_model_type=lx.inference.OllamaLanguageModel,
-      model_id=model_id,
-      model_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
-      temperature=temperature,
-      fence_output=False,
-      use_schema_constraints=False,
+      config=model_config,
+      use_schema_constraints=True,
   )
+
+  # Option 2 (simpler): Just pass model_id directly
+  # LangExtract's registry automatically identifies Ollama models like "gemma2:2b"
+  # result = lx.extract(
+  #     text_or_documents=input_text,
+  #     prompt_description=prompt,
+  #     examples=examples,
+  #     model_id=model_id,
+  #     model_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+  #     format_type=lx.data.FormatType.JSON,
+  #     temperature=temperature,
+  #     use_schema_constraints=True,
+  # )
 
   return result
 
 
 def main():
   """Main function to run the quick-start example."""
-  parser = argparse.ArgumentParser(description="Run Ollama extraction example")
+  parser = argparse.ArgumentParser(
+      description="Run Ollama extraction example",
+      epilog=(
+          "Supported models: gemma2:2b, llama3.2:1b, mistral:7b, qwen2.5:0.5b,"
+          " etc."
+      ),
+  )
   parser.add_argument(
       "--model-id",
       default=os.getenv("MODEL_ID", "gemma2:2b"),
@@ -86,23 +115,40 @@ def main():
         model_id=args.model_id, temperature=args.temperature
     )
 
-    for extraction in result.extractions:
-      print(f"Class: {extraction.extraction_class}")
-      print(f"Text: {extraction.extraction_text}")
-      print(f"Attributes: {extraction.attributes}")
+    if result.extractions:
+      print(f"\n📝 Found {len(result.extractions)} extraction(s):\n")
+      for extraction in result.extractions:
+        print(f"Class: {extraction.extraction_class}")
+        print(f"Text: {extraction.extraction_text}")
+        print(f"Attributes: {extraction.attributes}")
+        print()
+    else:
+      print("\n⚠️  No extractions found")
 
-    print("\n✅ SUCCESS! Ollama is working with langextract")
+    print("✅ SUCCESS! Ollama is working with langextract")
+    print(f"   Model: {args.model_id}")
+    print("   JSON mode: enabled")
+    print("   Schema constraints: enabled")
     return True
 
   except ConnectionError as e:
-    print(f"\nConnectionError: {e}")
-    print("Make sure Ollama is running: 'ollama serve'")
+    print(f"\n❌ ConnectionError: {e}")
+    print("\n💡 Make sure Ollama is running:")
+    print("   ollama serve")
+    return False
+  except ValueError as e:
+    if "Can't find Ollama" in str(e):
+      print(f"\n❌ Model not found: {args.model_id}")
+      print("\n💡 Install the model first:")
+      print(f"   ollama pull {args.model_id}")
+    else:
+      print(f"\n❌ ValueError: {e}")
     return False
   except Exception as e:
-    print(f"\nError: {type(e).__name__}: {e}")
+    print(f"\n❌ Error: {type(e).__name__}: {e}")
     return False
 
 
 if __name__ == "__main__":
-  success = main()
-  exit(0 if success else 1)
+  SUCCESS = main()
+  sys.exit(0 if SUCCESS else 1)

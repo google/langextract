@@ -28,8 +28,7 @@ import dataclasses
 import enum
 import re
 
-from absl import logging
-
+from langextract import debug_utils
 from langextract import exceptions
 
 
@@ -150,6 +149,7 @@ _WORD_PATTERN = re.compile(rf"(?:{_LETTERS_PATTERN}|{_DIGITS_PATTERN})\Z")
 _KNOWN_ABBREVIATIONS = frozenset({"Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "St."})
 
 
+@debug_utils.debug_log_calls
 def tokenize(text: str) -> TokenizedText:
   """Splits text into tokens (words, digits, or punctuation).
 
@@ -163,7 +163,6 @@ def tokenize(text: str) -> TokenizedText:
   Returns:
     A TokenizedText object containing all extracted tokens.
   """
-  logging.debug("Entering tokenize() with text:\n%r", text)
   tokenized = TokenizedText(text=text)
   previous_end = 0
   for token_index, match in enumerate(_TOKEN_PATTERN.finditer(text)):
@@ -192,7 +191,6 @@ def tokenize(text: str) -> TokenizedText:
       token.token_type = TokenType.PUNCTUATION
     tokenized.tokens.append(token)
     previous_end = end_pos
-  logging.debug("Completed tokenize(). Total tokens: %d", len(tokenized.tokens))
   return tokenized
 
 

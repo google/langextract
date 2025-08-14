@@ -60,7 +60,6 @@ def test_ollama_extraction():
         text_or_documents=input_text,
         prompt_description=prompt,
         examples=examples,
-        language_model_type=lx.inference.OllamaLanguageModel,
         model_id=model_id,
         model_url="http://localhost:11434",
         temperature=0.3,

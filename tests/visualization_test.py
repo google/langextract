@@ -125,7 +125,6 @@ class VisualizationTest(absltest.TestCase):
         f'style="background-color:{med_color};">MEDICATION</span></div>'
     )
     css_html = _VISUALIZATION_CSS
-    # Build expected components (adapted for animation format)
     expected_components = [
         css_html,
         "lx-animated-wrapper",

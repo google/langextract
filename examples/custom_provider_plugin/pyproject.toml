@@ -1,0 +1,38 @@
+# Copyright 2025 Google LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langextract-provider-example"  # Change to your package name
+version = "0.1.0"  # Update version for releases
+description = "Example custom provider plugin for LangExtract"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = [
+    # Uncomment when creating a standalone plugin package:
+    # "langextract",  # Will install latest version
+    "google-genai>=0.2.0",  # Replace with your backend's SDK
+]
+
+# Register the provider with LangExtract's plugin system
+[project.entry-points."langextract.providers"]
+custom_gemini = "langextract_provider_example:CustomGeminiProvider"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["langextract_provider_example*"]

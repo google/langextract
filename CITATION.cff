@@ -16,7 +16,7 @@ authors:
 repository-code: "https://github.com/google/langextract"
 url: "https://github.com/google/langextract"
 repository: "https://github.com/google/langextract"
-abstract: "LangExtract: A library for extracting structured data from language models"
+abstract: "LangExtract: LLM-powered structured information extraction from text with source grounding"
 keywords:
   - language-models
   - structured-data-extraction

@@ -68,6 +68,8 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
       temperature: Sampling temperature.
       **kwargs: Additional parameters.
     """
+    super().__init__()
+
     # TODO: Replace with your own client initialization
     try:
       from google import genai  # pylint: disable=import-outside-toplevel
@@ -97,8 +99,6 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
 
     self._client = genai.Client(api_key=self.api_key)
 
-    super().__init__()
-
   @classmethod
   def get_schema_class(cls) -> type[lx.schema.BaseSchema] | None:
     """Return our custom schema class.
@@ -110,6 +110,30 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
       Our custom schema class that will be used to generate constraints.
     """
     return custom_schema.CustomProviderSchema
+
+  def apply_schema(self, schema_instance: lx.schema.BaseSchema | None) -> None:
+    """Apply or clear schema configuration.
+
+    This method is called by LangExtract to dynamically apply schema
+    constraints after the provider is instantiated. It's important to
+    handle both the application of a new schema and clearing (None).
+
+    Args:
+      schema_instance: The schema to apply, or None to clear existing schema.
+    """
+    super().apply_schema(schema_instance)
+
+    if schema_instance:
+      # Apply the new schema configuration
+      config = schema_instance.to_provider_config()
+      self.response_schema = config.get('response_schema')
+      self.enable_structured_output = config.get(
+          'enable_structured_output', False
+      )
+    else:
+      # Clear the schema configuration
+      self.response_schema = None
+      self.enable_structured_output = False
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs: Any

@@ -113,13 +113,20 @@ result = lx.extract(
 
 2. import langextract
    └── Loads providers/__init__.py
-       └── Discovers and imports plugin via entry points
-           └── @lx.providers.registry.register decorator fires
-               └── Provider patterns added to registry
+       └── Plugin loading is lazy (on-demand)
 
 3. lx.extract(model_id="yourmodel-latest")
-   └── Registry matches pattern and uses your provider
+   └── Triggers plugin discovery via entry points
+       └── @lx.providers.registry.register decorator fires
+           └── Provider patterns added to registry
+               └── Registry matches pattern and uses your provider
 ```
+
+**Important Notes:**
+- Plugin loading is **lazy** - plugins are discovered when first needed
+- To manually trigger plugin loading: `lx.providers.load_plugins_once()`
+- Set `LANGEXTRACT_DISABLE_PLUGINS=1` to disable plugin loading
+- Registry entries are tuples: `(patterns_list, priority_int)`
 
 ## How Provider Selection Works
 
@@ -226,6 +233,71 @@ outputs = model.infer(["prompt1", "prompt2"])
 
 **📁 Complete Example**: See [examples/custom_provider_plugin/](../../examples/custom_provider_plugin/) for a fully-functional plugin template with testing and documentation.
 
+### Quick Start Checklist
+
+Creating a provider plugin? Follow this checklist:
+
+#### ☐ **1. Setup Package Structure**
+```
+langextract-yourprovider/
+├── pyproject.toml              # Package config with entry point
+├── README.md                    # Documentation
+├── LICENSE                      # License file
+└── langextract_yourprovider/   # Package directory
+    ├── __init__.py             # Exports provider class
+    ├── provider.py             # Provider implementation
+    └── schema.py               # (Optional) Custom schema
+```
+
+#### ☐ **2. Configure Entry Point** (`pyproject.toml`)
+```toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langextract-yourprovider"
+version = "0.1.0"
+dependencies = ["langextract>=1.0.0"]
+
+[project.entry-points."langextract.providers"]
+yourprovider = "langextract_yourprovider:YourProviderLanguageModel"
+```
+
+#### ☐ **3. Implement Provider** (`provider.py`)
+- [ ] Import required modules
+- [ ] Add `@lx.providers.registry.register()` decorator with patterns
+- [ ] Inherit from `lx.inference.BaseLanguageModel`
+- [ ] Implement `__init__()` method
+- [ ] Implement `infer()` method returning `ScoredOutput` objects
+- [ ] Export class from `__init__.py`
+
+#### ☐ **4. (Optional) Add Schema Support** (`schema.py`)
+- [ ] Create schema class inheriting from `lx.schema.BaseSchema`
+- [ ] Implement `from_examples()` class method
+- [ ] Implement `to_provider_config()` method
+- [ ] Add `get_schema_class()` to provider
+- [ ] Handle schema in provider's `__init__()` and `infer()`
+
+#### ☐ **5. Testing**
+- [ ] Install plugin with `pip install -e .`
+- [ ] Test that your provider loads and handles basic inference
+- [ ] Verify schema support works (if implemented)
+
+#### ☐ **6. Documentation**
+- [ ] Document supported model IDs and patterns
+- [ ] List required environment variables
+- [ ] Provide usage examples
+- [ ] Document any provider-specific parameters
+
+#### ☐ **7. Distribution & Community**
+- [ ] Test installation with `pip install -e .`
+- [ ] Build package with `python -m build`
+- [ ] Test in clean environment
+- [ ] Publish to PyPI with `twine upload dist/*`
+- [ ] Share your provider by opening an issue on [LangExtract GitHub](https://github.com/google/langextract/issues) to get feedback and help others discover it
+- [ ] Consider submitting a PR to add your provider to the community providers list (coming soon)
+
 ### Option 1: External Plugin (Recommended)
 
 External plugins are the recommended approach for adding new providers. They're easy to maintain, distribute, and don't require changes to the core package.
@@ -250,8 +322,13 @@ langextract-myprovider/
 
 2. Configure entry point in `pyproject.toml`:
 ```toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "langextract-myprovider"
+version = "0.1.0"
 dependencies = ["langextract>=1.0.0", "your-sdk"]
 
 [project.entry-points."langextract.providers"]
@@ -265,19 +342,22 @@ myprovider = "langextract_myprovider:MyProviderLanguageModel"
 3. Implement your provider:
 ```python
 # langextract_myprovider/__init__.py
+import os
 import langextract as lx
 
-@lx.providers.registry.register(r'^mymodel', r'^custom')
+@lx.providers.registry.register(r'^mymodel', r'^custom', priority=10)
 class MyProviderLanguageModel(lx.inference.BaseLanguageModel):
-    def __init__(self, model_id: str, **kwargs):
+    def __init__(self, model_id: str, api_key: str = None, **kwargs):
         super().__init__()
         self.model_id = model_id
+        self.api_key = api_key or os.environ.get('MYPROVIDER_API_KEY')
         # Initialize your client
+        self.client = MyProviderClient(api_key=self.api_key)
 
     def infer(self, batch_prompts, **kwargs):
         # Implement inference
         for prompt in batch_prompts:
-            result = self._call_api(prompt)
+            result = self.client.generate(prompt, **kwargs)
             yield [lx.inference.ScoredOutput(score=1.0, output=result)]
 ```
 
@@ -298,6 +378,112 @@ twine upload dist/*
 ```
 
 Now users can install and use your provider with just `pip install langextract-myprovider`!
+
+### Adding Schema Support
+
+Schemas enable structured output with strict JSON constraints. Here's how to add schema support to your provider:
+
+#### 1. Create a Schema Class
+
+```python
+# langextract_myprovider/schema.py
+import langextract as lx
+from langextract import schema
+
+class MyProviderSchema(lx.schema.BaseSchema):
+    def __init__(self, schema_dict: dict):
+        self._schema_dict = schema_dict
+
+    @property
+    def schema_dict(self) -> dict:
+        return self._schema_dict
+
+    @classmethod
+    def from_examples(cls, examples_data, attribute_suffix="_attributes"):
+        """Build schema from example extractions."""
+        # Analyze examples to determine structure
+        extraction_types = {}
+        for example in examples_data:
+            for extraction in example.extractions:
+                class_name = extraction.extraction_class
+                if class_name not in extraction_types:
+                    extraction_types[class_name] = set()
+                if extraction.attributes:
+                    extraction_types[class_name].update(extraction.attributes.keys())
+
+        # Build JSON schema
+        schema_dict = {
+            "type": "object",
+            "properties": {
+                "extractions": {
+                    "type": "array",
+                    "items": {"type": "object"}  # Simplified
+                }
+            }
+        }
+        return cls(schema_dict)
+
+    def to_provider_config(self) -> dict:
+        """Convert to provider-specific configuration."""
+        return {
+            "response_schema": self._schema_dict,
+            "structured_output": True
+        }
+
+    @property
+    def supports_strict_mode(self) -> bool:
+        """Return True if provider enforces valid JSON output."""
+        return True
+```
+
+#### 2. Update Your Provider
+
+```python
+# langextract_myprovider/provider.py
+class MyProviderLanguageModel(lx.inference.BaseLanguageModel):
+    def __init__(self, model_id: str, **kwargs):
+        super().__init__()
+        self.model_id = model_id
+        # Schema config will be in kwargs when use_schema_constraints=True
+        self.response_schema = kwargs.get('response_schema')
+        self.structured_output = kwargs.get('structured_output', False)
+
+    @classmethod
+    def get_schema_class(cls):
+        """Tell LangExtract about our schema support."""
+        from langextract_myprovider.schema import MyProviderSchema
+        return MyProviderSchema
+
+    def apply_schema(self, schema_instance):
+        """Apply or clear schema configuration."""
+        super().apply_schema(schema_instance)
+        if schema_instance:
+            config = schema_instance.to_provider_config()
+            self.response_schema = config.get('response_schema')
+            self.structured_output = config.get('structured_output', False)
+        else:
+            self.response_schema = None
+            self.structured_output = False
+
+    def infer(self, batch_prompts, **kwargs):
+        for prompt in batch_prompts:
+            # Use schema in API call if available
+            api_params = {}
+            if self.response_schema:
+                api_params['response_schema'] = self.response_schema
+
+            result = self.client.generate(prompt, **api_params)
+            yield [lx.inference.ScoredOutput(score=1.0, output=result)]
+```
+
+#### 3. Schema Usage
+
+When users set `use_schema_constraints=True`, LangExtract will:
+1. Call your provider's `get_schema_class()`
+2. Use `from_examples()` to build a schema from provided examples
+3. Call `to_provider_config()` to get provider-specific kwargs
+4. Pass these kwargs to your provider's `__init__()`
+5. Your provider uses the schema for structured output
 
 ### Option 2: Built-in Provider (Requires Core Team Approval)
 
@@ -357,8 +543,39 @@ ValueError: No provider registered for model_id='unknown-model'
 ```
 **Solution**: Check available patterns with `registry.list_entries()`
 
+### Plugin Not Loading
+```python
+# Your plugin isn't being discovered
+```
+**Solutions**:
+1. Manually trigger loading: `lx.providers.load_plugins_once()`
+2. Check entry points are installed: `pip show -f your-package`
+3. Verify no typos in `pyproject.toml` entry point
+4. Ensure package is installed: `pip list | grep your-package`
+
 ### Missing Dependencies
 ```python
 InferenceConfigError: OpenAI provider requires openai package
 ```
 **Solution**: Install optional dependencies: `pip install langextract[openai]`
+
+### Schema Not Working
+```python
+# Schema constraints not being applied
+```
+**Solutions**:
+1. Ensure provider implements `get_schema_class()`
+2. Check `use_schema_constraints=True` is set
+3. Verify schema's `supports_strict_mode` returns `True`
+4. Test schema creation with `Schema.from_examples(examples)`
+
+### Pattern Conflicts
+```python
+# Multiple providers match the same model_id
+```
+**Solution**: Use explicit provider selection:
+```python
+config = lx.factory.ModelConfig(
+    model_id="model-name",
+    provider="YourProviderClass"  # Explicit selection
+)

@@ -306,7 +306,8 @@ result = lx.extract(
     model_id="gemma2:2b",  # Automatically selects Ollama provider
     model_url="http://localhost:11434",
     fence_output=False,
-    use_schema_constraints=False
+    use_schema_constraints=False,
+    language_model_type=lx.inference.OllamaLanguageModel
 )
 ```
 

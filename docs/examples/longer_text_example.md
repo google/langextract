@@ -81,7 +81,10 @@ lx.io.save_annotated_documents([result], output_name="romeo_juliet_extractions.j
 # Generate the interactive visualization
 html_content = lx.visualize("romeo_juliet_extractions.jsonl")
 with open("romeo_juliet_visualization.html", "w") as f:
-    f.write(html_content)
+    if hasattr(html_content, 'data'):
+        f.write(html_content.data)  # For Jupyter/Colab
+    else:
+        f.write(html_content)
 
 print("Interactive visualization saved to romeo_juliet_visualization.html")
 ```

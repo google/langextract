@@ -23,6 +23,37 @@ docker-compose up
 - `docker-compose.yml` - Production-ready Docker setup with health checks
 - `Dockerfile` - Container definition for LangExtract
 
+## Configuration Options
+
+### Timeout Settings
+
+For slower models or large prompts, you may need to increase the timeout (default: 120 seconds):
+
+```python
+import langextract as lx
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="llama3.1:70b",  # Larger model may need more time
+    timeout=300,  # 5 minutes
+    model_url="http://localhost:11434",
+)
+```
+
+Or using ModelConfig:
+
+```python
+config = lx.factory.ModelConfig(
+    model_id="llama3.1:70b",
+    provider_kwargs={
+        "model_url": "http://localhost:11434",
+        "timeout": 300,  # 5 minutes
+    }
+)
+```
+
 ## Model License
 
 Ollama models come with their own licenses. For example:

@@ -50,8 +50,6 @@ def run_extraction(model_id="gemma2:2b", temperature=0.3):
       )
   ]
 
-  # Option 1: Use ModelConfig for explicit configuration
-  # This gives you full control over provider-specific settings
   model_config = lx.factory.ModelConfig(
       model_id=model_id,
       provider_kwargs={
@@ -69,8 +67,7 @@ def run_extraction(model_id="gemma2:2b", temperature=0.3):
       use_schema_constraints=True,
   )
 
-  # Option 2 (simpler): Just pass model_id directly
-  # LangExtract's registry automatically identifies Ollama models like "gemma2:2b"
+  # Option 2: Pass model_id directly (simpler)
   # result = lx.extract(
   #     text_or_documents=input_text,
   #     prompt_description=prompt,

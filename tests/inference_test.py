@@ -232,7 +232,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     self.assertEqual(json_payload["options"]["temperature"], 0.8)
     self.assertEqual(json_payload["options"]["keep_alive"], 300)
     self.assertEqual(json_payload["options"]["num_ctx"], 2048)
-    self.assertEqual(call_args.kwargs["timeout"], 30)
+    self.assertEqual(call_args.kwargs["timeout"], 120)
 
   @mock.patch("requests.post")
   def test_ollama_runtime_kwargs_override_stored(self, mock_post):
@@ -284,6 +284,55 @@ class TestOllamaLanguageModel(absltest.TestCase):
     json_payload = call_args.kwargs["json"]
 
     self.assertEqual(json_payload["options"]["temperature"], 0.0)
+
+  def test_ollama_default_timeout(self):
+    """Test that default timeout is used when not specified."""
+    model = ollama.OllamaLanguageModel(
+        model_id="test-model",
+        model_url="http://localhost:11434",
+    )
+
+    mock_response = mock.Mock(spec=["status_code", "json"])
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"response": "test output"}
+
+    with mock.patch.object(
+        model._requests, "post", return_value=mock_response
+    ) as mock_post:
+      model._ollama_query(prompt="test prompt")
+
+      mock_post.assert_called_once()
+      call_kwargs = mock_post.call_args[1]
+      self.assertEqual(
+          120,
+          call_kwargs["timeout"],
+          "Should use default timeout of 120 seconds",
+      )
+
+  def test_ollama_timeout_through_infer(self):
+    """Test that timeout flows correctly through the infer() method."""
+    model = ollama.OllamaLanguageModel(
+        model_id="test-model",
+        model_url="http://localhost:11434",
+        timeout=60,
+    )
+
+    mock_response = mock.Mock(spec=["status_code", "json"])
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"response": "test output"}
+
+    with mock.patch.object(
+        model._requests, "post", return_value=mock_response
+    ) as mock_post:
+      list(model.infer(["test prompt"]))
+
+      mock_post.assert_called_once()
+      call_kwargs = mock_post.call_args[1]
+      self.assertEqual(
+          60,
+          call_kwargs["timeout"],
+          "Timeout from constructor should flow through infer()",
+      )
 
 
 class TestGeminiLanguageModel(absltest.TestCase):

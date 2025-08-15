@@ -86,7 +86,7 @@ from langextract.providers import registry
 # Ollama defaults
 _OLLAMA_DEFAULT_MODEL_URL = 'http://localhost:11434'
 _DEFAULT_TEMPERATURE = 0.8
-_DEFAULT_TIMEOUT = 30
+_DEFAULT_TIMEOUT = 120
 _DEFAULT_KEEP_ALIVE = 5 * 60  # 5 minutes
 _DEFAULT_NUM_CTX = 2048
 
@@ -123,7 +123,11 @@ _DEFAULT_NUM_CTX = 2048
 )
 @dataclasses.dataclass(init=False)
 class OllamaLanguageModel(inference.BaseLanguageModel):
-  """Language model inference class using Ollama based host."""
+  """Language model inference class using Ollama based host.
+
+  Timeout can be set via constructor or passed through lx.extract():
+    lx.extract(..., language_model_params={"timeout": 300})
+  """
 
   _model: str
   _model_url: str
@@ -152,6 +156,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
       format_type: data.FormatType | None = None,
       structured_output_format: str | None = None,  # Deprecated
       constraint: schema.Constraint = schema.Constraint(),
+      timeout: int | None = None,
       **kwargs,
   ) -> None:
     """Initialize the Ollama language model.
@@ -163,6 +168,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
       format_type: Output format (JSON or YAML). Defaults to JSON.
       structured_output_format: DEPRECATED - use format_type instead.
       constraint: Schema constraints.
+      timeout: Request timeout in seconds. Defaults to 120.
       **kwargs: Additional parameters.
     """
     self._requests = requests
@@ -199,6 +205,8 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
     self.format_type = format_type
     self._constraint = constraint
     super().__init__(constraint=constraint)
+    if timeout is not None:
+      kwargs['timeout'] = timeout
     self._extra_kwargs = kwargs or {}
 
   def infer(
@@ -255,6 +263,9 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
   ) -> Mapping[str, Any]:
     """Sends a prompt to an Ollama model and returns the generated response.
 
+    Note: This is a low-level method. Constructor timeout is only used when
+    calling through infer(). Direct calls use the timeout parameter here.
+
     This function makes an HTTP POST request to the `/api/generate` endpoint of
     an Ollama server. It can optionally load the specified model first, generate
     a response (with or without streaming), then return a parsed JSON response.
@@ -275,7 +286,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
       raw: If True, bypasses any internal prompt templating; you provide the
         entire raw prompt.
       model_url: The base URL for the Ollama server. Defaults to self._model_url.
-      timeout: Timeout (in seconds) for the HTTP request.
+      timeout: Timeout (in seconds) for the HTTP request. Defaults to 120.
       keep_alive: How long (in seconds) the model remains loaded after
         generation completes.
       num_threads: Number of CPU threads to use. If None, Ollama uses a default

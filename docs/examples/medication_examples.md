@@ -67,7 +67,10 @@ lx.io.save_annotated_documents([result], output_name="medical_ner_extraction.jso
 # Generate the interactive visualization
 html_content = lx.visualize("medical_ner_extraction.jsonl")
 with open("medical_ner_visualization.html", "w") as f:
-    f.write(html_content)
+    if hasattr(html_content, 'data'):
+        f.write(html_content.data)  # For Jupyter/Colab
+    else:
+        f.write(html_content)
 
 print("Interactive visualization saved to medical_ner_visualization.html")
 ```
@@ -202,7 +205,10 @@ lx.io.save_annotated_documents(
 # Generate the interactive visualization
 html_content = lx.visualize("medical_relationship_extraction.jsonl")
 with open("medical_relationship_visualization.html", "w") as f:
-    f.write(html_content)
+    if hasattr(html_content, 'data'):
+        f.write(html_content.data)  # For Jupyter/Colab
+    else:
+        f.write(html_content)
 
 print("Interactive visualization saved to medical_relationship_visualization.html")
 ```

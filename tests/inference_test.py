@@ -94,15 +94,15 @@ class TestOllamaLanguageModel(absltest.TestCase):
     mock_response = mock.Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-      "response": '{"test": "value"}',
-      "done": True,
+        "response": '{"test": "value"}',
+        "done": True,
     }
     mock_post.return_value = mock_response
 
     api_key = "test-token-123"
     model = ollama.OllamaLanguageModel(
-      model_id="test-model",
-      api_key=api_key,
+        model_id="test-model",
+        api_key=api_key,
     )
 
     prompts = ["Test prompt"]
@@ -119,14 +119,14 @@ class TestOllamaLanguageModel(absltest.TestCase):
     mock_response = mock.Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-      "response": '{"test": "value"}',
-      "done": True,
+        "response": '{"test": "value"}',
+        "done": True,
     }
     mock_post.return_value = mock_response
 
     model = ollama.OllamaLanguageModel(
-      model_id="test-model",
-      # No api_key provided
+        model_id="test-model",
+        # No api_key provided
     )
 
     prompts = ["Test prompt"]

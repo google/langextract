@@ -364,7 +364,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
         'Content-Type': 'application/json',
         'Accept': 'application/json',
     }
-    
+
     # Add Authorization header if API key is provided
     if self._api_key:
       headers['Authorization'] = f'Bearer {self._api_key}'

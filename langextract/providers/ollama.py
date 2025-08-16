@@ -48,6 +48,7 @@ Direct provider instantiation (when model ID conflicts with other providers):
     model = OllamaLanguageModel(
         model_id="gemma2:2b",
         model_url="http://localhost:11434",  # optional, uses default if not specified
+        api_key="your-api-key",  # optional, for authenticated proxies like Open WebUI
     )
 
     # Use with extract by passing the model instance
@@ -133,6 +134,7 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       structured_output_format: str | None = None,  # Deprecated
       constraint: schema.Constraint = schema.Constraint(),
       timeout: int | None = None,
+      api_key: str | None = None,
       **kwargs,
   ) -> None:
     """Initialize the Ollama language model.
@@ -145,9 +147,11 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       structured_output_format: DEPRECATED - use format_type instead.
       constraint: Schema constraints.
       timeout: Request timeout in seconds. Defaults to 120.
+      api_key: Optional API key for authentication (sent as Bearer token).
       **kwargs: Additional parameters.
     """
     self._requests = requests
+    self._api_key = api_key
 
     # Handle deprecated structured_output_format parameter
     if structured_output_format is not None:
@@ -334,13 +338,19 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
 
     request_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
 
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+    
+    # Add Authorization header if API key is provided
+    if self._api_key:
+      headers['Authorization'] = f'Bearer {self._api_key}'
+
     try:
       response = self._requests.post(
           api_url,
-          headers={
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-          },
+          headers=headers,
           json=payload,
           timeout=request_timeout,
       )

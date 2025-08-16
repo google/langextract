@@ -88,6 +88,55 @@ class TestBaseLanguageModel(absltest.TestCase):
 
 class TestOllamaLanguageModel(absltest.TestCase):
 
+  @mock.patch("requests.post")
+  def test_ollama_authorization_header(self, mock_post):
+    """Verify Authorization header is sent when api_key is provided."""
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+      "response": '{"test": "value"}',
+      "done": True,
+    }
+    mock_post.return_value = mock_response
+
+    api_key = "test-token-123"
+    model = ollama.OllamaLanguageModel(
+      model_id="test-model",
+      api_key=api_key,
+    )
+
+    prompts = ["Test prompt"]
+    list(model.infer(prompts))
+
+    mock_post.assert_called_once()
+    call_args = mock_post.call_args
+    headers = call_args.kwargs["headers"]
+    self.assertEqual(headers["Authorization"], f"Bearer {api_key}")
+
+  @mock.patch("requests.post")
+  def test_ollama_no_authorization_header_when_no_api_key(self, mock_post):
+    """Verify Authorization header is not sent when api_key is not provided."""
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+      "response": '{"test": "value"}',
+      "done": True,
+    }
+    mock_post.return_value = mock_response
+
+    model = ollama.OllamaLanguageModel(
+      model_id="test-model",
+      # No api_key provided
+    )
+
+    prompts = ["Test prompt"]
+    list(model.infer(prompts))
+
+    mock_post.assert_called_once()
+    call_args = mock_post.call_args
+    headers = call_args.kwargs["headers"]
+    self.assertNotIn("Authorization", headers)
+
   @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
   def test_ollama_infer(self, mock_ollama_query):
 

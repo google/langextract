@@ -30,12 +30,12 @@ import time
 from absl import logging
 
 from langextract import chunking
-from langextract import data
-from langextract import exceptions
-from langextract import inference
 from langextract import progress
 from langextract import prompting
 from langextract import resolver as resolver_lib
+from langextract.core import data
+from langextract.core import exceptions
+from langextract.core.base_model import BaseLanguageModel
 
 ATTRIBUTE_SUFFIX = "_attributes"
 
@@ -160,7 +160,7 @@ class Annotator:
 
   def __init__(
       self,
-      language_model: inference.BaseLanguageModel,
+      language_model: BaseLanguageModel,
       prompt_template: prompting.PromptTemplateStructured,
       format_type: data.FormatType = data.FormatType.YAML,
       attribute_suffix: str = ATTRIBUTE_SUFFIX,
@@ -328,7 +328,7 @@ class Annotator:
           logging.error(
               "No scored outputs for chunk with ID %s.", text_chunk.document_id
           )
-          raise inference.InferenceOutputError(
+          raise exceptions.InferenceOutputError(
               "No scored outputs from language model."
           )
         while curr_document.document_id != text_chunk.document_id:

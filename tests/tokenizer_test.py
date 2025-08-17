@@ -17,7 +17,7 @@ import textwrap
 from absl.testing import absltest
 from absl.testing import parameterized
 
-from langextract import tokenizer
+from langextract.core import tokenizer
 
 
 class TokenizerTest(parameterized.TestCase):

@@ -19,18 +19,21 @@ from unittest import mock
 
 from absl.testing import absltest
 
-from langextract import data
 from langextract import inference
 from langextract import prompting
 from langextract import schema
 import langextract as lx
+from langextract.core import data
+from langextract.providers.schemas import gemini as gemini_schemas
 
 
 class InitTest(absltest.TestCase):
   """Test cases for the main package functions."""
 
-  @mock.patch.object(schema.GeminiSchema, "from_examples", autospec=True)
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch.object(
+      gemini_schemas.GeminiSchema, "from_examples", autospec=True
+  )
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_lang_extract_as_lx_extract(
       self, mock_create_model, mock_gemini_schema
   ):
@@ -141,8 +144,10 @@ class InitTest(absltest.TestCase):
 
     self.assertDataclassEqual(expected_result, actual_result)
 
-  @mock.patch.object(schema.GeminiSchema, "from_examples", autospec=True)
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch.object(
+      gemini_schemas.GeminiSchema, "from_examples", autospec=True
+  )
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_extract_custom_params_reach_inference(
       self, mock_create_model, mock_gemini_schema
   ):

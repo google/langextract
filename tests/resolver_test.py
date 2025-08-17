@@ -19,10 +19,10 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import chunking
-from langextract import data
 from langextract import resolver as resolver_lib
 from langextract import schema
-from langextract import tokenizer
+from langextract.core import data
+from langextract.core import tokenizer
 
 
 def assert_char_interval_match_source(

@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for provider plugin system."""
+"""Tests for provider plugin system.
+
+Note: This file contains test helper classes that intentionally have
+few public methods. The too-few-public-methods warnings are expected.
+"""
 
 from importlib import metadata
 import os
@@ -31,15 +35,38 @@ import pytest
 import langextract as lx
 
 
+def _create_mock_entry_points(entry_points_list):
+  """Create a mock EntryPoints object for testing.
+
+  Args:
+    entry_points_list: List of entry points to return for langextract.providers.
+
+  Returns:
+    A mock object that behaves like importlib.metadata.EntryPoints.
+  """
+
+  class MockEntryPoints:  # pylint: disable=too-few-public-methods
+    """Mock EntryPoints that implements select() method."""
+
+    def select(self, group=None):
+      if group == "langextract.providers":
+        return entry_points_list
+      return []
+
+  return MockEntryPoints()
+
+
 class PluginSmokeTest(absltest.TestCase):
   """Basic smoke tests for plugin loading functionality."""
 
   def setUp(self):
     super().setUp()
     lx.providers.registry.clear()
-    lx.providers._PLUGINS_LOADED = False
+    # Always reset both flags to ensure clean state
+    lx.providers._reset_for_testing()
+    # Register cleanup
     self.addCleanup(lx.providers.registry.clear)
-    self.addCleanup(setattr, lx.providers, "_PLUGINS_LOADED", False)
+    self.addCleanup(lx.providers._reset_for_testing)
 
   def test_plugin_discovery_and_usage(self):
     """Test plugin discovery via entry points.
@@ -50,7 +77,7 @@ class PluginSmokeTest(absltest.TestCase):
 
     def _ep_load():
       @lx.providers.registry.register(r"^plugin-model")
-      class PluginProvider(lx.inference.BaseLanguageModel):
+      class PluginProvider(lx.inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
         def __init__(self, model_id=None, **kwargs):
           super().__init__()
@@ -69,11 +96,7 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata,
-        "entry_points",
-        side_effect=lambda **kw: [ep]
-        if kw.get("group") == "langextract.providers"
-        else [],
+        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
     ):
       lx.providers.load_plugins_once()
 
@@ -111,7 +134,11 @@ class PluginSmokeTest(absltest.TestCase):
         load=_bad_load,
     )
 
-    with mock.patch.object(metadata, "entry_points", return_value=[bad_ep]):
+    with mock.patch.object(
+        metadata,
+        "entry_points",
+        return_value=_create_mock_entry_points([bad_ep]),
+    ):
       lx.providers.load_plugins_once()
 
       providers = lx.providers.registry.list_providers()
@@ -120,10 +147,11 @@ class PluginSmokeTest(absltest.TestCase):
           list,
           "Registry should remain functional after import error",
       )
-      self.assertEqual(
+      # Built-in providers should still be loaded even if plugin fails
+      self.assertGreater(
           len(providers),
           0,
-          "Broken EP should not partially register",
+          "Built-in providers should still be available after plugin failure",
       )
 
   def test_load_plugins_once_is_idempotent(self):
@@ -131,7 +159,7 @@ class PluginSmokeTest(absltest.TestCase):
 
     def _ep_load():
       @lx.providers.registry.register(r"^plugin-model")
-      class Plugin(lx.inference.BaseLanguageModel):
+      class Plugin(lx.inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
         def infer(self, *a, **k):
           return [[lx.inference.ScoredOutput(score=1.0, output="ok")]]
@@ -146,11 +174,7 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata,
-        "entry_points",
-        side_effect=lambda **kw: [ep]
-        if kw.get("group") == "langextract.providers"
-        else [],
+        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
     ) as m:
       lx.providers.load_plugins_once()
       lx.providers.load_plugins_once()  # should be a no-op
@@ -172,9 +196,7 @@ class PluginSmokeTest(absltest.TestCase):
     with mock.patch.object(
         metadata,
         "entry_points",
-        side_effect=lambda **kw: [bad_ep]
-        if kw.get("group") == "langextract.providers"
-        else [],
+        return_value=_create_mock_entry_points([bad_ep]),
     ):
       lx.providers.load_plugins_once()
       # The system should remain functional even if a bad provider is loaded
@@ -198,7 +220,7 @@ class PluginSmokeTest(absltest.TestCase):
 
     def _ep_load():
       @lx.providers.registry.register(r"^gemini", priority=50)
-      class OverrideGemini(lx.inference.BaseLanguageModel):
+      class OverrideGemini(lx.inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
         def infer(self, batch_prompts, **kwargs):
           return [[lx.inference.ScoredOutput(score=1.0, output="override")]]
@@ -213,11 +235,7 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata,
-        "entry_points",
-        side_effect=lambda **kw: [ep]
-        if kw.get("group") == "langextract.providers"
-        else [],
+        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
     ):
       lx.providers.load_plugins_once()
 
@@ -234,7 +252,7 @@ class PluginSmokeTest(absltest.TestCase):
 
     def _ep_load():
       @lx.providers.registry.register(r"^plugin-resolve")
-      class ResolveMePlease(lx.inference.BaseLanguageModel):
+      class ResolveMePlease(lx.inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
         def infer(self, batch_prompts, **kwargs):
           return [[lx.inference.ScoredOutput(score=1.0, output="ok")]]
@@ -249,11 +267,7 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata,
-        "entry_points",
-        side_effect=lambda **kw: [ep]
-        if kw.get("group") == "langextract.providers"
-        else [],
+        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
     ):
       lx.providers.load_plugins_once()
 
@@ -314,11 +328,7 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata,
-        "entry_points",
-        side_effect=lambda **kw: [ep]
-        if kw.get("group") == "langextract.providers"
-        else [],
+        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
     ):
       lx.providers.load_plugins_once()
 
@@ -430,11 +440,7 @@ class PluginE2ETest(absltest.TestCase):
     self.addCleanup(setattr, lx.providers, "_PLUGINS_LOADED", False)
 
     with mock.patch.object(
-        metadata,
-        "entry_points",
-        side_effect=lambda **kw: [ep]
-        if kw.get("group") == "langextract.providers"
-        else [],
+        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
     ):
       lx.providers.load_plugins_once()
 

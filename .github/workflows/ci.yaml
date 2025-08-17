@@ -64,6 +64,14 @@ jobs:
           pyink --check --diff .
           isort --check-only --diff .
 
+      - name: Check import structure
+        id: import-check
+        env:
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          lint-imports --config pyproject.toml
+
       - name: Comment on PR if formatting fails
         if: failure() && steps.format-check.outcome == 'failure'
         uses: actions/github-script@v7

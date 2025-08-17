@@ -30,10 +30,10 @@ import operator
 from absl import logging
 import yaml
 
-from langextract import data
-from langextract import exceptions
-from langextract import schema
-from langextract import tokenizer
+from langextract.core import data
+from langextract.core import exceptions
+from langextract.core import schema
+from langextract.core import tokenizer
 
 _FUZZY_ALIGNMENT_MIN_THRESHOLD = 0.75
 

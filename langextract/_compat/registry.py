@@ -12,14 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Compatibility shim for langextract.data imports.
-
-This module provides backward compatibility for code that imports from
-langextract.data. All functionality has moved to langextract.core.data.
-"""
+"""Compatibility shim for langextract.registry imports."""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
-# Re-export everything from core.data for backward compatibility
-# pylint: disable=wildcard-import,unused-wildcard-import
-from langextract.core.data import *
+import warnings
+
+from langextract import plugins
+
+
+def __getattr__(name: str):
+  """Forward to plugins module with deprecation warning."""
+  warnings.warn(
+      "`langextract.registry` is deprecated and will be removed in v2.0.0; "
+      "use `langextract.plugins` instead.",
+      FutureWarning,
+      stacklevel=2,
+  )
+  return getattr(plugins, name)

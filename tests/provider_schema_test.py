@@ -18,14 +18,15 @@ from unittest import mock
 
 from absl.testing import absltest
 
-from langextract import data
 from langextract import exceptions
 from langextract import factory
 from langextract import schema
 import langextract as lx
+from langextract.core import data
 from langextract.providers import gemini as gemini_provider
 from langextract.providers import ollama
 from langextract.providers import openai
+from langextract.providers.schemas import gemini as gemini_schemas
 
 
 class ProviderSchemaDiscoveryTest(absltest.TestCase):
@@ -36,7 +37,7 @@ class ProviderSchemaDiscoveryTest(absltest.TestCase):
     schema_class = gemini_provider.GeminiLanguageModel.get_schema_class()
     self.assertEqual(
         schema_class,
-        schema.GeminiSchema,
+        gemini_schemas.GeminiSchema,
         msg="GeminiLanguageModel should return GeminiSchema class",
     )
 
@@ -376,7 +377,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
         )
     ]
 
-    gemini_schema = schema.GeminiSchema.from_examples(examples_data)
+    gemini_schema = gemini_schemas.GeminiSchema.from_examples(examples_data)
     provider_config = gemini_schema.to_provider_config()
 
     self.assertIn(
@@ -409,7 +410,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
   def test_gemini_supports_strict_mode(self):
     """Test that GeminiSchema supports strict mode."""
     examples_data = []
-    gemini_schema = schema.GeminiSchema.from_examples(examples_data)
+    gemini_schema = gemini_schemas.GeminiSchema.from_examples(examples_data)
     self.assertTrue(
         gemini_schema.supports_strict_mode,
         msg="GeminiSchema should support strict mode",
@@ -429,7 +430,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
             ],
         )
     ]
-    test_schema = schema.GeminiSchema.from_examples(examples_data)
+    test_schema = gemini_schemas.GeminiSchema.from_examples(examples_data)
 
     with mock.patch("google.genai.Client", autospec=True):
       model = gemini_provider.GeminiLanguageModel(
@@ -464,7 +465,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
             ],
         )
     ]
-    test_schema = schema.GeminiSchema.from_examples(examples_data)
+    test_schema = gemini_schemas.GeminiSchema.from_examples(examples_data)
 
     with mock.patch("google.genai.Client", autospec=True) as mock_client:
       mock_model_instance = mock.Mock(spec=["return_value"])

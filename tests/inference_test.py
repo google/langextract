@@ -12,14 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Tests for inference module.
+
+Note: This file contains test helper classes that intentionally have
+few public methods and define attributes outside __init__. These
+pylint warnings are expected for test fixtures.
+"""
+# pylint: disable=attribute-defined-outside-init
+
 from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
 
-from langextract import data
 from langextract import exceptions
 from langextract import inference
+from langextract.core import data
 from langextract.providers import gemini
 from langextract.providers import ollama
 from langextract.providers import openai as openai_provider
@@ -30,7 +38,7 @@ class TestBaseLanguageModel(absltest.TestCase):
   def test_merge_kwargs_with_none(self):
     """Test merge_kwargs handles None runtime_kwargs."""
 
-    class TestModel(inference.BaseLanguageModel):
+    class TestModel(inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
       def infer(self, batch_prompts, **kwargs):
         return iter([])
@@ -62,7 +70,7 @@ class TestBaseLanguageModel(absltest.TestCase):
   def test_merge_kwargs_without_extra_kwargs(self):
     """Test merge_kwargs when _extra_kwargs doesn't exist."""
 
-    class TestModel(inference.BaseLanguageModel):
+    class TestModel(inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
       def infer(self, batch_prompts, **kwargs):
         return iter([])

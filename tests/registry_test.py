@@ -12,7 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the provider registry module."""
+"""Tests for the provider registry module.
+
+Note: This file tests the deprecated registry module which is now an alias
+for router. The no-name-in-module warning for providers.registry is expected.
+Test helper classes also intentionally have few public methods.
+"""
+# pylint: disable=no-name-in-module
 
 import re
 from unittest import mock
@@ -208,7 +214,7 @@ class RegistryTest(absltest.TestCase):
         r"^TinyLlama/",
         priority=100,
     )
-    class TestHFProvider(inference.BaseLanguageModel):
+    class TestHFProvider(inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
       def infer(self, batch_prompts, **kwargs):
         return []

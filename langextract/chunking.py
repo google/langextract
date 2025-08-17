@@ -27,9 +27,9 @@ import re
 from absl import logging
 import more_itertools
 
-from langextract import data
-from langextract import exceptions
-from langextract import tokenizer
+from langextract.core import data
+from langextract.core import exceptions
+from langextract.core import tokenizer
 
 
 class TokenUtilError(exceptions.LangExtractError):

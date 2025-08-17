@@ -25,10 +25,10 @@ import dataclasses
 import os
 import typing
 
-from langextract import exceptions
-from langextract import inference
 from langextract import providers
-from langextract.providers import registry
+from langextract.core import exceptions
+from langextract.core.base_model import BaseLanguageModel
+from langextract.providers import router
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
@@ -93,7 +93,7 @@ def create_model(
     use_schema_constraints: bool = False,
     fence_output: bool | None = None,
     return_fence_output: bool = False,
-) -> inference.BaseLanguageModel | tuple[inference.BaseLanguageModel, bool]:
+) -> BaseLanguageModel | tuple[BaseLanguageModel, bool]:
   """Create a language model instance from configuration.
 
   Args:
@@ -126,14 +126,15 @@ def create_model(
   if not config.model_id and not config.provider:
     raise ValueError("Either model_id or provider must be specified")
 
+  # Load providers before any resolution
+  providers.load_builtins_once()
+  providers.load_plugins_once()
+
   try:
     if config.provider:
-      provider_class = registry.resolve_provider(config.provider)
+      provider_class = router.resolve_provider(config.provider)
     else:
-      # Load providers before pattern matching
-      providers.load_builtins_once()
-      providers.load_plugins_once()
-      provider_class = registry.resolve(config.model_id)
+      provider_class = router.resolve(config.model_id)
   except (ModuleNotFoundError, ImportError) as e:
     raise exceptions.InferenceConfigError(
         "Failed to load provider. "
@@ -165,7 +166,7 @@ def create_model_from_id(
     model_id: str | None = None,
     provider: str | None = None,
     **provider_kwargs: typing.Any,
-) -> inference.BaseLanguageModel:
+) -> BaseLanguageModel:
   """Convenience function to create a model.
 
   Args:
@@ -187,7 +188,7 @@ def _create_model_with_schema(
     examples: typing.Sequence[typing.Any] | None = None,
     use_schema_constraints: bool = True,
     fence_output: bool | None = None,
-) -> inference.BaseLanguageModel:
+) -> BaseLanguageModel:
   """Internal helper to create a model with optional schema constraints.
 
   This function creates a language model and optionally configures it with
@@ -206,11 +207,11 @@ def _create_model_with_schema(
   """
 
   if config.provider:
-    provider_class = registry.resolve_provider(config.provider)
+    provider_class = router.resolve_provider(config.provider)
   else:
     providers.load_builtins_once()
     providers.load_plugins_once()
-    provider_class = registry.resolve(config.model_id)
+    provider_class = router.resolve(config.model_id)
 
   schema_instance = None
   if use_schema_constraints and examples:

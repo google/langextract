@@ -14,17 +14,31 @@
 
 """Provider package for LangExtract.
 
-This package contains the registry system and provider implementations
-for various LLM backends.
+This package contains provider implementations for various LLM backends.
+Each provider can be imported independently for fine-grained dependency
+management in build systems.
 """
-# pylint: disable=cyclic-import
 
+import importlib
 from importlib import metadata
 import os
+import warnings
 
 from absl import logging
 
-from langextract.providers import registry
+from langextract.providers.builtin_registry import BUILTIN_PROVIDERS
+from langextract.providers.router import register
+from langextract.providers.router import register_lazy
+
+__all__ = [
+    'gemini',
+    'openai',
+    'ollama',
+    'router',
+    'schemas',
+    'load_plugins_once',
+    'load_builtins_once',
+]
 
 # Track provider loading for lazy initialization
 _PLUGINS_LOADED = False
@@ -35,81 +49,123 @@ def load_builtins_once() -> None:
   """Load built-in providers to register their patterns.
 
   Idempotent function that ensures provider patterns are available
-  for model resolution.
+  for model resolution. Uses lazy registration to ensure providers
+  can be re-registered after registry.clear() even if their modules
+  are already in sys.modules.
   """
   global _BUILTINS_LOADED  # pylint: disable=global-statement
+
   if _BUILTINS_LOADED:
     return
 
-  # pylint: disable=import-outside-toplevel
-  from langextract.providers import gemini  # noqa: F401
-  from langextract.providers import ollama  # noqa: F401
-
-  try:
-    from langextract.providers import openai  # noqa: F401
-  except ImportError:
-    logging.debug("OpenAI provider not available (optional dependency)")
-  # pylint: enable=import-outside-toplevel
+  # Register built-ins lazily so they can be re-registered after a registry.clear()
+  # even if their modules were already imported earlier in the test run.
+  for config in BUILTIN_PROVIDERS:
+    register_lazy(
+        *config['patterns'],
+        target=config['target'],
+        priority=config['priority'],
+    )
 
   _BUILTINS_LOADED = True
 
 
 def load_plugins_once() -> None:
-  """Load third-party providers via entry points.
+  """Load provider plugins from installed packages.
 
-  This function is idempotent and will only load plugins once.
-  Set LANGEXTRACT_DISABLE_PLUGINS=1 to disable plugin loading.
+  Discovers and loads langextract provider plugins using entry points.
+  This function is idempotent - multiple calls have no effect.
   """
   global _PLUGINS_LOADED  # pylint: disable=global-statement
   if _PLUGINS_LOADED:
     return
 
-  if os.getenv("LANGEXTRACT_DISABLE_PLUGINS") == "1":
-    logging.info("Plugin loading disabled by LANGEXTRACT_DISABLE_PLUGINS=1")
+  # Check if plugin loading is disabled
+  if os.environ.get('LANGEXTRACT_DISABLE_PLUGINS', '').lower() in (
+      '1',
+      'true',
+      'yes',
+  ):
+    logging.info('Plugin loading disabled via LANGEXTRACT_DISABLE_PLUGINS')
     _PLUGINS_LOADED = True
     return
 
-  try:
-    entry_points_group = metadata.entry_points(group="langextract.providers")
-  except Exception as exc:
-    logging.debug("No third-party provider entry points found: %s", exc)
-    return
+  # Load built-in providers first
+  load_builtins_once()
 
-  # Set flag after successful entry point query to avoid disabling discovery
-  # on transient failures during enumeration.
+  try:
+    # Get entry points using the metadata API
+    eps = metadata.entry_points()
+
+    # Try different APIs based on what's available
+    if hasattr(eps, 'select'):
+      # Python 3.10+ API
+      provider_eps = eps.select(group='langextract.providers')
+    elif hasattr(eps, 'get'):
+      # Python 3.9 API
+      provider_eps = eps.get('langextract.providers', [])
+    else:
+      # Fallback for older versions
+      provider_eps = [
+          ep
+          for ep in eps
+          if getattr(ep, 'group', None) == 'langextract.providers'
+      ]
+
+    for entry_point in provider_eps:
+      try:
+        # Load the entry point
+        provider_class = entry_point.load()
+        logging.info('Loaded provider plugin: %s', entry_point.name)
+
+        # Register if it has pattern information
+        if hasattr(provider_class, 'get_model_patterns'):
+          patterns = provider_class.get_model_patterns()
+          for pattern in patterns:
+            register(
+                pattern,
+                priority=getattr(
+                    provider_class,
+                    'pattern_priority',
+                    20,  # Default plugin priority
+                ),
+            )(provider_class)
+          logging.info(
+              'Registered %d patterns for %s', len(patterns), entry_point.name
+          )
+      except Exception as e:
+        logging.warning(
+            'Failed to load provider plugin %s: %s', entry_point.name, e
+        )
+
+  except Exception as e:
+    logging.warning('Error discovering provider plugins: %s', e)
+
   _PLUGINS_LOADED = True
 
-  for entry_point in entry_points_group:
-    try:
-      provider = entry_point.load()
-      # Validate provider subclasses but don't auto-register - plugins must
-      # use their own @register decorators to control patterns.
-      if isinstance(provider, type):
-        # pylint: disable=import-outside-toplevel
-        # Late import to avoid circular dependency
-        from langextract import inference
 
-        if issubclass(provider, inference.BaseLanguageModel):
-          logging.info(
-              "Loaded third-party provider class from entry point: %s",
-              entry_point.name,
-          )
-        else:
-          logging.warning(
-              "Entry point %s returned non-provider class %r; ignoring",
-              entry_point.name,
-              provider,
-          )
-      else:
-        # Module import triggers decorator execution
-        logging.debug(
-            "Loaded provider module/object from entry point: %s",
-            entry_point.name,
-        )
-    except Exception as exc:
-      logging.warning(
-          "Failed to load third-party provider %s: %s", entry_point.value, exc
-      )
+def _reset_for_testing() -> None:
+  """Reset plugin loading state for testing. Should only be used in tests."""
+  global _PLUGINS_LOADED, _BUILTINS_LOADED  # pylint: disable=global-statement
+  _PLUGINS_LOADED = False
+  _BUILTINS_LOADED = False
 
 
-__all__ = ["registry", "load_plugins_once", "load_builtins_once"]
+def __getattr__(name: str):
+  """Lazy loading for submodules."""
+  if name == 'router':
+    return importlib.import_module('langextract.providers.router')
+  elif name == 'registry':  # Backward compat
+    warnings.warn(
+        'providers.registry is deprecated, use providers.router instead',
+        FutureWarning,
+        stacklevel=2,
+    )
+    return importlib.import_module('langextract.providers.router')
+  elif name == 'schemas':
+    return importlib.import_module('langextract.providers.schemas')
+  elif name == '_PLUGINS_LOADED':
+    return _PLUGINS_LOADED
+  elif name == '_BUILTINS_LOADED':
+    return _BUILTINS_LOADED
+  raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

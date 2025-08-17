@@ -67,7 +67,7 @@ Prerequisites:
     2. Pull the model: ollama pull gemma2:2b
     3. Ollama server will start automatically when you use extract()
 """
-# pylint: disable=cyclic-import,duplicate-code
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -77,11 +77,14 @@ import warnings
 
 import requests
 
-from langextract import data
-from langextract import exceptions
-from langextract import inference
-from langextract import schema
-from langextract.providers import registry
+# Import from core modules directly
+from langextract.core import exceptions
+from langextract.core import schema
+from langextract.core import types as core_types
+from langextract.core.base_model import BaseLanguageModel
+from langextract.core.types import FormatType
+from langextract.providers import patterns
+from langextract.providers import router
 
 # Ollama defaults
 _OLLAMA_DEFAULT_MODEL_URL = 'http://localhost:11434'
@@ -91,38 +94,12 @@ _DEFAULT_KEEP_ALIVE = 5 * 60  # 5 minutes
 _DEFAULT_NUM_CTX = 2048
 
 
-@registry.register(
-    # Standard Ollama naming patterns
-    r'^gemma',  # gemma2:2b, gemma2:9b, gemma2:27b, etc.
-    r'^llama',  # llama3.2:1b, llama3.2:3b, llama3.1:8b, llama3.1:70b, etc.
-    r'^mistral',  # mistral:7b, mistral-nemo:12b, mistral-large, etc.
-    r'^mixtral',  # mixtral:8x7b, mixtral:8x22b, etc.
-    r'^phi',  # phi3:mini, phi3:medium, phi3.5, etc.
-    r'^qwen',  # qwen3:8b, qwen2.5:7b, qwen2.5:32b, qwen2.5-coder, etc.
-    r'^deepseek',  # deepseek-r1:8b, deepseek-v3:671b, deepseek-coder-v2, etc.
-    r'^command-r',  # command-r:35b, command-r-plus:104b, etc.
-    r'^starcoder',  # starcoder2:3b, starcoder2:7b, starcoder2:15b, etc.
-    r'^codellama',  # codellama:7b, codellama:13b, codellama:34b, etc.
-    r'^codegemma',  # codegemma:2b, codegemma:7b, etc.
-    r'^tinyllama',  # tinyllama:1.1b, etc.
-    r'^wizardcoder',  # wizardcoder:7b, wizardcoder:13b, wizardcoder:34b, etc.
-    r'^gpt-oss',  # gpt-oss:20b, etc.
-    # Hugging Face style model IDs (organization/model-name)
-    r'^meta-llama/[Ll]lama',  # meta-llama/Llama-3.2-1B-Instruct, etc.
-    r'^google/gemma',  # google/gemma-2b, google/gemma-7b-it, etc.
-    r'^mistralai/[Mm]istral',  # mistralai/Mistral-7B-v0.1, etc.
-    r'^mistralai/[Mm]ixtral',  # mistralai/Mixtral-8x7B-v0.1, etc.
-    r'^microsoft/phi',  # microsoft/phi-2, microsoft/phi-3-mini, etc.
-    r'^Qwen/',  # Qwen/Qwen2.5-7B, Qwen/Qwen2.5-Coder, etc.
-    r'^deepseek-ai/',  # deepseek-ai/deepseek-coder-v2, etc.
-    r'^bigcode/starcoder',  # bigcode/starcoder2-3b, etc.
-    r'^codellama/',  # codellama/CodeLlama-7b-Python, etc.
-    r'^TinyLlama/',  # TinyLlama/TinyLlama-1.1B-Chat-v1.0, etc.
-    r'^WizardLM/',  # WizardLM/WizardCoder-Python-7B-V1.0, etc.
-    priority=10,
+@router.register(
+    *patterns.OLLAMA_PATTERNS,
+    priority=patterns.OLLAMA_PRIORITY,
 )
 @dataclasses.dataclass(init=False)
-class OllamaLanguageModel(inference.BaseLanguageModel):
+class OllamaLanguageModel(BaseLanguageModel):
   """Language model inference class using Ollama based host.
 
   Timeout can be set via constructor or passed through lx.extract():
@@ -131,7 +108,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
 
   _model: str
   _model_url: str
-  format_type: data.FormatType = data.FormatType.JSON
+  format_type: FormatType = FormatType.JSON
   _constraint: schema.Constraint = dataclasses.field(
       default_factory=schema.Constraint, repr=False, compare=False
   )
@@ -153,7 +130,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
       model_id: str,
       model_url: str = _OLLAMA_DEFAULT_MODEL_URL,
       base_url: str | None = None,  # Alias for model_url
-      format_type: data.FormatType | None = None,
+      format_type: FormatType | None = None,
       structured_output_format: str | None = None,  # Deprecated
       constraint: schema.Constraint = schema.Constraint(),
       timeout: int | None = None,
@@ -178,26 +155,24 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
       warnings.warn(
           "'structured_output_format' is deprecated and will be removed in "
           "v2.0.0. Use 'format_type' instead.",
-          DeprecationWarning,
+          FutureWarning,
           stacklevel=2,
       )
       # Only use structured_output_format if format_type wasn't explicitly provided
       if format_type is None:
         format_type = (
-            data.FormatType.JSON
+            FormatType.JSON
             if structured_output_format == 'json'
-            else data.FormatType.YAML
+            else FormatType.YAML
         )
 
     fmt = kwargs.pop('format', None)
     if format_type is None and fmt in ('json', 'yaml'):
-      format_type = (
-          data.FormatType.JSON if fmt == 'json' else data.FormatType.YAML
-      )
+      format_type = FormatType.JSON if fmt == 'json' else FormatType.YAML
 
     # Default to JSON if neither parameter was provided
     if format_type is None:
-      format_type = data.FormatType.JSON
+      format_type = FormatType.JSON
 
     self._model = model_id
     # Support both model_url and base_url parameters
@@ -211,7 +186,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
-  ) -> Iterator[Sequence[inference.ScoredOutput]]:
+  ) -> Iterator[Sequence[core_types.ScoredOutput]]:
     """Runs inference on a list of prompts via Ollama's API.
 
     Args:
@@ -229,13 +204,13 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
             prompt=prompt,
             model=self._model,
             structured_output_format='json'
-            if self.format_type == data.FormatType.JSON
+            if self.format_type == FormatType.JSON
             else 'yaml',
             model_url=self._model_url,
             **combined_kwargs,
         )
         # No score for Ollama. Default to 1.0
-        yield [inference.ScoredOutput(score=1.0, output=response['response'])]
+        yield [core_types.ScoredOutput(score=1.0, output=response['response'])]
       except Exception as e:
         raise exceptions.InferenceRuntimeError(
             f'Ollama API error: {str(e)}', original=e
@@ -310,7 +285,7 @@ class OllamaLanguageModel(inference.BaseLanguageModel):
     model_url = model_url or self._model_url
     if structured_output_format is None:
       structured_output_format = (
-          'json' if self.format_type == data.FormatType.JSON else 'yaml'
+          'json' if self.format_type == FormatType.JSON else 'yaml'
       )
 
     options: dict[str, Any] = {}

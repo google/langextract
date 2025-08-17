@@ -14,6 +14,7 @@
 
 [MASTER]
 
+
 # Use multiple processes to speed up Pylint. Specifying 0 will auto-detect the
 # number of processors available to use.
 jobs=0

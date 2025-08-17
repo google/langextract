@@ -18,8 +18,8 @@ from unittest import mock
 
 from absl.testing import absltest
 
-from langextract import data as lx_data
 from langextract import visualization
+from langextract.core import data as lx_data
 
 _PALETTE = visualization._PALETTE
 _VISUALIZATION_CSS = visualization._VISUALIZATION_CSS

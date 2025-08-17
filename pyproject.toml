@@ -59,7 +59,8 @@ dev = [
     "isort>=5.13.0",
     "pylint>=3.0.0",
     "pytype>=2024.10.11",
-    "tox>=4.0.0"
+    "tox>=4.0.0",
+    "import-linter>=2.0"
 ]
 test = [
     "pytest>=7.4.0",
@@ -71,8 +72,23 @@ notebook = [
 ]
 
 [tool.setuptools]
-packages = ["langextract", "langextract.providers", "langextract.providers.schemas"]
-include-package-data = false
+packages = [
+    "langextract",
+    "langextract._compat",
+    "langextract.core",
+    "langextract.providers",
+    "langextract.providers.schemas"
+]
+include-package-data = true
+
+[tool.setuptools.package-data]
+langextract = ["py.typed"]
+
+# Provider discovery mechanism for built-in and third-party providers
+[project.entry-points."langextract.providers"]
+gemini = "langextract.providers.gemini:GeminiLanguageModel"
+ollama = "langextract.providers.ollama:OllamaLanguageModel"
+openai = "langextract.providers.openai:OpenAILanguageModel"
 
 [tool.setuptools.exclude-package-data]
 "*" = [
@@ -110,3 +126,30 @@ line_length = 80
 force_sort_within_sections = true
 # Allow multiple imports on one line for these modules
 single_line_exclusions = ["typing", "typing_extensions", "collections.abc"]
+
+[tool.importlinter]
+root_package = "langextract"
+
+
+[[tool.importlinter.contracts]]
+name = "Providers must not import inference"
+type = "forbidden"
+source_modules = ["langextract.providers"]
+forbidden_modules = ["langextract.inference"]
+
+[[tool.importlinter.contracts]]
+name = "Core must not import providers"
+type = "forbidden"
+source_modules = ["langextract.core"]
+forbidden_modules = ["langextract.providers"]
+
+[[tool.importlinter.contracts]]
+name = "Core must not import high-level modules"
+type = "forbidden"
+source_modules = ["langextract.core"]
+forbidden_modules = [
+  "langextract.annotation",
+  "langextract.chunking",
+  "langextract.prompting",
+  "langextract.resolver",
+]

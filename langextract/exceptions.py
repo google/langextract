@@ -12,60 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Base exceptions for LangExtract."""
+"""Public exceptions API for LangExtract.
+
+This module re-exports exceptions from core.exceptions for backward compatibility.
+All new code should import directly from langextract.core.exceptions.
+"""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
+
+# Re-export all exceptions from core for backward compatibility
+from langextract.core.exceptions import InferenceConfigError
+from langextract.core.exceptions import InferenceError
+from langextract.core.exceptions import InferenceOutputError
+from langextract.core.exceptions import InferenceRuntimeError
+from langextract.core.exceptions import LangExtractError
+from langextract.core.exceptions import ProviderError
+from langextract.core.exceptions import SchemaError
 
 __all__ = [
     "LangExtractError",
     "InferenceError",
     "InferenceConfigError",
     "InferenceRuntimeError",
+    "InferenceOutputError",
+    "ProviderError",
+    "SchemaError",
 ]
-
-
-class LangExtractError(Exception):
-  """Base exception for all LangExtract errors.
-
-  All exceptions raised by LangExtract should inherit from this class.
-  This allows users to catch all LangExtract-specific errors with a single
-  except clause.
-  """
-
-
-class InferenceError(LangExtractError):
-  """Base exception for inference-related errors."""
-
-
-class InferenceConfigError(InferenceError):
-  """Exception raised for configuration errors.
-
-  This includes missing API keys, invalid model IDs, or other
-  configuration-related issues that prevent model instantiation.
-  """
-
-
-class InferenceRuntimeError(InferenceError):
-  """Exception raised for runtime inference errors.
-
-  This includes API call failures, network errors, or other issues
-  that occur during inference execution.
-  """
-
-  def __init__(
-      self,
-      message: str,
-      *,
-      original: BaseException | None = None,
-      provider: str | None = None,
-  ) -> None:
-    """Initialize the runtime error.
-
-    Args:
-      message: Error message.
-      original: Original exception from the provider SDK.
-      provider: Name of the provider that raised the error.
-    """
-    super().__init__(message)
-    self.original = original
-    self.provider = provider

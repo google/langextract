@@ -12,14 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Compatibility shim for langextract.data imports.
+"""Backward compatibility layer for LangExtract.
 
-This module provides backward compatibility for code that imports from
-langextract.data. All functionality has moved to langextract.core.data.
+This package contains compatibility shims for deprecated imports. All code
+in this directory will be removed in v2.0.0.
 """
 
 from __future__ import annotations
 
-# Re-export everything from core.data for backward compatibility
-# pylint: disable=wildcard-import,unused-wildcard-import
-from langextract.core.data import *
+__all__ = ["inference", "schema", "exceptions", "registry"]

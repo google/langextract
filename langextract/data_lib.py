@@ -13,14 +13,15 @@
 # limitations under the License.
 
 """Library for data conversion between AnnotatedDocument and JSON."""
+from __future__ import annotations
 
 import dataclasses
 import enum
 import numbers
 from typing import Any, Iterable, Mapping
 
-from langextract import data
-from langextract import tokenizer
+from langextract.core import data
+from langextract.core import tokenizer
 
 
 def enum_asdict_factory(items: Iterable[tuple[str, Any]]) -> dict[str, Any]:

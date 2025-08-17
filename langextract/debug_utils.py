@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Debug utilities for LangExtract."""
+from __future__ import annotations
 
 import functools
 import inspect
@@ -20,6 +21,8 @@ import logging
 import reprlib
 import time
 from typing import Any, Callable, Mapping
+
+from absl import logging as absl_logging
 
 _LOG = logging.getLogger("langextract.debug")
 
@@ -147,8 +150,6 @@ def debug_log_calls(fn: Callable) -> Callable:
 
 def configure_debug_logging() -> None:
   """Enable debug logging for the 'langextract' namespace only."""
-  from absl import logging as absl_logging  # pylint: disable=import-outside-toplevel
-
   logger = logging.getLogger("langextract")
 
   # Skip if we already added our handler
@@ -180,5 +181,5 @@ def configure_debug_logging() -> None:
   # Best-effort absl configuration
   try:
     absl_logging.set_verbosity(absl_logging.DEBUG)
-  except Exception:  # pylint: disable=broad-exception-caught
+  except Exception:
     pass

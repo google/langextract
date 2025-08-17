@@ -18,9 +18,9 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import numpy as np
 
-from langextract import data
 from langextract import data_lib
-from langextract import tokenizer
+from langextract.core import data
+from langextract.core import tokenizer
 
 
 class DataLibToDictParameterizedTest(parameterized.TestCase):

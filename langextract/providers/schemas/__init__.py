@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Provider-specific schema implementations."""
+from __future__ import annotations
 
 from langextract.providers.schemas.gemini import GeminiSchema
 

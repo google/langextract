@@ -18,10 +18,10 @@ from unittest import mock
 
 from absl.testing import absltest
 
-from langextract import data
 from langextract import factory
 from langextract import inference
 import langextract as lx
+from langextract.core import data
 
 
 class ExtractParameterPrecedenceTest(absltest.TestCase):
@@ -43,7 +43,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.description = "description"
 
   @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_model_overrides_all_other_parameters(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -72,7 +72,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertEqual(result, "ok")
 
   @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_config_overrides_model_id_and_language_model_type(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -86,7 +86,9 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     mock_annotator = mock_annotator_cls.return_value
     mock_annotator.annotate_text.return_value = "ok"
 
-    with mock.patch("langextract.factory.ModelConfig") as mock_model_config:
+    with mock.patch(
+        "langextract.extraction.factory.ModelConfig"
+    ) as mock_model_config:
       result = lx.extract(
           text_or_documents="text",
           prompt_description=self.description,
@@ -109,7 +111,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertEqual(result, "ok")
 
   @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_model_id_and_base_kwargs_override_language_model_type(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -121,9 +123,9 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     mock_config = mock.MagicMock()
 
     with mock.patch(
-        "langextract.factory.ModelConfig", return_value=mock_config
+        "langextract.extraction.factory.ModelConfig", return_value=mock_config
     ) as mock_model_config:
-      with self.assertWarns(DeprecationWarning):
+      with self.assertWarns(FutureWarning):
         result = lx.extract(
             text_or_documents="text",
             prompt_description=self.description,
@@ -148,7 +150,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertEqual(result, "ok")
 
   @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_language_model_type_only_emits_warning_and_works(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -160,9 +162,9 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     mock_config = mock.MagicMock()
 
     with mock.patch(
-        "langextract.factory.ModelConfig", return_value=mock_config
+        "langextract.extraction.factory.ModelConfig", return_value=mock_config
     ) as mock_model_config:
-      with self.assertWarns(DeprecationWarning):
+      with self.assertWarns(FutureWarning):
         result = lx.extract(
             text_or_documents="text",
             prompt_description=self.description,
@@ -178,7 +180,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertEqual(result, "ok")
 
   @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_use_schema_constraints_warns_with_config(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -210,7 +212,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertEqual(result, "ok")
 
   @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_use_schema_constraints_warns_with_model(
       self, mock_create_model, mock_annotator_cls
   ):

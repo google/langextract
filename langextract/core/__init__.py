@@ -12,14 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Compatibility shim for langextract.data imports.
+"""Core abstractions for LangExtract.
 
-This module provides backward compatibility for code that imports from
-langextract.data. All functionality has moved to langextract.core.data.
+This package contains the foundational base models and types used throughout
+LangExtract. Each module can be imported independently for fine-grained
+dependency management in build systems.
 """
 
 from __future__ import annotations
 
-# Re-export everything from core.data for backward compatibility
-# pylint: disable=wildcard-import,unused-wildcard-import
-from langextract.core.data import *
+__all__ = [
+    "base_model",
+    "types",
+    "exceptions",
+    "schema",
+    "data",
+    "tokenizer",
+]

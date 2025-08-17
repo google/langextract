@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Gemini provider schema implementation."""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -20,8 +21,8 @@ from collections.abc import Sequence
 import dataclasses
 from typing import Any
 
-from langextract import data
-from langextract import schema
+from langextract.core import data
+from langextract.core import schema
 
 EXTRACTIONS_KEY = schema.EXTRACTIONS_KEY
 

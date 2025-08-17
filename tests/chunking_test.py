@@ -18,8 +18,8 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import chunking
-from langextract import data
-from langextract import tokenizer
+from langextract.core import data
+from langextract.core import tokenizer
 
 
 class SentenceIterTest(absltest.TestCase):

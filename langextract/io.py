@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Supports Input and Output Operations for Data Annotations."""
+from __future__ import annotations
 
 import abc
 import dataclasses
@@ -24,10 +25,10 @@ from typing import Any, Iterator
 import pandas as pd
 import requests
 
-from langextract import data
 from langextract import data_lib
-from langextract import exceptions
 from langextract import progress
+from langextract.core import data
+from langextract.core import exceptions
 
 DEFAULT_TIMEOUT_SECONDS = 30
 

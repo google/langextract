@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """Gemini provider for LangExtract."""
-# pylint: disable=cyclic-import,duplicate-code
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -21,11 +21,14 @@ import concurrent.futures
 import dataclasses
 from typing import Any, Final, Iterator, Sequence
 
-from langextract import data
-from langextract import exceptions
-from langextract import inference
-from langextract import schema
-from langextract.providers import registry
+from langextract.core import data
+from langextract.core import exceptions
+from langextract.core import schema
+from langextract.core import types as core_types
+from langextract.core.base_model import BaseLanguageModel
+from langextract.providers import patterns
+from langextract.providers import router
+from langextract.providers.schemas import gemini as gemini_schemas
 
 _API_CONFIG_KEYS: Final[set[str]] = {
     'response_mime_type',
@@ -38,17 +41,17 @@ _API_CONFIG_KEYS: Final[set[str]] = {
 }
 
 
-@registry.register(
-    r'^gemini',
-    priority=10,
+@router.register(
+    *patterns.GEMINI_PATTERNS,
+    priority=patterns.GEMINI_PRIORITY,
 )
 @dataclasses.dataclass(init=False)
-class GeminiLanguageModel(inference.BaseLanguageModel):
+class GeminiLanguageModel(BaseLanguageModel):
   """Language model inference using Google's Gemini API with structured output."""
 
   model_id: str = 'gemini-2.5-flash'
   api_key: str | None = None
-  gemini_schema: schema.GeminiSchema | None = None
+  gemini_schema: gemini_schemas.GeminiSchema | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
   max_workers: int = 10
@@ -64,7 +67,7 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
     Returns:
       The GeminiSchema class that supports strict schema constraints.
     """
-    return schema.GeminiSchema
+    return gemini_schemas.GeminiSchema
 
   def apply_schema(self, schema_instance: schema.BaseSchema | None) -> None:
     """Apply a schema instance to this provider.
@@ -74,14 +77,14 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
     """
     super().apply_schema(schema_instance)
     # Keep provider behavior consistent with legacy path
-    if isinstance(schema_instance, schema.GeminiSchema):
+    if isinstance(schema_instance, gemini_schemas.GeminiSchema):
       self.gemini_schema = schema_instance
 
   def __init__(
       self,
       model_id: str = 'gemini-2.5-flash',
       api_key: str | None = None,
-      gemini_schema: schema.GeminiSchema | None = None,
+      gemini_schema: gemini_schemas.GeminiSchema | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float = 0.0,
       max_workers: int = 10,
@@ -134,7 +137,7 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
 
   def _process_single_prompt(
       self, prompt: str, config: dict
-  ) -> inference.ScoredOutput:
+  ) -> core_types.ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
     try:
       # Apply stored kwargs that weren't already set in config
@@ -156,7 +159,7 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
           model=self.model_id, contents=prompt, config=config
       )
 
-      return inference.ScoredOutput(score=1.0, output=response.text)
+      return core_types.ScoredOutput(score=1.0, output=response.text)
 
     except Exception as e:
       raise exceptions.InferenceRuntimeError(
@@ -165,7 +168,7 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
-  ) -> Iterator[Sequence[inference.ScoredOutput]]:
+  ) -> Iterator[Sequence[core_types.ScoredOutput]]:
     """Runs inference on a list of prompts via Gemini's API.
 
     Args:
@@ -208,7 +211,7 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
             for i, prompt in enumerate(batch_prompts)
         }
 
-        results: list[inference.ScoredOutput | None] = [None] * len(
+        results: list[core_types.ScoredOutput | None] = [None] * len(
             batch_prompts
         )
         for future in concurrent.futures.as_completed(future_to_index):
@@ -230,4 +233,4 @@ class GeminiLanguageModel(inference.BaseLanguageModel):
       # Sequential processing for single prompt or worker
       for prompt in batch_prompts:
         result = self._process_single_prompt(prompt, config.copy())
-        yield [result]
+        yield [result]  # pylint: disable=duplicate-code

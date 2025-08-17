@@ -17,7 +17,7 @@
 This module provides a lazy registration system for LLM providers, allowing
 providers to be registered without importing their dependencies until needed.
 """
-# pylint: disable=cyclic-import
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ import typing
 
 from absl import logging
 
-from langextract import exceptions
-from langextract import inference
+from langextract.core import exceptions
+from langextract.core.base_model import BaseLanguageModel
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -38,11 +38,42 @@ class _Entry:
   """Registry entry for a provider."""
 
   patterns: tuple[re.Pattern[str], ...]
-  loader: typing.Callable[[], type[inference.BaseLanguageModel]]
+  loader: typing.Callable[[], type[BaseLanguageModel]]
   priority: int
 
 
 _ENTRIES: list[_Entry] = []
+_ENTRY_KEYS: set[tuple[str, tuple[str, ...], int]] = (
+    set()
+)  # (provider_id, patterns, priority)
+
+
+def _add_entry(
+    *,
+    provider_id: str,
+    patterns: tuple[re.Pattern[str], ...],
+    loader: typing.Callable[[], type[BaseLanguageModel]],
+    priority: int,
+) -> None:
+  """Add an entry to the registry with deduplication."""
+  key = (provider_id, tuple(p.pattern for p in patterns), priority)
+  if key in _ENTRY_KEYS:
+    logging.debug(
+        "Skipping duplicate registration for %s with patterns %s at"
+        " priority %d",
+        provider_id,
+        [p.pattern for p in patterns],
+        priority,
+    )
+    return
+  _ENTRY_KEYS.add(key)
+  _ENTRIES.append(_Entry(patterns=patterns, loader=loader, priority=priority))
+  logging.debug(
+      "Registered provider %s with patterns %s at priority %d",
+      provider_id,
+      [p.pattern for p in patterns],
+      priority,
+  )
 
 
 def register_lazy(
@@ -57,24 +88,22 @@ def register_lazy(
   """
   compiled = tuple(re.compile(p) if isinstance(p, str) else p for p in patterns)
 
-  def _loader() -> type[inference.BaseLanguageModel]:
+  def _loader() -> type[BaseLanguageModel]:
     module_path, class_name = target.rsplit(":", 1)
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
 
-  _ENTRIES.append(_Entry(patterns=compiled, loader=_loader, priority=priority))
-  logging.debug(
-      "Registered provider with patterns %s at priority %d",
-      [p.pattern for p in compiled],
-      priority,
+  _add_entry(
+      provider_id=target,
+      patterns=compiled,
+      loader=_loader,
+      priority=priority,
   )
 
 
 def register(
     *patterns: str | re.Pattern[str], priority: int = 0
-) -> typing.Callable[
-    [type[inference.BaseLanguageModel]], type[inference.BaseLanguageModel]
-]:
+) -> typing.Callable[[type[BaseLanguageModel]], type[BaseLanguageModel]]:
   """Decorator to register a provider class directly.
 
   Args:
@@ -87,19 +116,17 @@ def register(
   compiled = tuple(re.compile(p) if isinstance(p, str) else p for p in patterns)
 
   def _decorator(
-      cls: type[inference.BaseLanguageModel],
-  ) -> type[inference.BaseLanguageModel]:
-    def _loader() -> type[inference.BaseLanguageModel]:
+      cls: type[BaseLanguageModel],
+  ) -> type[BaseLanguageModel]:
+    def _loader() -> type[BaseLanguageModel]:
       return cls
 
-    _ENTRIES.append(
-        _Entry(patterns=compiled, loader=_loader, priority=priority)
-    )
-    logging.debug(
-        "Registered %s with patterns %s at priority %d",
-        cls.__name__,
-        [p.pattern for p in compiled],
-        priority,
+    provider_id = f"{cls.__module__}:{cls.__name__}"
+    _add_entry(
+        provider_id=provider_id,
+        patterns=compiled,
+        loader=_loader,
+        priority=priority,
     )
     return cls
 
@@ -107,7 +134,7 @@ def register(
 
 
 @functools.lru_cache(maxsize=128)
-def resolve(model_id: str) -> type[inference.BaseLanguageModel]:
+def resolve(model_id: str) -> type[BaseLanguageModel]:
   """Resolve a model ID to a provider class.
 
   Args:
@@ -119,11 +146,8 @@ def resolve(model_id: str) -> type[inference.BaseLanguageModel]:
   Raises:
     ValueError: If no provider is registered for the model ID.
   """
-  # pylint: disable=import-outside-toplevel
-  from langextract import providers
-
-  providers.load_builtins_once()
-  providers.load_plugins_once()
+  # Providers should be loaded by the caller (e.g., factory.create_model)
+  # Router doesn't load providers to avoid circular dependencies
 
   sorted_entries = sorted(_ENTRIES, key=lambda e: e.priority, reverse=True)
 
@@ -141,7 +165,7 @@ def resolve(model_id: str) -> type[inference.BaseLanguageModel]:
 
 
 @functools.lru_cache(maxsize=128)
-def resolve_provider(provider_name: str) -> type[inference.BaseLanguageModel]:
+def resolve_provider(provider_name: str) -> type[BaseLanguageModel]:
   """Resolve a provider name to a provider class.
 
   This allows explicit provider selection by name or class name.
@@ -156,11 +180,8 @@ def resolve_provider(provider_name: str) -> type[inference.BaseLanguageModel]:
   Raises:
     ValueError: If no provider matches the name.
   """
-  # pylint: disable=import-outside-toplevel
-  from langextract import providers
-
-  providers.load_builtins_once()
-  providers.load_plugins_once()
+  # Providers should be loaded by the caller (e.g., factory.create_model)
+  # Router doesn't load providers to avoid circular dependencies
 
   for entry in _ENTRIES:
     for pattern in entry.patterns:
@@ -195,7 +216,9 @@ def clear() -> None:
   """Clear all registered providers. Mainly for testing."""
   global _ENTRIES  # pylint: disable=global-statement
   _ENTRIES = []
+  _ENTRY_KEYS.clear()  # Also clear dedup keys to allow re-registration
   resolve.cache_clear()
+  resolve_provider.cache_clear()
 
 
 def list_providers() -> list[tuple[tuple[str, ...], int]]:

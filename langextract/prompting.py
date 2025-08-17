@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Library for building prompts."""
+from __future__ import annotations
 
 import dataclasses
 import json
@@ -22,9 +23,9 @@ import pathlib
 import pydantic
 import yaml
 
-from langextract import data
-from langextract import exceptions
-from langextract import schema
+from langextract.core import data
+from langextract.core import exceptions
+from langextract.core import schema
 
 
 class PromptBuilderError(exceptions.LangExtractError):

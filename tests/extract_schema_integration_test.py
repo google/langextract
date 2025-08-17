@@ -19,8 +19,8 @@ import warnings
 
 from absl.testing import absltest
 
-from langextract import data
 import langextract as lx
+from langextract.core import data
 
 
 class ExtractSchemaIntegrationTest(absltest.TestCase):
@@ -177,7 +177,7 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
             deprecation_warnings = [
                 warning
                 for warning in w
-                if issubclass(warning.category, DeprecationWarning)
+                if issubclass(warning.category, FutureWarning)
                 and "gemini_schema" in str(warning.message)
             ]
             self.assertGreater(len(deprecation_warnings), 0)

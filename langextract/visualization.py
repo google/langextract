@@ -31,8 +31,8 @@ import json
 import pathlib
 import textwrap
 
-from langextract import data as _data
 from langextract import io as _io
+from langextract.core import data as _data
 
 # Fallback if IPython is not present
 try:

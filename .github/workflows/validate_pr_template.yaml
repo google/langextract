@@ -7,15 +7,60 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   check:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false   # drafts can save early
     runs-on: ubuntu-latest
 
     steps:
-      - name: Fail if template untouched
-        if: github.event_name == 'pull_request_target'
+      - name: Check PR author permissions
+        id: check
+        if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const {owner, repo} = context.repo;
+            const actor = pr.user.login;
+            const authorType = pr.user.type;
+
+            // Check if PR author is a bot (e.g., Dependabot)
+            if (authorType === 'Bot') {
+              core.setOutput('skip_validation', 'true');
+              console.log(`Skipping validation for bot-authored PR: ${actor}`);
+              return;
+            }
+
+            // Get permission level
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner, repo, username: actor
+              });
+
+              const permission = data.permission; // admin|maintain|write|triage|read|none
+              console.log(`Actor ${actor} has permission level: ${permission}`);
+
+              // Check if user has write+ permissions
+              if (['admin', 'maintain', 'write'].includes(permission)) {
+                core.setOutput('skip_validation', 'true');
+                console.log(`Skipping validation for maintainer: ${actor} (${permission})`);
+              } else {
+                core.setOutput('skip_validation', 'false');
+                console.log(`Validation required for: ${actor} (${permission})`);
+              }
+            } catch (e) {
+              // If we can't determine permissions, require validation
+              core.setOutput('skip_validation', 'false');
+              core.warning(`Permission lookup failed: ${e.message}`);
+            }
+
+      - name: Validate PR template
+        if: |
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.draft == false &&
+          steps.check.outputs.skip_validation != 'true'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -41,3 +86,11 @@ jobs:
           }
 
           exit $err
+
+      - name: Log skip reason
+        if: |
+          github.event_name == 'pull_request_target' &&
+          (github.event.pull_request.draft == true ||
+           steps.check.outputs.skip_validation == 'true')
+        run: |
+          echo "Skipping PR template validation. Draft: ${{ github.event.pull_request.draft }}; skip_validation: ${{ steps.check.outputs.skip_validation || 'N/A' }}"

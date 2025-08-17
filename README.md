@@ -118,7 +118,7 @@ lx.io.save_annotated_documents([result], output_name="extraction_results.jsonl",
 
 # Generate the visualization from the file
 html_content = lx.visualize("extraction_results.jsonl")
-with open("visualization.html", "w") as f:
+with open("visualization.html", "w",encoding="utf-8") as f:
     if hasattr(html_content, 'data'):
         f.write(html_content.data)  # For Jupyter/Colab
     else:

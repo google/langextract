@@ -22,8 +22,7 @@ from typing import Any, Mapping
 
 import yaml
 
-from langextract.core import types as core_types
-from langextract.core.types import FormatType
+from langextract.core import types
 
 __all__ = ['BaseLanguageModel']
 
@@ -35,9 +34,7 @@ class BaseLanguageModel(abc.ABC):
     _constraint: A `Constraint` object specifying constraints for model output.
   """
 
-  def __init__(
-      self, constraint: core_types.Constraint | None = None, **kwargs: Any
-  ):
+  def __init__(self, constraint: types.Constraint | None = None, **kwargs: Any):
     """Initializes the BaseLanguageModel with an optional constraint.
 
     Args:
@@ -45,7 +42,7 @@ class BaseLanguageModel(abc.ABC):
         constraint.
       **kwargs: Additional keyword arguments passed to the model.
     """
-    self._constraint = constraint or core_types.Constraint()
+    self._constraint = constraint or types.Constraint()
     self._schema: Any = None  # BaseSchema instance
     self._fence_output_override: bool | None = None
     self._extra_kwargs: dict[str, Any] = kwargs.copy()
@@ -112,7 +109,7 @@ class BaseLanguageModel(abc.ABC):
   @abc.abstractmethod
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
-  ) -> Iterator[Sequence[core_types.ScoredOutput]]:
+  ) -> Iterator[Sequence[types.ScoredOutput]]:
     """Implements language model inference.
 
     Args:
@@ -127,7 +124,7 @@ class BaseLanguageModel(abc.ABC):
 
   def infer_batch(
       self, prompts: Sequence[str], batch_size: int = 32  # pylint: disable=unused-argument
-  ) -> list[list[core_types.ScoredOutput]]:
+  ) -> list[list[types.ScoredOutput]]:
     """Batch inference with configurable batch size.
 
     This is a convenience method that collects all results from infer().
@@ -160,10 +157,10 @@ class BaseLanguageModel(abc.ABC):
       ValueError: If output cannot be parsed as JSON or YAML.
     """
     # Check if we have a format_type attribute (providers should set this)
-    format_type = getattr(self, 'format_type', FormatType.JSON)
+    format_type = getattr(self, 'format_type', types.FormatType.JSON)
 
     try:
-      if format_type == FormatType.JSON:
+      if format_type == types.FormatType.JSON:
         return json.loads(output)
       else:
         return yaml.safe_load(output)

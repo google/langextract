@@ -26,7 +26,7 @@ from typing import Dict, List, Type
 
 from absl import logging
 
-from langextract.core.base_model import BaseLanguageModel
+from langextract.core import base_model
 
 __all__ = ["available_providers", "get_provider_class"]
 
@@ -123,7 +123,7 @@ def available_providers(
   return providers
 
 
-def _load_class(spec: str) -> Type[BaseLanguageModel]:
+def _load_class(spec: str) -> Type[base_model.BaseLanguageModel]:
   """Load a provider class from module:Class specification.
 
   Args:
@@ -157,7 +157,9 @@ def _load_class(spec: str) -> Type[BaseLanguageModel]:
     ) from e
 
   # Validate it's a language model
-  if not isinstance(cls, type) or not issubclass(cls, BaseLanguageModel):
+  if not isinstance(cls, type) or not issubclass(
+      cls, base_model.BaseLanguageModel
+  ):
     # Fallback: check structural compatibility for non-ABC classes
     missing = []
     for method in ("infer", "parse_output"):
@@ -183,7 +185,7 @@ def _load_class(spec: str) -> Type[BaseLanguageModel]:
 @lru_cache(maxsize=None)  # Cache all loaded classes
 def get_provider_class(
     name: str, allow_override: bool = False, include_optional: bool = True
-) -> Type[BaseLanguageModel]:
+) -> Type[base_model.BaseLanguageModel]:
   """Get a provider class by name.
 
   Args:

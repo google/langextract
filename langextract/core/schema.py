@@ -19,9 +19,7 @@ import abc
 from collections.abc import Sequence
 from typing import Any, TYPE_CHECKING
 
-from langextract.core.types import Constraint
-from langextract.core.types import ConstraintType
-from langextract.core.types import FormatType
+from langextract.core import types
 
 if TYPE_CHECKING:
   from langextract.core import data
@@ -35,6 +33,10 @@ __all__ = [
 ]
 
 EXTRACTIONS_KEY = "extractions"  # Shared key for extraction arrays in JSON/YAML
+
+# Backward compat re-exports
+ConstraintType = types.ConstraintType
+Constraint = types.Constraint
 
 
 class BaseSchema(abc.ABC):
@@ -92,11 +94,11 @@ class FormatModeSchema(BaseSchema):
   support field-level constraints.
   """
 
-  def __init__(self, format_type: FormatType = FormatType.JSON):
+  def __init__(self, format_type: types.FormatType = types.FormatType.JSON):
     """Initialize with a format type."""
     self.format_type = format_type
     # Keep _format for backward compatibility with tests
-    self._format = "json" if format_type == FormatType.JSON else "yaml"
+    self._format = "json" if format_type == types.FormatType.JSON else "yaml"
 
   @classmethod
   def from_examples(
@@ -106,7 +108,7 @@ class FormatModeSchema(BaseSchema):
   ) -> FormatModeSchema:
     """Factory method to build a schema instance from example data."""
     # Default to JSON format
-    return cls(format_type=FormatType.JSON)
+    return cls(format_type=types.FormatType.JSON)
 
   def to_provider_config(self) -> dict[str, Any]:
     """Convert schema to provider-specific configuration."""
@@ -124,9 +126,13 @@ class FormatModeSchema(BaseSchema):
     """Sync format type with provider kwargs."""
     if "format_type" in kwargs:
       self.format_type = kwargs["format_type"]
-      self._format = "json" if self.format_type == FormatType.JSON else "yaml"
+      self._format = (
+          "json" if self.format_type == types.FormatType.JSON else "yaml"
+      )
     if "format" in kwargs:
       self._format = kwargs["format"]
       self.format_type = (
-          FormatType.JSON if self._format == "json" else FormatType.YAML
+          types.FormatType.JSON
+          if self._format == "json"
+          else types.FormatType.YAML
       )

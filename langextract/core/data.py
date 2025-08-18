@@ -20,7 +20,9 @@ import enum
 import uuid
 
 from langextract.core import tokenizer
-from langextract.core.types import FormatType
+from langextract.core import types
+
+FormatType = types.FormatType  # Backward compat
 
 
 class AlignmentStatus(enum.Enum):

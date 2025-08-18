@@ -22,19 +22,22 @@ management in build systems.
 import importlib
 from importlib import metadata
 import os
-import warnings
 
 from absl import logging
 
+from langextract.providers import router
 from langextract.providers.builtin_registry import BUILTIN_PROVIDERS
 from langextract.providers.router import register
 from langextract.providers.router import register_lazy
+
+registry = router  # Backward compat alias
 
 __all__ = [
     'gemini',
     'openai',
     'ollama',
     'router',
+    'registry',  # Backward compat
     'schemas',
     'load_plugins_once',
     'load_builtins_once',
@@ -154,13 +157,6 @@ def _reset_for_testing() -> None:
 def __getattr__(name: str):
   """Lazy loading for submodules."""
   if name == 'router':
-    return importlib.import_module('langextract.providers.router')
-  elif name == 'registry':  # Backward compat
-    warnings.warn(
-        'providers.registry is deprecated, use providers.router instead',
-        FutureWarning,
-        stacklevel=2,
-    )
     return importlib.import_module('langextract.providers.router')
   elif name == 'schemas':
     return importlib.import_module('langextract.providers.schemas')

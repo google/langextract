@@ -26,8 +26,8 @@ import os
 import typing
 
 from langextract import providers
+from langextract.core import base_model
 from langextract.core import exceptions
-from langextract.core.base_model import BaseLanguageModel
 from langextract.providers import router
 
 
@@ -93,7 +93,7 @@ def create_model(
     use_schema_constraints: bool = False,
     fence_output: bool | None = None,
     return_fence_output: bool = False,
-) -> BaseLanguageModel | tuple[BaseLanguageModel, bool]:
+) -> base_model.BaseLanguageModel | tuple[base_model.BaseLanguageModel, bool]:
   """Create a language model instance from configuration.
 
   Args:
@@ -166,7 +166,7 @@ def create_model_from_id(
     model_id: str | None = None,
     provider: str | None = None,
     **provider_kwargs: typing.Any,
-) -> BaseLanguageModel:
+) -> base_model.BaseLanguageModel:
   """Convenience function to create a model.
 
   Args:
@@ -188,7 +188,7 @@ def _create_model_with_schema(
     examples: typing.Sequence[typing.Any] | None = None,
     use_schema_constraints: bool = True,
     fence_output: bool | None = None,
-) -> BaseLanguageModel:
+) -> base_model.BaseLanguageModel:
   """Internal helper to create a model with optional schema constraints.
 
   This function creates a language model and optionally configures it with

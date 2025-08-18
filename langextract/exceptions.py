@@ -21,14 +21,16 @@ All new code should import directly from langextract.core.exceptions.
 
 from __future__ import annotations
 
-# Re-export all exceptions from core for backward compatibility
-from langextract.core.exceptions import InferenceConfigError
-from langextract.core.exceptions import InferenceError
-from langextract.core.exceptions import InferenceOutputError
-from langextract.core.exceptions import InferenceRuntimeError
-from langextract.core.exceptions import LangExtractError
-from langextract.core.exceptions import ProviderError
-from langextract.core.exceptions import SchemaError
+from langextract.core import exceptions as core_exceptions
+
+# Backward compat re-exports
+InferenceConfigError = core_exceptions.InferenceConfigError
+InferenceError = core_exceptions.InferenceError
+InferenceOutputError = core_exceptions.InferenceOutputError
+InferenceRuntimeError = core_exceptions.InferenceRuntimeError
+LangExtractError = core_exceptions.LangExtractError
+ProviderError = core_exceptions.ProviderError
+SchemaError = core_exceptions.SchemaError
 
 __all__ = [
     "LangExtractError",

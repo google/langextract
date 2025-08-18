@@ -29,8 +29,8 @@ import typing
 
 from absl import logging
 
+from langextract.core import base_model
 from langextract.core import exceptions
-from langextract.core.base_model import BaseLanguageModel
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -38,7 +38,7 @@ class _Entry:
   """Registry entry for a provider."""
 
   patterns: tuple[re.Pattern[str], ...]
-  loader: typing.Callable[[], type[BaseLanguageModel]]
+  loader: typing.Callable[[], type[base_model.BaseLanguageModel]]
   priority: int
 
 
@@ -52,7 +52,7 @@ def _add_entry(
     *,
     provider_id: str,
     patterns: tuple[re.Pattern[str], ...],
-    loader: typing.Callable[[], type[BaseLanguageModel]],
+    loader: typing.Callable[[], type[base_model.BaseLanguageModel]],
     priority: int,
 ) -> None:
   """Add an entry to the registry with deduplication."""
@@ -88,7 +88,7 @@ def register_lazy(
   """
   compiled = tuple(re.compile(p) if isinstance(p, str) else p for p in patterns)
 
-  def _loader() -> type[BaseLanguageModel]:
+  def _loader() -> type[base_model.BaseLanguageModel]:
     module_path, class_name = target.rsplit(":", 1)
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
@@ -103,7 +103,9 @@ def register_lazy(
 
 def register(
     *patterns: str | re.Pattern[str], priority: int = 0
-) -> typing.Callable[[type[BaseLanguageModel]], type[BaseLanguageModel]]:
+) -> typing.Callable[
+    [type[base_model.BaseLanguageModel]], type[base_model.BaseLanguageModel]
+]:
   """Decorator to register a provider class directly.
 
   Args:
@@ -116,9 +118,9 @@ def register(
   compiled = tuple(re.compile(p) if isinstance(p, str) else p for p in patterns)
 
   def _decorator(
-      cls: type[BaseLanguageModel],
-  ) -> type[BaseLanguageModel]:
-    def _loader() -> type[BaseLanguageModel]:
+      cls: type[base_model.BaseLanguageModel],
+  ) -> type[base_model.BaseLanguageModel]:
+    def _loader() -> type[base_model.BaseLanguageModel]:
       return cls
 
     provider_id = f"{cls.__module__}:{cls.__name__}"
@@ -134,7 +136,7 @@ def register(
 
 
 @functools.lru_cache(maxsize=128)
-def resolve(model_id: str) -> type[BaseLanguageModel]:
+def resolve(model_id: str) -> type[base_model.BaseLanguageModel]:
   """Resolve a model ID to a provider class.
 
   Args:
@@ -165,7 +167,7 @@ def resolve(model_id: str) -> type[BaseLanguageModel]:
 
 
 @functools.lru_cache(maxsize=128)
-def resolve_provider(provider_name: str) -> type[BaseLanguageModel]:
+def resolve_provider(provider_name: str) -> type[base_model.BaseLanguageModel]:
   """Resolve a provider name to a provider class.
 
   This allows explicit provider selection by name or class name.

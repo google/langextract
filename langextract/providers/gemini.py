@@ -21,11 +21,11 @@ import concurrent.futures
 import dataclasses
 from typing import Any, Final, Iterator, Sequence
 
+from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import schema
 from langextract.core import types as core_types
-from langextract.core.base_model import BaseLanguageModel
 from langextract.providers import patterns
 from langextract.providers import router
 from langextract.providers.schemas import gemini as gemini_schemas
@@ -46,7 +46,7 @@ _API_CONFIG_KEYS: Final[set[str]] = {
     priority=patterns.GEMINI_PRIORITY,
 )
 @dataclasses.dataclass(init=False)
-class GeminiLanguageModel(BaseLanguageModel):
+class GeminiLanguageModel(base_model.BaseLanguageModel):
   """Language model inference using Google's Gemini API with structured output."""
 
   model_id: str = 'gemini-2.5-flash'

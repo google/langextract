@@ -21,11 +21,11 @@ import concurrent.futures
 import dataclasses
 from typing import Any, Iterator, Sequence
 
+from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import schema
 from langextract.core import types as core_types
-from langextract.core.base_model import BaseLanguageModel
 from langextract.providers import patterns
 from langextract.providers import router
 
@@ -35,7 +35,7 @@ from langextract.providers import router
     priority=patterns.OPENAI_PRIORITY,
 )
 @dataclasses.dataclass(init=False)
-class OpenAILanguageModel(BaseLanguageModel):
+class OpenAILanguageModel(base_model.BaseLanguageModel):
   """Language model inference using OpenAI's API with structured output."""
 
   model_id: str = 'gpt-4o-mini'

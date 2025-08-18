@@ -33,9 +33,9 @@ from langextract import chunking
 from langextract import progress
 from langextract import prompting
 from langextract import resolver as resolver_lib
+from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
-from langextract.core.base_model import BaseLanguageModel
 
 ATTRIBUTE_SUFFIX = "_attributes"
 
@@ -160,7 +160,7 @@ class Annotator:
 
   def __init__(
       self,
-      language_model: BaseLanguageModel,
+      language_model: base_model.BaseLanguageModel,
       prompt_template: prompting.PromptTemplateStructured,
       format_type: data.FormatType = data.FormatType.YAML,
       attribute_suffix: str = ATTRIBUTE_SUFFIX,

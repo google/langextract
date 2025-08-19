@@ -44,6 +44,11 @@ BUILTIN_PROVIDERS: list[ProviderConfig] = [
         'priority': patterns.OLLAMA_PRIORITY,
     },
     {
+        'patterns': patterns.LLAMA_CPP_PATTERNS,
+        'target': 'langextract.providers.llama_cpp:LlamaCppLanguageModel',
+        'priority': patterns.LLAMA_CPP_PRIORITY,
+    },
+    {
         'patterns': patterns.OPENAI_PATTERNS,
         'target': 'langextract.providers.openai:OpenAILanguageModel',
         'priority': patterns.OPENAI_PRIORITY,

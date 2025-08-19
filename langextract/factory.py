@@ -68,6 +68,7 @@ def _kwargs_with_environment_defaults(
     env_vars_by_provider = {
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
         "gpt": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
+        "llama-cpp": ("LLAMA_CPP_API_KEY", "LANGEXTRACT_API_KEY"),
     }
 
     for provider_prefix, env_vars in env_vars_by_provider.items():
@@ -82,6 +83,12 @@ def _kwargs_with_environment_defaults(
   if "ollama" in model_id.lower() and "base_url" not in resolved:
     resolved["base_url"] = os.getenv(
         "OLLAMA_BASE_URL", "http://localhost:11434"
+    )
+
+  # Default llama.cpp server URL
+  if ("llama-cpp" in model_id.lower() or "llama_cpp" in model_id.lower()) and "base_url" not in resolved:
+    resolved["base_url"] = os.getenv(
+        "LLAMA_CPP_BASE_URL", "http://localhost:8080"
     )
 
   return resolved

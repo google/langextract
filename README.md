@@ -20,6 +20,7 @@
 - [Adding Custom Model Providers](#adding-custom-model-providers)
 - [Using OpenAI Models](#using-openai-models)
 - [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
+- [Using llama.cpp](#using-llamacpp)
 - [More Examples](#more-examples)
   - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
   - [Medication Extraction](#medication-extraction)
@@ -313,6 +314,60 @@ result = lx.extract(
 **Quick setup:** Install Ollama from [ollama.com](https://ollama.com/), run `ollama pull gemma2:2b`, then `ollama serve`.
 
 For detailed installation, Docker setup, and examples, see [`examples/ollama/`](examples/ollama/).
+
+## Using llama.cpp
+
+LangExtract now supports local inference via the llama.cpp HTTP server, which exposes an OpenAI-compatible API. This lets you run GGUF models locally and call them just like OpenAI chat completions.
+
+- Project: [llama.cpp](https://github.com/ggml-org/llama.cpp)
+- Server: `llama-server` (serves `/v1/chat/completions`)
+- Optional dependency: `pip install langextract[openai]`
+
+### Quick start
+
+1. Start the server (you may use different options):
+
+```bash
+llama-server -m path/to/your/model.gguf --port 8080
+```
+
+2. Call from Python:
+
+```python
+import langextract as lx
+
+# Minimal example list; see test_llcpp.py for a larger Farsi example
+examples = [
+    lx.data.ExampleData(
+        text="John sent a letter yesterday",
+        extractions=[
+            lx.data.Extraction(extraction_class="sender_person", extraction_text="John"),
+            lx.data.Extraction(extraction_class="preparation_date", extraction_text="yesterday"),
+        ],
+    ),
+]
+
+result = lx.extract(
+    text_or_documents="Letters John sent to the social security organization",
+    prompt_description="Extract entities",
+    examples=examples,
+    model_id="llama_cpp",  # or "llama-cpp"
+    model_url="http://localhost:8080",    # or set LLAMA_CPP_BASE_URL
+    fence_output=False,                   # JSON mode returns raw JSON
+    use_schema_constraints=False          # JSON mode only; no strict schema constraints
+)
+
+print(result)
+```
+
+### Notes
+
+- Model routing accepts `llama-cpp:` or `llama_cpp:` prefixes.
+- For different `ports`, you need to use `model_url` parameter in the `lx.extract(...)`
+- Environment variables:
+  - `LLAMA_CPP_BASE_URL` (default `http://localhost:8080`)
+  - `LLAMA_CPP_API_KEY` (only if your server enforces auth)
+- This integration targets the OpenAI-compatible API of llama.cpp; ensure the server is running before calling `lx.extract`.
 
 ## More Examples
 

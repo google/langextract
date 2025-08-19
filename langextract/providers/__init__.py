@@ -36,6 +36,7 @@ __all__ = [
     'gemini',
     'openai',
     'ollama',
+    'llama_cpp',
     'router',
     'registry',  # Backward compat
     'schemas',

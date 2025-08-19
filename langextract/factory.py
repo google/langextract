@@ -86,7 +86,9 @@ def _kwargs_with_environment_defaults(
     )
 
   # Default llama.cpp server URL
-  if ("llama-cpp" in model_id.lower() or "llama_cpp" in model_id.lower()) and "base_url" not in resolved:
+  if (
+      "llama-cpp" in model_id.lower() or "llama_cpp" in model_id.lower()
+    ) and "base_url" not in resolved:
     resolved["base_url"] = os.getenv(
         "LLAMA_CPP_BASE_URL", "http://localhost:8080"
     )

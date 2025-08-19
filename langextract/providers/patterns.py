@@ -35,10 +35,10 @@ OPENAI_PRIORITY = 10
 # We support model-id schemes such as
 # "llama-cpp[:<model>]" or "llama_cpp[:<model>]" to route automatically.
 LLAMA_CPP_PATTERNS = (
-    r"^llama_cpp$",       # explicit provider name (underscore variant)
-    r"^llama_cpp:",       # scheme prefix, e.g., llama_cpp:your-model
-    r"^llama-cpp$",       # explicit provider name (dash variant)
-    r"^llama-cpp:",       # scheme prefix, e.g., llama-cpp:your-model
+    r'^llama_cpp$',  # explicit provider name (underscore variant)
+    r'^llama_cpp:',  # scheme prefix, e.g., llama_cpp:your-model
+    r'^llama-cpp$',  # explicit provider name (dash variant)
+    r'^llama-cpp:',  # scheme prefix, e.g., llama-cpp:your-model
 )
 LLAMA_CPP_PRIORITY = 20
 

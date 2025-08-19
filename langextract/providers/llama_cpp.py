@@ -195,5 +195,3 @@ class LlamaCppLanguageModel(base_model.BaseLanguageModel):
     for prompt in batch_prompts:
       result = self._process_single_prompt(prompt, config.copy())
       yield [result]
-
-

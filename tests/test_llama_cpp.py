@@ -84,9 +84,7 @@ class TestLlamaCppLanguageModel(absltest.TestCase):
     self.assertEqual(call_args.kwargs["messages"][1]["role"], "user")
 
     expected = [[
-        inference.ScoredOutput(
-            score=1.0, output='{"name": "John", "age": 30}'
-        )
+        inference.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')
     ]]
     self.assertEqual(results, expected)
 

@@ -89,6 +89,7 @@ langextract = ["py.typed"]
 gemini = "langextract.providers.gemini:GeminiLanguageModel"
 ollama = "langextract.providers.ollama:OllamaLanguageModel"
 openai = "langextract.providers.openai:OpenAILanguageModel"
+llama_cpp = "langextract.providers.llama_cpp:LlamaCppLanguageModel"
 
 [tool.setuptools.exclude-package-data]
 "*" = [

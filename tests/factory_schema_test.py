@@ -19,8 +19,8 @@ from unittest import mock
 from absl.testing import absltest
 
 from langextract import factory
-from langextract import inference
 from langextract import schema
+from langextract.core import base_model
 from langextract.core import data
 
 
@@ -117,7 +117,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
   def test_no_schema_defaults_to_true_fence(self):
     """Test that models without schema support default to fence_output=True."""
 
-    class NoSchemaModel(inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
+    class NoSchemaModel(base_model.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
       def infer(self, batch_prompts, **kwargs):
         yield []
@@ -226,7 +226,7 @@ class SchemaApplicationTest(absltest.TestCase):
         )
     ]
 
-    class SchemaAwareModel(inference.BaseLanguageModel):
+    class SchemaAwareModel(base_model.BaseLanguageModel):
 
       @classmethod
       def get_schema_class(cls):

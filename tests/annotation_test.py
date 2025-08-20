@@ -22,12 +22,13 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import annotation
-from langextract import inference
 from langextract import prompting
 from langextract import resolver as resolver_lib
 from langextract import schema
 from langextract.core import data
 from langextract.core import tokenizer
+from langextract.core import types
+from langextract.providers import gemini
 
 
 class AnnotatorTest(absltest.TestCase):
@@ -35,7 +36,7 @@ class AnnotatorTest(absltest.TestCase):
   def setUp(self):
     super().setUp()
     self.mock_language_model = self.enter_context(
-        mock.patch.object(inference, "GeminiLanguageModel", autospec=True)
+        mock.patch.object(gemini, "GeminiLanguageModel", autospec=True)
     )
     self.annotator = annotation.Annotator(
         language_model=self.mock_language_model,
@@ -81,7 +82,7 @@ class AnnotatorTest(absltest.TestCase):
         " hypertension diagnosed on 2023-03-15."
     )
     self.mock_language_model.infer.return_value = [[
-        inference.ScoredOutput(
+        types.ScoredOutput(
             score=1.0,
             output=textwrap.dedent(f"""\
               ```yaml
@@ -204,7 +205,7 @@ class AnnotatorTest(absltest.TestCase):
         " hypertension diagnosed on 2023-03-15."
     )
     self.mock_language_model.infer.return_value = [[
-        inference.ScoredOutput(
+        types.ScoredOutput(
             score=1.0,
             output=textwrap.dedent(f"""\
               ```yaml
@@ -323,7 +324,7 @@ class AnnotatorTest(absltest.TestCase):
         " hypertension diagnosed on 2023-03-15."
     )
     self.mock_language_model.infer.return_value = [[
-        inference.ScoredOutput(
+        types.ScoredOutput(
             score=1.0,
             output=textwrap.dedent(f"""\
               ```yaml
@@ -464,7 +465,7 @@ class AnnotatorTest(absltest.TestCase):
   def test_annotate_text_multiple_chunks(self):
     self.mock_language_model.infer.side_effect = [
         [[
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=textwrap.dedent(f"""\
                   ```yaml
@@ -477,7 +478,7 @@ class AnnotatorTest(absltest.TestCase):
             )
         ]],
         [[
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=textwrap.dedent(f"""\
                   ```yaml
@@ -563,7 +564,7 @@ class AnnotatorTest(absltest.TestCase):
   def test_annotate_text_no_extractions(self):
     text = "Text without extractions."
     self.mock_language_model.infer.return_value = [[
-        inference.ScoredOutput(
+        types.ScoredOutput(
             score=1.0,
             output=textwrap.dedent(f"""\
             ```yaml
@@ -688,14 +689,14 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
       batch_length: int = 1,
   ):
     mock_language_model = self.enter_context(
-        mock.patch.object(inference, "GeminiLanguageModel", autospec=True)
+        mock.patch.object(gemini, "GeminiLanguageModel", autospec=True)
     )
 
     # Define a side effect function so return length based on batch length.
     def mock_infer_side_effect(batch_prompts, **kwargs):
       for _ in batch_prompts:
         yield [
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=self._LLM_INFERENCE,
             )
@@ -761,11 +762,11 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
       batch_length: int = 1,
   ):
     mock_language_model = self.enter_context(
-        mock.patch.object(inference, "GeminiLanguageModel", autospec=True)
+        mock.patch.object(gemini, "GeminiLanguageModel", autospec=True)
     )
     mock_language_model.infer.return_value = [
         [
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=self._LLM_INFERENCE,
             )
@@ -798,7 +799,7 @@ class AnnotatorMultiPassTest(absltest.TestCase):
   def setUp(self):
     super().setUp()
     self.mock_language_model = self.enter_context(
-        mock.patch.object(inference, "GeminiLanguageModel", autospec=True)
+        mock.patch.object(gemini, "GeminiLanguageModel", autospec=True)
     )
     self.annotator = annotation.Annotator(
         language_model=self.mock_language_model,
@@ -811,7 +812,7 @@ class AnnotatorMultiPassTest(absltest.TestCase):
 
     self.mock_language_model.infer.side_effect = [
         [[
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=textwrap.dedent(f"""\
               ```yaml
@@ -824,7 +825,7 @@ class AnnotatorMultiPassTest(absltest.TestCase):
             )
         ]],
         [[
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=textwrap.dedent(f"""\
               ```yaml
@@ -859,7 +860,7 @@ class AnnotatorMultiPassTest(absltest.TestCase):
     # Mock overlapping extractions - both passes find "Smith" but differently
     self.mock_language_model.infer.side_effect = [
         [[
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=textwrap.dedent(f"""\
               ```yaml
@@ -870,7 +871,7 @@ class AnnotatorMultiPassTest(absltest.TestCase):
             )
         ]],
         [[
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=textwrap.dedent(f"""\
               ```yaml
@@ -905,7 +906,7 @@ class AnnotatorMultiPassTest(absltest.TestCase):
     text = "Patient has fever."
 
     self.mock_language_model.infer.return_value = [[
-        inference.ScoredOutput(
+        types.ScoredOutput(
             score=1.0,
             output=textwrap.dedent(f"""\
               ```yaml
@@ -933,7 +934,7 @@ class AnnotatorMultiPassTest(absltest.TestCase):
 
     self.mock_language_model.infer.side_effect = [
         [[
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=textwrap.dedent(f"""\
               ```yaml
@@ -944,7 +945,7 @@ class AnnotatorMultiPassTest(absltest.TestCase):
             )
         ]],
         [[
-            inference.ScoredOutput(
+            types.ScoredOutput(
                 score=1.0,
                 output=textwrap.dedent(f"""\
               ```yaml

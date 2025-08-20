@@ -23,10 +23,10 @@ from langextract import factory
 from langextract import schema
 import langextract as lx
 from langextract.core import data
-from langextract.providers import gemini as gemini_provider
+from langextract.providers import gemini
 from langextract.providers import ollama
 from langextract.providers import openai
-from langextract.providers.schemas import gemini as gemini_schemas
+from langextract.providers import schemas
 
 
 class ProviderSchemaDiscoveryTest(absltest.TestCase):
@@ -34,10 +34,10 @@ class ProviderSchemaDiscoveryTest(absltest.TestCase):
 
   def test_gemini_returns_gemini_schema(self):
     """Test that GeminiLanguageModel returns GeminiSchema."""
-    schema_class = gemini_provider.GeminiLanguageModel.get_schema_class()
+    schema_class = gemini.GeminiLanguageModel.get_schema_class()
     self.assertEqual(
         schema_class,
-        gemini_schemas.GeminiSchema,
+        schemas.gemini.GeminiSchema,
         msg="GeminiLanguageModel should return GeminiSchema class",
     )
 
@@ -377,7 +377,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
         )
     ]
 
-    gemini_schema = gemini_schemas.GeminiSchema.from_examples(examples_data)
+    gemini_schema = schemas.gemini.GeminiSchema.from_examples(examples_data)
     provider_config = gemini_schema.to_provider_config()
 
     self.assertIn(
@@ -410,7 +410,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
   def test_gemini_supports_strict_mode(self):
     """Test that GeminiSchema supports strict mode."""
     examples_data = []
-    gemini_schema = gemini_schemas.GeminiSchema.from_examples(examples_data)
+    gemini_schema = schemas.gemini.GeminiSchema.from_examples(examples_data)
     self.assertTrue(
         gemini_schema.supports_strict_mode,
         msg="GeminiSchema should support strict mode",
@@ -430,10 +430,10 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
             ],
         )
     ]
-    test_schema = gemini_schemas.GeminiSchema.from_examples(examples_data)
+    test_schema = schemas.gemini.GeminiSchema.from_examples(examples_data)
 
     with mock.patch("google.genai.Client", autospec=True):
-      model = gemini_provider.GeminiLanguageModel(
+      model = gemini.GeminiLanguageModel(
           model_id="gemini-2.5-flash",
           api_key="test_key",
           format_type=data.FormatType.YAML,
@@ -465,14 +465,14 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
             ],
         )
     ]
-    test_schema = gemini_schemas.GeminiSchema.from_examples(examples_data)
+    test_schema = schemas.gemini.GeminiSchema.from_examples(examples_data)
 
     with mock.patch("google.genai.Client", autospec=True) as mock_client:
       mock_model_instance = mock.Mock(spec=["return_value"])
       mock_client.return_value.models.generate_content = mock_model_instance
       mock_model_instance.return_value.text = '{"extractions": []}'
 
-      model = gemini_provider.GeminiLanguageModel(
+      model = gemini.GeminiLanguageModel(
           model_id="gemini-2.5-flash",
           api_key="test_key",
           response_schema=test_schema.schema_dict,
@@ -514,7 +514,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
       mock_client.return_value.models.generate_content = mock_model_instance
       mock_model_instance.return_value.text = '{"extractions": []}'
 
-      model = gemini_provider.GeminiLanguageModel(
+      model = gemini.GeminiLanguageModel(
           model_id="gemini-2.5-flash",
           api_key="test_key",
           max_workers=5,
@@ -546,38 +546,38 @@ class SchemaShimTest(absltest.TestCase):
 
   def test_extractions_key_import(self):
     """Test that EXTRACTIONS_KEY can be imported from schema module."""
-    from langextract import schema as s  # pylint: disable=reimported,import-outside-toplevel
+    from langextract import schema as lx_schema  # pylint: disable=reimported,import-outside-toplevel
 
     self.assertEqual(
-        s.EXTRACTIONS_KEY,
+        lx_schema.EXTRACTIONS_KEY,
         "extractions",
         msg="EXTRACTIONS_KEY should be 'extractions'",
     )
 
   def test_constraint_types_import(self):
     """Test that Constraint and ConstraintType can be imported."""
-    from langextract import schema as s  # pylint: disable=reimported,import-outside-toplevel
+    from langextract import schema as lx_schema  # pylint: disable=reimported,import-outside-toplevel
 
-    constraint = s.Constraint()
+    constraint = lx_schema.Constraint()
     self.assertEqual(
         constraint.constraint_type,
-        s.ConstraintType.NONE,
+        lx_schema.ConstraintType.NONE,
         msg="Default Constraint should have type NONE",
     )
 
     self.assertEqual(
-        s.ConstraintType.NONE.value,
+        lx_schema.ConstraintType.NONE.value,
         "none",
         msg="ConstraintType.NONE should have value 'none'",
     )
 
   def test_provider_schema_imports(self):
     """Test that provider schemas can be imported from schema module."""
-    from langextract import schema as s  # pylint: disable=reimported,import-outside-toplevel
+    from langextract import schema as lx_schema  # pylint: disable=reimported,import-outside-toplevel
 
     # Backward compatibility: re-exported from providers.schemas.gemini
     self.assertTrue(
-        hasattr(s, "GeminiSchema"),
+        hasattr(lx_schema, "GeminiSchema"),
         msg=(
             "GeminiSchema should be importable from schema module for backward"
             " compatibility"

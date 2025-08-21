@@ -28,7 +28,7 @@ import dataclasses
 import enum
 import re
 
-from langextract import debug_utils
+from langextract.core import debug_utils
 from langextract.core import exceptions
 
 

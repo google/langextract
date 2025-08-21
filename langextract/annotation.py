@@ -23,7 +23,7 @@ Usage example:
     annotated_documents = annotator.annotate_documents(documents, resolver)
 """
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 import itertools
 import time
 
@@ -488,7 +488,7 @@ class Annotator:
         recall by finding additional entities. Defaults to 1, which performs
         standard single extraction. Values > 1 reprocess tokens multiple times,
         potentially increasing costs.
-      **kwargs: Additional arguments for inference and resolver.
+      **kwargs: Additional arguments for inference and resolver_lib.
 
     Returns:
       Resolved annotations from text for document.

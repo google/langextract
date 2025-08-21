@@ -148,7 +148,7 @@ def extract(
 
   if debug:
     # pylint: disable=import-outside-toplevel
-    from langextract import debug_utils
+    from langextract.core import debug_utils
 
     debug_utils.configure_debug_logging()
 

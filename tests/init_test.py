@@ -19,19 +19,18 @@ from unittest import mock
 
 from absl.testing import absltest
 
-from langextract import inference
 from langextract import prompting
-from langextract import schema
 import langextract as lx
 from langextract.core import data
-from langextract.providers.schemas import gemini as gemini_schemas
+from langextract.core import types
+from langextract.providers import schemas
 
 
 class InitTest(absltest.TestCase):
   """Test cases for the main package functions."""
 
   @mock.patch.object(
-      gemini_schemas.GeminiSchema, "from_examples", autospec=True
+      schemas.gemini.GeminiSchema, "from_examples", autospec=True
   )
   @mock.patch("langextract.extraction.factory.create_model")
   def test_lang_extract_as_lx_extract(
@@ -42,7 +41,7 @@ class InitTest(absltest.TestCase):
 
     mock_model = mock.MagicMock()
     mock_model.infer.return_value = [[
-        inference.ScoredOutput(
+        types.ScoredOutput(
             output=textwrap.dedent("""\
             ```json
             {
@@ -145,7 +144,7 @@ class InitTest(absltest.TestCase):
     self.assertDataclassEqual(expected_result, actual_result)
 
   @mock.patch.object(
-      gemini_schemas.GeminiSchema, "from_examples", autospec=True
+      schemas.gemini.GeminiSchema, "from_examples", autospec=True
   )
   @mock.patch("langextract.extraction.factory.create_model")
   def test_extract_custom_params_reach_inference(
@@ -156,7 +155,7 @@ class InitTest(absltest.TestCase):
 
     mock_model = mock.MagicMock()
     mock_model.infer.return_value = [[
-        inference.ScoredOutput(
+        types.ScoredOutput(
             output='```json\n{"extractions": []}\n```',
             score=0.9,
         )

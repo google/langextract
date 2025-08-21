@@ -26,11 +26,12 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import exceptions
-from langextract import inference
+from langextract.core import base_model
 from langextract.core import data
+from langextract.core import types
 from langextract.providers import gemini
 from langextract.providers import ollama
-from langextract.providers import openai as openai_provider
+from langextract.providers import openai
 
 
 class TestBaseLanguageModel(absltest.TestCase):
@@ -38,7 +39,7 @@ class TestBaseLanguageModel(absltest.TestCase):
   def test_merge_kwargs_with_none(self):
     """Test merge_kwargs handles None runtime_kwargs."""
 
-    class TestModel(inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
+    class TestModel(base_model.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
       def infer(self, batch_prompts, **kwargs):
         return iter([])
@@ -70,7 +71,7 @@ class TestBaseLanguageModel(absltest.TestCase):
   def test_merge_kwargs_without_extra_kwargs(self):
     """Test merge_kwargs when _extra_kwargs doesn't exist."""
 
-    class TestModel(inference.BaseLanguageModel):  # pylint: disable=too-few-public-methods
+    class TestModel(base_model.BaseLanguageModel):  # pylint: disable=too-few-public-methods
 
       def infer(self, batch_prompts, **kwargs):
         return iter([])
@@ -153,7 +154,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
         model_url="http://localhost:11434",
     )
     expected_results = [[
-        inference.ScoredOutput(
+        types.ScoredOutput(
             score=1.0, output="{'bus' : '**autóbusz**'} \n\n\n  \n"
         )
     ]]
@@ -455,7 +456,7 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         model_id=model_id,
         api_key=api_key,
         base_url=base_url,
@@ -475,16 +476,16 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
     self.assertEqual(call_args.kwargs["messages"][0]["role"], "system")
     self.assertEqual(call_args.kwargs["messages"][1]["role"], "user")
 
-    expected_results = [[
-        inference.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')
-    ]]
+    expected_results = [
+        [types.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')]
+    ]
     self.assertEqual(results, expected_results)
 
 
 class TestOpenAILanguageModel(absltest.TestCase):
 
   def test_openai_parse_output_json(self):
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         api_key="test-key", format_type=data.FormatType.JSON
     )
 
@@ -497,7 +498,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertIn("Failed to parse output as JSON", str(context.exception))
 
   def test_openai_parse_output_yaml(self):
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         api_key="test-key", format_type=data.FormatType.YAML
     )
 
@@ -511,7 +512,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
   def test_openai_no_api_key_raises_error(self):
     with self.assertRaises(exceptions.InferenceConfigError) as context:
-      openai_provider.OpenAILanguageModel(api_key=None)
+      openai.OpenAILanguageModel(api_key=None)
     self.assertEqual(str(context.exception), "API key not provided.")
 
   @mock.patch("openai.OpenAI")
@@ -526,7 +527,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         api_key="test-key",
         frequency_penalty=0.5,
         presence_penalty=0.7,
@@ -552,7 +553,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         api_key="test-key",
         temperature=0.5,
         seed=123,
@@ -575,7 +576,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         api_key="test-key", format_type=data.FormatType.JSON
     )
 
@@ -599,9 +600,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
-    model = openai_provider.OpenAILanguageModel(
-        api_key="test-key", temperature=0.0
-    )
+    model = openai.OpenAILanguageModel(api_key="test-key", temperature=0.0)
 
     list(model.infer(["test prompt"]))
 
@@ -624,7 +623,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     mock_client.chat.completions.create.return_value = mock_response
 
     # Test with temperature=None in model init
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         api_key="test-key",
         temperature=None,
     )
@@ -646,7 +645,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         api_key="test-key",
         top_p=0.9,
     )
@@ -669,7 +668,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
-    model = openai_provider.OpenAILanguageModel(
+    model = openai.OpenAILanguageModel(
         api_key="test-key",
         format_type=None,
     )

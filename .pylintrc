@@ -73,8 +73,7 @@ disable=
     missing-raises-doc,
     # --- Gradual improvements ---
     deprecated-typing-alias,  # For typing.Type etc.
-    unspecified-encoding,
-    unused-import
+    unspecified-encoding
 
 
 [REPORTS]

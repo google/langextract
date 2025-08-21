@@ -19,7 +19,7 @@ from unittest import mock
 from absl.testing import absltest
 
 from langextract import visualization
-from langextract.core import data as lx_data
+from langextract.core import data
 
 _PALETTE = visualization._PALETTE
 _VISUALIZATION_CSS = visualization._VISUALIZATION_CSS
@@ -30,15 +30,15 @@ class VisualizationTest(absltest.TestCase):
   def test_assign_colors_basic_assignment(self):
 
     extractions = [
-        lx_data.Extraction(
+        data.Extraction(
             extraction_class="CLASS_A",
             extraction_text="text_a",
-            char_interval=lx_data.CharInterval(start_pos=0, end_pos=1),
+            char_interval=data.CharInterval(start_pos=0, end_pos=1),
         ),
-        lx_data.Extraction(
+        data.Extraction(
             extraction_class="CLASS_B",
             extraction_text="text_b",
-            char_interval=lx_data.CharInterval(start_pos=1, end_pos=2),
+            char_interval=data.CharInterval(start_pos=1, end_pos=2),
         ),
     ]
     # Classes are sorted alphabetically before color assignment.
@@ -54,10 +54,10 @@ class VisualizationTest(absltest.TestCase):
   def test_build_highlighted_text_single_span_correct_html(self):
 
     text = "Hello world"
-    extraction = lx_data.Extraction(
+    extraction = data.Extraction(
         extraction_class="GREETING",
         extraction_text="Hello",
-        char_interval=lx_data.CharInterval(start_pos=0, end_pos=5),
+        char_interval=data.CharInterval(start_pos=0, end_pos=5),
     )
     extractions = [extraction]
     color_map = {"GREETING": "#ff0000"}
@@ -75,10 +75,10 @@ class VisualizationTest(absltest.TestCase):
   def test_build_highlighted_text_escapes_html_in_text_and_tooltip(self):
 
     text = "Text with <unsafe> content & ampersand."
-    extraction = lx_data.Extraction(
+    extraction = data.Extraction(
         extraction_class="UNSAFE_CLASS",
         extraction_text="<unsafe> content & ampersand.",
-        char_interval=lx_data.CharInterval(start_pos=10, end_pos=39),
+        char_interval=data.CharInterval(start_pos=10, end_pos=39),
         attributes={"detail": "Attribute with <tag> & 'quote'"},
     )
     # Highlighting "<unsafe> content & ampersand"
@@ -102,13 +102,13 @@ class VisualizationTest(absltest.TestCase):
   )  # Ensures visualize returns str
   def test_visualize_basic_document_renders_correctly(self):
 
-    doc = lx_data.AnnotatedDocument(
+    doc = data.AnnotatedDocument(
         text="Patient needs Aspirin.",
         extractions=[
-            lx_data.Extraction(
+            data.Extraction(
                 extraction_class="MEDICATION",
                 extraction_text="Aspirin",
-                char_interval=lx_data.CharInterval(
+                char_interval=data.CharInterval(
                     start_pos=14, end_pos=21
                 ),  # "Aspirin"
             )
@@ -143,7 +143,7 @@ class VisualizationTest(absltest.TestCase):
   )  # Ensures visualize returns str
   def test_visualize_no_extractions_renders_text_and_empty_legend(self):
 
-    doc = lx_data.AnnotatedDocument(text="No entities here.", extractions=[])
+    doc = data.AnnotatedDocument(text="No entities here.", extractions=[])
     body_html = (
         '<div class="lx-animated-wrapper"><p>No valid extractions to'
         " animate.</p></div>"

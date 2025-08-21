@@ -31,8 +31,8 @@ import json
 import pathlib
 import textwrap
 
-from langextract import io as _io
-from langextract.core import data as _data
+from langextract import io
+from langextract.core import data
 
 # Fallback if IPython is not present
 try:
@@ -176,7 +176,7 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
     </style>""")
 
 
-def _assign_colors(extractions: list[_data.Extraction]) -> dict[str, str]:
+def _assign_colors(extractions: list[data.Extraction]) -> dict[str, str]:
   """Assigns a background colour to each extraction class.
 
   Args:
@@ -194,8 +194,8 @@ def _assign_colors(extractions: list[_data.Extraction]) -> dict[str, str]:
 
 
 def _filter_valid_extractions(
-    extractions: list[_data.Extraction],
-) -> list[_data.Extraction]:
+    extractions: list[data.Extraction],
+) -> list[data.Extraction]:
   """Filters extractions to only include those with valid char intervals."""
   return [
       e
@@ -229,12 +229,12 @@ class SpanPoint:
   position: int
   tag_type: TagType
   span_idx: int
-  extraction: _data.Extraction
+  extraction: data.Extraction
 
 
 def _build_highlighted_text(
     text: str,
-    extractions: list[_data.Extraction],
+    extractions: list[data.Extraction],
     color_map: dict[str, str],
 ) -> str:
   """Returns text with <span> highlights inserted, supporting nesting.
@@ -358,7 +358,7 @@ def _format_attributes(attributes: dict | None) -> str:
 
 def _prepare_extraction_data(
     text: str,
-    extractions: list[_data.Extraction],
+    extractions: list[data.Extraction],
     color_map: dict[str, str],
     context_chars: int = 150,
 ) -> list[dict]:
@@ -416,7 +416,7 @@ def _prepare_extraction_data(
 
 def _build_visualization_html(
     text: str,
-    extractions: list[_data.Extraction],
+    extractions: list[data.Extraction],
     color_map: dict[str, str],
     animation_speed: float = 1.0,
     show_legend: bool = True,
@@ -552,7 +552,7 @@ def _build_visualization_html(
 
 
 def visualize(
-    data_source: _data.AnnotatedDocument | str | pathlib.Path,
+    data_source: data.AnnotatedDocument | str | pathlib.Path,
     *,
     animation_speed: float = 1.0,
     show_legend: bool = True,
@@ -578,7 +578,7 @@ def visualize(
     if not file_path.exists():
       raise FileNotFoundError(f'JSONL file not found: {file_path}')
 
-    documents = list(_io.load_annotated_documents_jsonl(file_path))
+    documents = list(io.load_annotated_documents_jsonl(file_path))
     if not documents:
       raise ValueError(f'No documents found in JSONL file: {file_path}')
 

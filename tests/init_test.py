@@ -191,6 +191,48 @@ class InitTest(absltest.TestCase):
     _, kwargs = mock_model.infer.call_args
     self.assertEqual(kwargs.get("max_workers"), 5)
 
+  def test_data_module_exports_via_compatibility_shim(self):
+    """Verify data module exports are accessible via lx.data."""
+    expected_exports = [
+        "AlignmentStatus",
+        "CharInterval",
+        "Extraction",
+        "Document",
+        "AnnotatedDocument",
+        "ExampleData",
+        "FormatType",
+    ]
+
+    for name in expected_exports:
+      with self.subTest(export=name):
+        self.assertTrue(
+            hasattr(lx.data, name),
+            f"lx.data.{name} not accessible via compatibility shim",
+        )
+
+  def test_tokenizer_module_exports_via_compatibility_shim(self):
+    """Verify tokenizer module exports are accessible via lx.tokenizer."""
+    expected_exports = [
+        "BaseTokenizerError",
+        "InvalidTokenIntervalError",
+        "SentenceRangeError",
+        "CharInterval",
+        "TokenInterval",
+        "TokenType",
+        "Token",
+        "TokenizedText",
+        "tokenize",
+        "tokens_text",
+        "find_sentence_range",
+    ]
+
+    for name in expected_exports:
+      with self.subTest(export=name):
+        self.assertTrue(
+            hasattr(lx.tokenizer, name),
+            f"lx.tokenizer.{name} not accessible via compatibility shim",
+        )
+
 
 if __name__ == "__main__":
   absltest.main()

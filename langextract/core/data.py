@@ -24,6 +24,16 @@ from langextract.core import types
 
 FormatType = types.FormatType  # Backward compat
 
+__all__ = [
+    "AlignmentStatus",
+    "CharInterval",
+    "Extraction",
+    "Document",
+    "AnnotatedDocument",
+    "ExampleData",
+    "FormatType",
+]
+
 
 class AlignmentStatus(enum.Enum):
   MATCH_EXACT = "match_exact"

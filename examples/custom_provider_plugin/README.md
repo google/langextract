@@ -199,8 +199,8 @@ twine upload dist/*
 ```
 
 **Share with the community:**
+- Submit a PR to add your provider to the [Community Providers Registry](../../COMMUNITY_PROVIDERS.md)
 - Open an issue on [LangExtract GitHub](https://github.com/google/langextract/issues) to announce your provider and get feedback
-- Consider submitting a PR to add your provider to the community providers list (coming soon)
 
 ## Common Pitfalls to Avoid
 

@@ -73,6 +73,8 @@ from __future__ import annotations
 
 import dataclasses
 from typing import Any, Iterator, Mapping, Sequence
+from urllib.parse import urljoin
+from urllib.parse import urlparse
 import warnings
 
 import requests
@@ -103,6 +105,9 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
 
   Timeout can be set via constructor or passed through lx.extract():
     lx.extract(..., language_model_params={"timeout": 300})
+
+  Authentication is supported for proxied Ollama instances:
+    lx.extract(..., language_model_params={"api_key": "sk-..."})
   """
 
   _model: str
@@ -114,6 +119,10 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
+  # Authentication
+  _api_key: str | None = None
+  _auth_scheme: str = 'Bearer'
+  _auth_header: str = 'Authorization'
 
   @classmethod
   def get_schema_class(cls) -> type[schema.BaseSchema] | None:
@@ -123,6 +132,17 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       The FormatModeSchema class that enables JSON mode (non-strict).
     """
     return schema.FormatModeSchema
+
+  def __repr__(self) -> str:
+    """Return string representation with redacted API key."""
+    api_key_display = '[REDACTED]' if self._api_key else None
+    return (
+        f'{self.__class__.__name__}('
+        f'model={self._model!r}, '
+        f'model_url={self._model_url!r}, '
+        f'format_type={self.format_type!r}, '
+        f'api_key={api_key_display})'
+    )
 
   def __init__(
       self,
@@ -178,10 +198,26 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       format_type = core_types.FormatType.JSON
 
     self._model = model_id
-    # Support both model_url and base_url parameters
+    # Support both model_url and base_url
     self._model_url = base_url or model_url or _OLLAMA_DEFAULT_MODEL_URL
     self.format_type = format_type
     self._constraint = constraint
+
+    # Extract authentication
+    self._api_key = kwargs.pop('api_key', None)
+    self._auth_scheme = kwargs.pop('auth_scheme', 'Bearer')
+    self._auth_header = kwargs.pop('auth_header', 'Authorization')
+
+    if self._api_key:
+      host = urlparse(self._model_url).hostname
+      if host in ('localhost', '127.0.0.1', '::1'):
+        warnings.warn(
+            'API key provided for localhost Ollama instance. '
+            "Native Ollama doesn't require authentication. "
+            'This is typically only needed for proxied instances.',
+            UserWarning,
+        )
+
     super().__init__(constraint=constraint)
     if timeout is not None:
       kwargs['timeout'] = timeout
@@ -212,7 +248,6 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
             model_url=self._model_url,
             **combined_kwargs,
         )
-        # No score for Ollama. Default to 1.0
         yield [core_types.ScoredOutput(score=1.0, output=response['response'])]
       except Exception as e:
         raise exceptions.InferenceRuntimeError(
@@ -237,7 +272,7 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       num_threads: int | None = None,
       num_ctx: int | None = None,
       stop: str | list[str] | None = None,
-      **kwargs,  # pylint: disable=unused-argument
+      **kwargs,
   ) -> Mapping[str, Any]:
     """Sends a prompt to an Ollama model and returns the generated response.
 
@@ -286,7 +321,7 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
     """
     model = model or self._model
     model_url = model_url or self._model_url
-    if structured_output_format is None:
+    if structured_output_format is None and self.format_type is not None:
       structured_output_format = (
           'json' if self.format_type == core_types.FormatType.JSON else 'yaml'
       )
@@ -316,31 +351,60 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
     else:
       options['num_ctx'] = _DEFAULT_NUM_CTX
 
-    api_url = model_url + '/api/generate'
+    reserved_top_level = {
+        'model',
+        'prompt',
+        'system',
+        'stop',
+        'format',
+        'stream',
+        'raw',
+    }
+    for key, value in kwargs.items():
+      if value is None:
+        continue
+      if key in reserved_top_level:
+        continue
+      if key not in options:
+        options[key] = value
 
-    payload = {
+    api_url = urljoin(
+        model_url if model_url.endswith('/') else model_url + '/',
+        'api/generate',
+    )
+
+    payload: dict[str, Any] = {
         'model': model,
         'prompt': prompt,
         'system': system,
         'stream': False,
         'raw': raw,
-        'format': structured_output_format,
         'options': options,
     }
 
-    # Add stop sequences if provided (top-level in Ollama API)
+    if structured_output_format is not None:
+      payload['format'] = structured_output_format
+
     if stop is not None:
       payload['stop'] = stop
 
     request_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
 
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
+    if self._api_key:
+      if self._auth_scheme:
+        headers[self._auth_header] = f'{self._auth_scheme} {self._api_key}'
+      else:
+        headers[self._auth_header] = self._api_key
+
     try:
       response = self._requests.post(
           api_url,
-          headers={
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-          },
+          headers=headers,
           json=payload,
           timeout=request_timeout,
       )

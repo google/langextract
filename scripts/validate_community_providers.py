@@ -117,6 +117,11 @@ def validate(filepath: Path) -> bool:
           f'Line {i+1}: PyPI package must be backticked and normalized (e.g.,'
           ' `langextract-provider-foo`).'
       )
+    elif pypi and not pypi.strip('`').lower().startswith('langextract-'):
+      errors.append(
+          f'Line {i+1}: PyPI package should start with `langextract-` for'
+          ' discoverability.'
+      )
 
     if not re.fullmatch(GH_MULTI_USER, maint):
       errors.append(

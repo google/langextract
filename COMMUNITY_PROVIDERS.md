@@ -24,12 +24,12 @@ Copy this row template, replace placeholders, and insert **above** the marker li
 ```
 
 **Before submitting your PR:**
-- [ ] Plugin name follows `langextract-provider-<name>` convention
+- [ ] PyPI package name starts with `langextract-` (recommended: `langextract-provider-<name>`)
 - [ ] PyPI package is published (or will be soon) and listed in backticks
 - [ ] Maintainer(s) listed as GitHub profile links (comma-separated if multiple)
 - [ ] Repository link points to public GitHub repo
 - [ ] Description clearly explains what your provider does
-- [ ] Issue Link points to a tracking issue in the LangExtract repository
+- [ ] Issue Link points to a tracking issue in the LangExtract repository for integration and usage feedback (plugin-specific features and discussions can optionally happen in the plugin's repository)
 - [ ] Entries are sorted alphabetically by Plugin Name
 
 ## Documentation

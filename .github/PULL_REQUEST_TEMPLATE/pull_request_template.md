@@ -9,7 +9,9 @@ Replace this with a clear and concise change description
   alternatives considered, risks (such as breaking backwards compatibility), and
   any new dependencies. --->
 
-Fixes #[issue number]
+<!--- Use "Fixes #123" to auto-close the issue when merged (for bug fixes/implementations) -->
+<!--- Use "Related to #123" or "Addresses #123" for documentation updates or partial solutions -->
+Fixes/Related to #[issue number]
 
 Choose one: (Bug fix | Feature | Documentation | Testing | Code health | Other)
 

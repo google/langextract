@@ -11,6 +11,7 @@ Community-developed provider plugins that extend LangExtract with additional mod
 | Plugin Name | PyPI Package | Maintainer | GitHub Repo | Description | Issue Link |
 |-------------|--------------|------------|-------------|-------------|------------|
 | Example Provider | `langextract-provider-example` | [@google](https://github.com/google) | [google/langextract](https://github.com/google/langextract) | Reference implementation for creating custom providers | [#123](https://github.com/google/langextract/issues/123) |
+| AWS Bedrock | `langextract-bedrock` | [@andyxhadji](https://github.com/andyxhadji) | [andyxhadji/langextract-bedrock](https://github.com/andyxhadji/langextract-bedrock) | AWS Bedrock provider for LangExtract, supports all models & inference profiles | [#148](https://github.com/google/langextract/issues/148) |
 | LiteLLM | `langextract-litellm` | [@JustStas](https://github.com/JustStas) | [JustStas/langextract-litellm](https://github.com/JustStas/langextract-litellm) | LiteLLM provider for LangExtract, supports all models covered in LiteLLM, including OpenAI, Azure, Anthropic, etc., See [LiteLLM's supported models](https://docs.litellm.ai/docs/providers) | [#187](https://github.com/google/langextract/issues/187) |
 
 <!-- ADD NEW PLUGINS ABOVE THIS LINE -->

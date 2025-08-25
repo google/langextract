@@ -21,5 +21,5 @@ langextract.data. All functionality has moved to langextract.core.data.
 from __future__ import annotations
 
 # Re-export everything from core.data for backward compatibility
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=unused-wildcard-import
 from langextract.core.data import *

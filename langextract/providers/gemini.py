@@ -51,6 +51,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):
 
   model_id: str = 'gemini-2.5-flash'
   api_key: str | None = None
+  project_id: str | None = None
+  location: str | None = None
   gemini_schema: schemas.gemini.GeminiSchema | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
@@ -84,6 +86,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):
       self,
       model_id: str = 'gemini-2.5-flash',
       api_key: str | None = None,
+      project_id: str | None = None,
+      location: str | None = None,
       gemini_schema: schemas.gemini.GeminiSchema | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float = 0.0,
@@ -96,6 +100,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):
     Args:
       model_id: The Gemini model ID to use.
       api_key: API key for Gemini service.
+      project_id: Project ID for Gemini service.
+      location: Location for Gemini service.
       gemini_schema: Optional schema for structured output.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
@@ -117,16 +123,20 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):
 
     self.model_id = model_id
     self.api_key = api_key
+    self.project_id = project_id
+    self.location = location
     self.gemini_schema = gemini_schema
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
     self.fence_output = fence_output
 
-    if not self.api_key:
-      raise exceptions.InferenceConfigError('API key not provided.')
-
-    self._client = genai.Client(api_key=self.api_key)
+    if self.api_key:
+      self._client = genai.Client(api_key=self.api_key)
+    elif (self.project_id and self.location):
+      self._client = genai.Client(vertexai=True, project=self.project_id, location=self.location)
+    else:
+      raise exceptions.InferenceConfigError('API key OR project_id/location not provided.')
 
     super().__init__(
         constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)

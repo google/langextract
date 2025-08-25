@@ -258,6 +258,20 @@ result = lx.extract(
 )
 ```
 
+**Option 4: GCP project authentication**
+If you don't have an API key, you can initialize your model through Vertex AI with a Project ID and location;
+```python
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description="Extract information...",
+    examples=[...],
+    model_id="gemini-2.5-flash",
+    project_id="your-gcp-project-id"
+    location="your-project-location" # For example, 'us-central1'
+)
+```
+
+
 ## Adding Custom Model Providers
 
 LangExtract supports custom LLM providers via a lightweight plugin system. You can add support for new models without changing core code.

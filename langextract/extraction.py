@@ -51,6 +51,8 @@ def extract(
     extraction_passes: int = 1,
     config: typing.Any = None,
     model: typing.Any = None,
+    *,
+    fetch_urls: bool = True,
 ) -> typing.Any:
   """Extracts structured information from text.
 
@@ -61,8 +63,8 @@ def extract(
 
   Args:
       text_or_documents: The source text to extract information from, a URL to
-        download text from (starting with http:// or https://), or an iterable
-        of Document objects.
+        download text from (starting with http:// or https:// when fetch_urls
+        is True), or an iterable of Document objects.
       prompt_description: Instructions for what to extract from the text.
       examples: List of ExampleData objects to guide the extraction.
       api_key: API key for Gemini or other LLM services (can also use
@@ -129,6 +131,10 @@ def extract(
         and config are provided, model takes precedence.
       model: Pre-configured language model to use for extraction. Takes
         precedence over all other parameters including config.
+      fetch_urls: Whether to automatically download content when the input is a
+        URL string. When True (default), strings starting with http:// or
+        https:// are fetched. When False, all strings are treated as literal
+        text to analyze. This is a keyword-only parameter.
 
   Returns:
       An AnnotatedDocument with the extracted information when input is a
@@ -163,7 +169,11 @@ def extract(
         UserWarning,
     )
 
-  if isinstance(text_or_documents, str) and io.is_url(text_or_documents):
+  if (
+      fetch_urls
+      and isinstance(text_or_documents, str)
+      and io.is_url(text_or_documents)
+  ):
     text_or_documents = io.download_text_from_url(text_or_documents)
 
   prompt_template = prompting.PromptTemplateStructured(

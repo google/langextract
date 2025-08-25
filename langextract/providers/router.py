@@ -32,6 +32,10 @@ from absl import logging
 from langextract.core import base_model
 from langextract.core import exceptions
 
+TLanguageModel = typing.TypeVar(
+    "TLanguageModel", bound=base_model.BaseLanguageModel
+)
+
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class _Entry:
@@ -103,9 +107,7 @@ def register_lazy(
 
 def register(
     *patterns: str | re.Pattern[str], priority: int = 0
-) -> typing.Callable[
-    [type[base_model.BaseLanguageModel]], type[base_model.BaseLanguageModel]
-]:
+) -> typing.Callable[[type[TLanguageModel]], type[TLanguageModel]]:
   """Decorator to register a provider class directly.
 
   Args:
@@ -117,9 +119,7 @@ def register(
   """
   compiled = tuple(re.compile(p) if isinstance(p, str) else p for p in patterns)
 
-  def _decorator(
-      cls: type[base_model.BaseLanguageModel],
-  ) -> type[base_model.BaseLanguageModel]:
+  def _decorator(cls: type[TLanguageModel]) -> type[TLanguageModel]:
     def _loader() -> type[base_model.BaseLanguageModel]:
       return cls
 

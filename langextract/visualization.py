@@ -446,7 +446,7 @@ def _build_visualization_html(
   )
   legend_html = _build_legend_html(color_map) if show_legend else ''
 
-  js_data = json.dumps(extraction_data)
+  js_data = json.dumps(extraction_data, ensure_ascii=False)
 
   # Prepare pos_info_str safely for pytype for the f-string below
   first_extraction = extractions[0]

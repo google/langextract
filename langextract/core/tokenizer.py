@@ -151,11 +151,12 @@ _DIGITS_PATTERN = r"[0-9]+"
 _SYMBOLS_PATTERN = r"[^A-Za-z0-9\s]+"
 _END_OF_SENTENCE_PATTERN = re.compile(r"[.?!]$")
 _SLASH_ABBREV_PATTERN = r"[A-Za-z0-9]+(?:/[A-Za-z0-9]+)+"
+_CN = r"[^\x00-\xff]"
 
 _TOKEN_PATTERN = re.compile(
-    rf"{_SLASH_ABBREV_PATTERN}|{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_SYMBOLS_PATTERN}"
+    rf"{_CN}|{_SLASH_ABBREV_PATTERN}|{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_SYMBOLS_PATTERN}"
 )
-_WORD_PATTERN = re.compile(rf"(?:{_LETTERS_PATTERN}|{_DIGITS_PATTERN})\Z")
+_WORD_PATTERN = re.compile(rf"(?:{_CN}|{_LETTERS_PATTERN}|{_DIGITS_PATTERN})\Z")
 
 # Known abbreviations that should not count as sentence enders.
 # TODO: This can potentially be removed given most use cases

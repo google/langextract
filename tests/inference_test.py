@@ -436,6 +436,90 @@ class TestGeminiLanguageModel(absltest.TestCase):
         "unknown_runtime_param", config, "Unknown kwargs should be filtered out"
     )
 
+  def test_gemini_requires_auth_config(self):
+    """Test that Gemini requires either API key or Vertex AI config."""
+    with self.assertRaises(exceptions.InferenceConfigError) as cm:
+      gemini.GeminiLanguageModel()
+
+    self.assertIn("Gemini models require either", str(cm.exception))
+    self.assertIn("API key", str(cm.exception))
+    self.assertIn("Vertex AI", str(cm.exception))
+
+  def test_gemini_vertexai_requires_project_and_location(self):
+    """Test that Vertex AI mode requires both project and location."""
+    with self.assertRaises(exceptions.InferenceConfigError) as cm:
+      gemini.GeminiLanguageModel(vertexai=True)
+
+    self.assertIn("requires both project and location", str(cm.exception))
+
+  @mock.patch("google.genai.Client")
+  def test_gemini_vertexai_initialization(self, mock_client_class):
+    """Test successful initialization with Vertex AI config."""
+    mock_client = mock.Mock()
+    mock_client_class.return_value = mock_client
+
+    model = gemini.GeminiLanguageModel(
+        vertexai=True, project="test-project", location="us-central1"
+    )
+
+    self.assertIsNone(model.api_key)
+    self.assertTrue(model.vertexai)
+    self.assertEqual(model.project, "test-project")
+    self.assertEqual(model.location, "us-central1")
+    mock_client_class.assert_called_once_with(
+        api_key=None,
+        vertexai=True,
+        credentials=None,
+        project="test-project",
+        location="us-central1",
+        http_options=None,
+    )
+
+  @mock.patch("absl.logging.warning")
+  @mock.patch("google.genai.Client")
+  def test_gemini_warns_when_both_auth_provided(
+      self, mock_client_class, mock_warning
+  ):
+    """Test that warning is logged when both API key and Vertex AI are provided."""
+    mock_client = mock.Mock()
+    mock_client_class.return_value = mock_client
+
+    gemini.GeminiLanguageModel(
+        api_key="test-key",
+        vertexai=True,
+        project="test-project",
+        location="us-central1",
+    )
+
+    mock_warning.assert_called_once()
+    warning_msg = mock_warning.call_args[0][0]
+    self.assertIn("Both API key and Vertex AI", warning_msg)
+    self.assertIn("API key will take precedence", warning_msg)
+
+  @mock.patch("google.genai.Client")
+  def test_gemini_vertexai_with_http_options(self, mock_client_class):
+    """Test that http_options are passed to genai.Client for VPC endpoints."""
+    mock_client = mock.Mock()
+    mock_client_class.return_value = mock_client
+
+    http_options = {"base_url": "https://custom-vpc.p.googleapis.com"}
+    model = gemini.GeminiLanguageModel(
+        vertexai=True,
+        project="test-project",
+        location="us-central1",
+        http_options=http_options,
+    )
+
+    self.assertEqual(model.http_options, http_options)
+    mock_client_class.assert_called_once_with(
+        api_key=None,
+        vertexai=True,
+        credentials=None,
+        project="test-project",
+        location="us-central1",
+        http_options=http_options,
+    )
+
 
 class TestOpenAILanguageModelInference(parameterized.TestCase):
 

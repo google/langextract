@@ -258,6 +258,24 @@ result = lx.extract(
 )
 ```
 
+**Option 4: Vertex AI (Service Accounts)**
+
+Use [Vertex AI](https://cloud.google.com/vertex-ai/docs/start/introduction-unified-platform) for authentication with service accounts:
+
+```python
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description="Extract information...",
+    examples=[...],
+    model_id="gemini-2.5-flash",
+    language_model_params={
+        "vertexai": True,
+        "project": "your-project-id",
+        "location": "global"  # or regional endpoint
+    }
+)
+```
+
 ## Adding Custom Model Providers
 
 LangExtract supports custom LLM providers via a lightweight plugin system. You can add support for new models without changing core code.

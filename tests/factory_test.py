@@ -65,7 +65,7 @@ class FakeOpenAIProvider(base_model.BaseLanguageModel):
     return self.infer(prompts)
 
 
-class FactoryTest(absltest.TestCase):
+class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
   def setUp(self):
     super().setUp()
@@ -338,6 +338,87 @@ class FactoryTest(absltest.TestCase):
     self.assertIn(
         "Either model_id or provider must be specified", str(cm.exception)
     )
+
+  def test_gemini_vertexai_parameters_accepted(self):
+    """Test that Vertex AI parameters are properly passed to Gemini provider."""
+    original_entries = router._ENTRIES.copy()  # pylint: disable=protected-access
+    original_keys = router._ENTRY_KEYS.copy()  # pylint: disable=protected-access
+
+    try:
+
+      @router.register(r"^gemini", priority=200)
+      class MockGeminiWithVertexAI(base_model.BaseLanguageModel):  # pylint: disable=unused-variable
+
+        def __init__(
+            self,
+            model_id="gemini-2.5-flash",
+            api_key=None,
+            vertexai=False,
+            credentials=None,
+            project=None,
+            location=None,
+            **kwargs,
+        ):
+          self.model_id = model_id
+          self.api_key = api_key
+          self.vertexai = vertexai
+          self.credentials = credentials
+          self.project = project
+          self.location = location
+          super().__init__()
+
+        def infer(self, batch_prompts, **kwargs):
+          return [[types.ScoredOutput(score=1.0, output="vertexai-test")]]
+
+      config = factory.ModelConfig(
+          model_id="gemini-pro",
+          provider_kwargs={
+              "vertexai": True,
+              "project": "test-project",
+              "location": "us-central1",
+          },
+      )
+      model = factory.create_model(config)
+
+      self.assertTrue(model.vertexai)
+      self.assertEqual(model.project, "test-project")
+      self.assertEqual(model.location, "us-central1")
+      self.assertIsNone(model.api_key)
+    finally:
+      router._ENTRIES = original_entries  # pylint: disable=protected-access
+      router._ENTRY_KEYS = original_keys  # pylint: disable=protected-access
+
+  def test_gemini_vertexai_with_credentials(self):
+    """Test that Vertex AI credentials can be passed through."""
+    original_entries = router._ENTRIES.copy()  # pylint: disable=protected-access
+    original_keys = router._ENTRY_KEYS.copy()  # pylint: disable=protected-access
+
+    try:
+
+      @router.register(r"^gemini", priority=200)
+      class MockGeminiWithCredentials(base_model.BaseLanguageModel):  # pylint: disable=unused-variable
+
+        def __init__(
+            self, model_id="gemini-2.5-flash", credentials=None, **kwargs
+        ):
+          self.model_id = model_id
+          self.credentials = credentials
+          super().__init__()
+
+        def infer(self, batch_prompts, **kwargs):
+          return [[types.ScoredOutput(score=1.0, output="creds-test")]]
+
+      mock_credentials = {"type": "service_account"}  # Simplified mock
+      config = factory.ModelConfig(
+          model_id="gemini-2.5-flash",
+          provider_kwargs={"credentials": mock_credentials},
+      )
+      model = factory.create_model(config)
+
+      self.assertEqual(model.credentials, mock_credentials)
+    finally:
+      router._ENTRIES = original_entries  # pylint: disable=protected-access
+      router._ENTRY_KEYS = original_keys  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":

@@ -21,6 +21,8 @@ import concurrent.futures
 import dataclasses
 from typing import Any, Final, Iterator, Sequence
 
+from absl import logging
+
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
@@ -46,11 +48,16 @@ _API_CONFIG_KEYS: Final[set[str]] = {
     priority=patterns.GEMINI_PRIORITY,
 )
 @dataclasses.dataclass(init=False)
-class GeminiLanguageModel(base_model.BaseLanguageModel):
+class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-many-instance-attributes
   """Language model inference using Google's Gemini API with structured output."""
 
   model_id: str = 'gemini-2.5-flash'
   api_key: str | None = None
+  vertexai: bool = False
+  credentials: Any | None = None
+  project: str | None = None
+  location: str | None = None
+  http_options: Any | None = None
   gemini_schema: schemas.gemini.GeminiSchema | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
@@ -84,6 +91,11 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):
       self,
       model_id: str = 'gemini-2.5-flash',
       api_key: str | None = None,
+      vertexai: bool = False,
+      credentials: Any | None = None,
+      project: str | None = None,
+      location: str | None = None,
+      http_options: Any | None = None,
       gemini_schema: schemas.gemini.GeminiSchema | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float = 0.0,
@@ -96,6 +108,11 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):
     Args:
       model_id: The Gemini model ID to use.
       api_key: API key for Gemini service.
+      vertexai: Whether to use Vertex AI instead of API key authentication.
+      credentials: Optional Google auth credentials for Vertex AI.
+      project: Google Cloud project ID for Vertex AI.
+      location: Vertex AI location (e.g., 'global', 'us-central1').
+      http_options: Optional HTTP options for the client (e.g., for VPC endpoints).
       gemini_schema: Optional schema for structured output.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
@@ -112,21 +129,48 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):
       from google import genai
     except ImportError as e:
       raise exceptions.InferenceConfigError(
-          'Failed to import google-genai. Reinstall: pip install langextract'
+          'google-genai is required for Gemini. Install it with: pip install'
+          ' google-genai'
       ) from e
 
     self.model_id = model_id
     self.api_key = api_key
+    self.vertexai = vertexai
+    self.credentials = credentials
+    self.project = project
+    self.location = location
+    self.http_options = http_options
     self.gemini_schema = gemini_schema
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
     self.fence_output = fence_output
 
-    if not self.api_key:
-      raise exceptions.InferenceConfigError('API key not provided.')
+    if not self.api_key and not self.vertexai:
+      raise exceptions.InferenceConfigError(
+          'Gemini models require either:\n  - An API key via api_key parameter'
+          ' or LANGEXTRACT_API_KEY env var\n  - Vertex AI configuration with'
+          ' vertexai=True, project, and location'
+      )
+    if self.vertexai and (not self.project or not self.location):
+      raise exceptions.InferenceConfigError(
+          'Vertex AI mode requires both project and location parameters'
+      )
 
-    self._client = genai.Client(api_key=self.api_key)
+    if self.api_key and self.vertexai:
+      logging.warning(
+          'Both API key and Vertex AI configuration provided. '
+          'API key will take precedence for authentication.'
+      )
+
+    self._client = genai.Client(
+        api_key=self.api_key,
+        vertexai=vertexai,
+        credentials=credentials,
+        project=project,
+        location=location,
+        http_options=http_options,
+    )
 
     super().__init__(
         constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)

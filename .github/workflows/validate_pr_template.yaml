@@ -33,6 +33,22 @@ jobs:
               return;
             }
 
+            // Check if this is a community provider PR (only modifies COMMUNITY_PROVIDERS.md)
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner, repo,
+              pull_number: pr.number
+            });
+            
+            const isCommunityProviderPR = files.length === 1 && 
+                                          files[0].filename === 'COMMUNITY_PROVIDERS.md';
+            
+            if (isCommunityProviderPR) {
+              core.setOutput('is_community_provider', 'true');
+              console.log('Community provider PR detected - relaxed validation will apply');
+            } else {
+              core.setOutput('is_community_provider', 'false');
+            }
+
             // Get permission level
             try {
               const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
@@ -63,17 +79,33 @@ jobs:
           steps.check.outputs.skip_validation != 'true'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          IS_COMMUNITY_PROVIDER: ${{ steps.check.outputs.is_community_provider }}
         run: |
           printf '%s\n' "$PR_BODY" | tr -d '\r' > body.txt
 
           # Required sections from the template
-          required=( "# Description" "Fixes #" "# How Has This Been Tested?" "# Checklist" )
+          required=( "# Description" "# How Has This Been Tested?" "# Checklist" )
           err=0
 
           # Check for required sections
           for h in "${required[@]}"; do
             grep -Fq "$h" body.txt || { echo "::error::$h missing"; err=1; }
           done
+
+          # Check for issue reference - relaxed for community provider PRs
+          if [ "$IS_COMMUNITY_PROVIDER" = "true" ]; then
+            # For community provider PRs, accept either "Fixes #" or "Related to #" (case-insensitive)
+            if ! grep -Eiq '(Fixes #[0-9]+|Related to #[0-9]+)' body.txt; then
+              echo "::error::Issue reference missing (need 'Fixes #NNN' or 'Related to #NNN')"
+              err=1
+            fi
+          else
+            # For other PRs, require "Fixes #" with a number
+            if ! grep -Eq 'Fixes #[0-9]+' body.txt; then
+              echo "::error::Missing 'Fixes #NNN' reference"
+              err=1
+            fi
+          fi
 
           # Check for placeholder text that should be replaced
           grep -Eiq 'Replace this with|Choose one:' body.txt && {

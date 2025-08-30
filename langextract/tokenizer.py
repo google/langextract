@@ -21,5 +21,5 @@ langextract.tokenizer. All functionality has moved to langextract.core.tokenizer
 from __future__ import annotations
 
 # Re-export everything from core.tokenizer for backward compatibility
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=unused-wildcard-import
 from langextract.core.tokenizer import *

@@ -25,6 +25,7 @@
   - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
   - [Medication Extraction](#medication-extraction)
   - [Radiology Report Structuring: RadExtract](#radiology-report-structuring-radextract)
+- [Community Providers](#community-providers)
 - [Contributing](#contributing)
 - [Testing](#testing)
 - [Disclaimer](#disclaimer)
@@ -264,6 +265,24 @@ result = lx.extract(
 )
 ```
 
+**Option 4: Vertex AI (Service Accounts)**
+
+Use [Vertex AI](https://cloud.google.com/vertex-ai/docs/start/introduction-unified-platform) for authentication with service accounts:
+
+```python
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description="Extract information...",
+    examples=[...],
+    model_id="gemini-2.5-flash",
+    language_model_params={
+        "vertexai": True,
+        "project": "your-project-id",
+        "location": "global"  # or regional endpoint
+    }
+)
+```
+
 ## Adding Custom Model Providers
 
 LangExtract supports custom LLM providers via a lightweight plugin system. You can add support for new models without changing core code.
@@ -344,6 +363,12 @@ LangExtract excels at extracting structured medical information from clinical te
 Explore RadExtract, a live interactive demo on HuggingFace Spaces that shows how LangExtract can automatically structure radiology reports. Try it directly in your browser with no setup required.
 
 **[View RadExtract Demo →](https://huggingface.co/spaces/google/radextract)**
+
+## Community Providers
+
+Extend LangExtract with custom model providers! Check out our [Community Provider Plugins](COMMUNITY_PROVIDERS.md) registry to discover providers created by the community or add your own.
+
+For detailed instructions on creating a provider plugin, see the [Custom Provider Plugin Example](examples/custom_provider_plugin/).
 
 ## Contributing
 

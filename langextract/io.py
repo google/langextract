@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import ipaddress
 import json
 import os
 import pathlib
 from typing import Any, Iterator
+from urllib import parse as urlparse
 
 import pandas as pd
 import requests
@@ -218,16 +220,42 @@ def _read_csv(
 
 
 def is_url(text: str) -> bool:
-  """Check if the given text is a URL.
+  """Check if the given text is a valid URL.
+
+  Uses urllib.parse to validate that the text is a properly formed URL
+  with http or https scheme and a valid network location.
 
   Args:
     text: The string to check.
 
   Returns:
-    True if the text is a URL (starts with http:// or https://), False
-    otherwise.
+    True if the text is a valid URL with http(s) scheme, False otherwise.
   """
-  return text.startswith('http://') or text.startswith('https://')
+  if not text or not isinstance(text, str):
+    return False
+
+  text = text.strip()
+
+  # Reject text with whitespace (not a pure URL)
+  if ' ' in text or '\n' in text or '\t' in text:
+    return False
+
+  try:
+    result = urlparse.urlparse(text)
+    hostname = result.hostname
+
+    # Must have valid scheme, netloc, and hostname
+    if not (result.scheme in ('http', 'https') and result.netloc and hostname):
+      return False
+
+    # Accept IPs, localhost, or domains with dots
+    try:
+      ipaddress.ip_address(hostname)
+      return True
+    except ValueError:
+      return hostname == 'localhost' or '.' in hostname
+  except (ValueError, AttributeError):
+    return False
 
 
 def download_text_from_url(

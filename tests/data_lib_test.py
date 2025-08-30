@@ -19,6 +19,7 @@ from absl.testing import parameterized
 import numpy as np
 
 from langextract import data_lib
+from langextract import io
 from langextract.core import data
 from langextract.core import tokenizer
 
@@ -201,6 +202,31 @@ class DataLibToDictParameterizedTest(parameterized.TestCase):
 
     json_str = json.dumps(doc_dict, ensure_ascii=False)
     self.assertIn('"extraction_index": 42', json_str)
+
+
+class IsUrlTest(absltest.TestCase):
+  """Tests for io.is_url function validation."""
+
+  def test_valid_urls(self):
+    """Test that valid URLs are recognized."""
+    self.assertTrue(io.is_url("http://example.com"))
+    self.assertTrue(io.is_url("https://www.example.com"))
+    self.assertTrue(io.is_url("http://localhost:8080"))
+    self.assertTrue(io.is_url("http://192.168.1.1"))
+    self.assertTrue(io.is_url("http://[2001:db8::1]"))  # IPv6
+    self.assertTrue(io.is_url("http://[::1]:8080"))  # IPv6 localhost with port
+
+  def test_invalid_urls_with_text(self):
+    """Test that URLs with additional text are rejected."""
+    # Validates fix for issue where text starting with URL was incorrectly fetched
+    self.assertFalse(io.is_url("http://example.com is a website"))
+    self.assertFalse(io.is_url("http://medical-journal.com published a study"))
+
+  def test_invalid_urls_no_scheme(self):
+    """Test that URLs without proper scheme are rejected."""
+    self.assertFalse(io.is_url("example.com"))
+    self.assertFalse(io.is_url("www.example.com"))
+    self.assertFalse(io.is_url("ftp://example.com"))
 
 
 if __name__ == "__main__":

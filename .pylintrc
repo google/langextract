@@ -133,7 +133,7 @@ good-names=i,j,k,ex,Run,_,id,ok
 
 # Good variable names regexes, separated by a comma. If names match any regex,
 # they will always be accepted
-good-names-rgxs=
+good-names-rgxs=^T[A-Z][a-zA-Z]*$
 
 # Include a hint for the correct naming format with invalid-name.
 include-naming-hint=no

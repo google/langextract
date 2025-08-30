@@ -22,10 +22,7 @@ import pathlib
 import pydantic
 import yaml
 
-from langextract.core import data
-from langextract.core import exceptions
-from langextract.core import schema
-
+from langextract.core import data, exceptions, schema
 
 class PromptBuilderError(exceptions.LangExtractError):
   """Failure to build prompt."""

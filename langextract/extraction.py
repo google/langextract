@@ -24,6 +24,7 @@ import warnings
 from langextract import annotation
 from langextract import factory
 from langextract import io
+from langextract import prompt_validation as pv
 from langextract import prompting
 from langextract import resolver
 from langextract.core import data
@@ -46,13 +47,15 @@ def extract(
     additional_context: str | None = None,
     resolver_params: dict | None = None,
     language_model_params: dict | None = None,
-    debug: bool = True,
+    debug: bool = False,
     model_url: str | None = None,
     extraction_passes: int = 1,
     config: typing.Any = None,
     model: typing.Any = None,
     *,
     fetch_urls: bool = True,
+    prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
+    prompt_validation_strict: bool = False,
 ) -> typing.Any:
   """Extracts structured information from text.
 
@@ -135,6 +138,11 @@ def extract(
         URL string. When True (default), strings starting with http:// or
         https:// are fetched. When False, all strings are treated as literal
         text to analyze. This is a keyword-only parameter.
+      prompt_validation_level: Controls pre-flight alignment checks on few-shot
+        examples. OFF skips validation, WARNING logs issues but continues, ERROR
+        raises on failures. Defaults to WARNING.
+      prompt_validation_strict: When True and prompt_validation_level is ERROR,
+        raises on non-exact matches (MATCH_FUZZY, MATCH_LESSER). Defaults to False.
 
   Returns:
       An AnnotatedDocument with the extracted information when input is a
@@ -145,11 +153,24 @@ def extract(
       ValueError: If examples is None or empty.
       ValueError: If no API key is provided or found in environment variables.
       requests.RequestException: If URL download fails.
+      pv.PromptAlignmentError: If validation fails in ERROR mode.
   """
   if not examples:
     raise ValueError(
         "Examples are required for reliable extraction. Please provide at least"
         " one ExampleData object with sample extractions."
+    )
+
+  if prompt_validation_level is not pv.PromptValidationLevel.OFF:
+    report = pv.validate_prompt_alignment(
+        examples=examples,
+        aligner=resolver.WordAligner(),
+        policy=pv.AlignmentPolicy(),
+    )
+    pv.handle_alignment_report(
+        report,
+        level=prompt_validation_level,
+        strict_non_exact=prompt_validation_strict,
     )
 
   if debug:

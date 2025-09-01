@@ -143,6 +143,227 @@ class InitTest(absltest.TestCase):
 
     self.assertDataclassEqual(expected_result, actual_result)
 
+  @mock.patch("langextract.extraction.resolver.Resolver.align")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_resolver_params_alignment_passthrough(
+      self, mock_create_model, mock_align
+  ):
+    mock_model = mock.MagicMock()
+    mock_model.infer.return_value = [
+        [types.ScoredOutput(output='{"extractions":[]}')]
+    ]
+    mock_model.requires_fence_output = False
+    mock_create_model.return_value = mock_model
+    mock_align.return_value = []
+
+    mock_examples = [
+        lx.data.ExampleData(
+            text="Patient takes Tylenol 500mg daily.",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="Tylenol",
+                    attributes={
+                        "type": "analgesic",
+                        "class": "medication",
+                    },
+                ),
+            ],
+        )
+    ]
+
+    lx.extract(
+        text_or_documents="test text",
+        prompt_description="desc",
+        examples=mock_examples,
+        api_key="test_key",
+        resolver_params={
+            "enable_fuzzy_alignment": False,
+            "fuzzy_alignment_threshold": 0.8,
+            "accept_match_lesser": False,
+            "extraction_attributes_suffix": "_attrs",
+        },
+    )
+
+    mock_align.assert_called()
+    _, kwargs = mock_align.call_args
+    self.assertFalse(kwargs.get("enable_fuzzy_alignment"))
+    self.assertEqual(kwargs.get("fuzzy_alignment_threshold"), 0.8)
+    self.assertFalse(kwargs.get("accept_match_lesser"))
+    self.assertNotIn("extraction_attributes_suffix", kwargs)
+
+  @mock.patch("langextract.extraction.resolver.Resolver")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_resolver_params_none_handling(
+      self, mock_create_model, mock_resolver_class
+  ):
+    mock_model = mock.MagicMock()
+    mock_model.infer.return_value = [
+        [types.ScoredOutput(output='{"extractions":[]}')]
+    ]
+    mock_model.requires_fence_output = False
+    mock_create_model.return_value = mock_model
+
+    mock_resolver = mock.MagicMock()
+    mock_resolver_class.return_value = mock_resolver
+
+    mock_examples = [
+        lx.data.ExampleData(
+            text="Test text",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="test",
+                ),
+            ],
+        )
+    ]
+
+    with mock.patch(
+        "langextract.annotation.Annotator.annotate_text"
+    ) as mock_annotate:
+      mock_annotate.return_value = lx.data.AnnotatedDocument(
+          text="test", extractions=[]
+      )
+
+      lx.extract(
+          text_or_documents="test text",
+          prompt_description="desc",
+          examples=mock_examples,
+          api_key="test_key",
+          resolver_params={
+              "enable_fuzzy_alignment": None,
+              "fuzzy_alignment_threshold": 0.8,
+              "extraction_attributes_suffix": "_attrs",
+          },
+      )
+
+      _, resolver_kwargs = mock_resolver_class.call_args
+      self.assertNotIn("enable_fuzzy_alignment", resolver_kwargs)
+      self.assertNotIn("fuzzy_alignment_threshold", resolver_kwargs)
+      self.assertEqual(
+          resolver_kwargs["extraction_attributes_suffix"], "_attrs"
+      )
+
+      _, annotate_kwargs = mock_annotate.call_args
+      self.assertNotIn("enable_fuzzy_alignment", annotate_kwargs)
+      self.assertEqual(annotate_kwargs["fuzzy_alignment_threshold"], 0.8)
+
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_resolver_params_typo_error(self, mock_create_model):
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = False
+    mock_create_model.return_value = mock_model
+
+    mock_examples = [
+        lx.data.ExampleData(
+            text="Test",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="test",
+                ),
+            ],
+        )
+    ]
+
+    with self.assertRaisesRegex(TypeError, "Unknown key in resolver_params"):
+      lx.extract(
+          text_or_documents="test",
+          prompt_description="desc",
+          examples=mock_examples,
+          api_key="test_key",
+          resolver_params={
+              "fuzzy_alignment_treshold": (
+                  0.5
+              ),  # Typo: treshold instead of threshold
+          },
+      )
+
+  @mock.patch("langextract.annotation.Annotator.annotate_documents")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_resolver_params_docs_path_passthrough(
+      self, mock_create_model, mock_annotate_docs
+  ):
+    mock_model = mock.MagicMock()
+    mock_model.infer.return_value = [
+        [types.ScoredOutput(output='{"extractions":[]}')]
+    ]
+    mock_model.requires_fence_output = False
+    mock_create_model.return_value = mock_model
+    mock_annotate_docs.return_value = []
+
+    docs = [lx.data.Document(text="doc1")]
+    examples = [
+        lx.data.ExampleData(
+            text="Example text",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="example",
+                ),
+            ],
+        )
+    ]
+
+    lx.extract(
+        text_or_documents=docs,
+        prompt_description="desc",
+        examples=examples,
+        api_key="k",
+        resolver_params={
+            "enable_fuzzy_alignment": False,
+            "fuzzy_alignment_threshold": 0.9,
+            "accept_match_lesser": False,
+        },
+    )
+
+    _, kwargs = mock_annotate_docs.call_args
+    self.assertFalse(kwargs.get("enable_fuzzy_alignment"))
+    self.assertEqual(kwargs.get("fuzzy_alignment_threshold"), 0.9)
+    self.assertFalse(kwargs.get("accept_match_lesser"))
+
+  @mock.patch("langextract.annotation.Annotator.annotate_text")
+  @mock.patch("langextract.extraction.resolver.Resolver")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_resolver_params_none_threshold(
+      self, mock_create_model, mock_resolver_cls, mock_annotate
+  ):
+    mock_model = mock.MagicMock()
+    mock_model.infer.return_value = [
+        [types.ScoredOutput(output='{"extractions":[]}')]
+    ]
+    mock_model.requires_fence_output = False
+    mock_create_model.return_value = mock_model
+    mock_resolver_cls.return_value = mock.MagicMock()
+    mock_annotate.return_value = lx.data.AnnotatedDocument(
+        text="t", extractions=[]
+    )
+
+    lx.extract(
+        text_or_documents="t",
+        prompt_description="d",
+        examples=[
+            lx.data.ExampleData(
+                text="example",
+                extractions=[
+                    lx.data.Extraction(
+                        extraction_class="entity",
+                        extraction_text="ex",
+                    ),
+                ],
+            )
+        ],
+        api_key="k",
+        resolver_params={"fuzzy_alignment_threshold": None},
+    )
+
+    _, resolver_kwargs = mock_resolver_cls.call_args
+    self.assertNotIn("fuzzy_alignment_threshold", resolver_kwargs)
+
+    _, annotate_kwargs = mock_annotate.call_args
+    self.assertNotIn("fuzzy_alignment_threshold", annotate_kwargs)
+
   @mock.patch.object(
       schemas.gemini.GeminiSchema, "from_examples", autospec=True
   )

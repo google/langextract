@@ -115,7 +115,13 @@ def extract(
         None): Suffix for keys indicating extraction order. Default is None
         (order by appearance). - 'extraction_attributes_suffix' (str | None):
         Suffix for keys containing extraction attributes. Default is
-        "_attributes".
+        "_attributes". Additional alignment parameters can be included:
+        'enable_fuzzy_alignment' (bool): Whether to use fuzzy matching if exact
+        matching fails. Disabling this can improve performance but may reduce
+        recall. Default is True. 'fuzzy_alignment_threshold' (float): Minimum
+        token overlap ratio for fuzzy match (0.0-1.0). Default is 0.75.
+        'accept_match_lesser' (bool): Whether to accept partial exact matches.
+        Default is True.
       language_model_params: Additional parameters for the language model.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract
@@ -283,7 +289,26 @@ def extract(
   }
   resolver_defaults.update(resolver_params or {})
 
-  res = resolver.Resolver(**resolver_defaults)
+  effective_params = dict(resolver_defaults)
+
+  alignment_kwargs = {}
+  for key in resolver.ALIGNMENT_PARAM_KEYS:
+    val = effective_params.pop(key, None)
+    if val is not None:
+      alignment_kwargs[key] = val
+
+  try:
+    res = resolver.Resolver(**effective_params)
+  except TypeError as e:
+    msg = str(e)
+    if (
+        "unexpected keyword argument" in msg
+        or "got an unexpected keyword argument" in msg
+    ):
+      raise TypeError(
+          f"Unknown key in resolver_params; check spelling: {e}"
+      ) from e
+    raise
 
   annotator = annotation.Annotator(
       language_model=language_model,
@@ -302,6 +327,7 @@ def extract(
         debug=debug,
         extraction_passes=extraction_passes,
         max_workers=max_workers,
+        **alignment_kwargs,
     )
   else:
     documents = cast(Iterable[data.Document], text_or_documents)
@@ -313,4 +339,5 @@ def extract(
         debug=debug,
         extraction_passes=extraction_passes,
         max_workers=max_workers,
+        **alignment_kwargs,
     )

@@ -18,7 +18,7 @@ blank_issues_enabled: true
 # Redirect users to other channels for general support or security issues
 contact_links:
   - name: Community Support
-    url: https://github.com/google-health/langextract/discussions
+    url: https://github.com/google/langextract/discussions
     about: Please ask and answer questions here.
   - name: Security Bug Reporting
     url: https://g.co/vulnz

@@ -458,6 +458,9 @@ def _build_visualization_html(
   pos_info_str = f'[{first_extraction.char_interval.start_pos}-{first_extraction.char_interval.end_pos}]'
 
   html_content = textwrap.dedent(f"""
+    <head>
+      <meta charset="UTF-8">
+    </head>
     <div class="lx-animated-wrapper">
       <div class="lx-attributes-panel">
         {legend_html}

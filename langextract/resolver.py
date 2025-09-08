@@ -184,6 +184,8 @@ class Resolver(AbstractResolver):
       extraction_attributes_suffix: str | None = "_attributes",
       constraint: schema.Constraint = schema.Constraint(),
       format_type: data.FormatType = data.FormatType.JSON,
+      strict_fences: bool = False,
+      require_extractions_key: bool = True,
   ):
     """Constructor.
 
@@ -195,6 +197,10 @@ class Resolver(AbstractResolver):
         with extractions.
       constraint: Applies constraints when decoding the output.
       format_type: The format to parse (YAML or JSON).
+      strict_fences: If False (default), attempt to parse without fences when
+        markers are missing. If True, raise error when fence markers are missing.
+      require_extractions_key: If True (default), expect {"extractions": [...]}.
+        If False, accept a direct list or unwrapped dict.
     """
     super().__init__(
         fence_output=fence_output,
@@ -203,6 +209,8 @@ class Resolver(AbstractResolver):
     self.extraction_index_suffix = extraction_index_suffix
     self.extraction_attributes_suffix = extraction_attributes_suffix
     self.format_type = format_type
+    self.strict_fences = strict_fences
+    self.require_extractions_key = require_extractions_key
 
   def resolve(
       self,
@@ -339,17 +347,39 @@ class Resolver(AbstractResolver):
       logging.error("Input string must be a non-empty string.")
       raise ValueError("Input string must be a non-empty string.")
 
+    content = None
+
     if self.fence_output:
       left_key = "```" + self.format_type.value
       left = input_string.find(left_key)
-      right = input_string.rfind("```")
       prefix_length = len(left_key)
-      if left == -1 or right == -1 or left >= right:
-        logging.error("Input string does not contain valid markers.")
-        raise ValueError("Input string does not contain valid markers.")
+      right = (
+          input_string.find("```", left + prefix_length) if left != -1 else -1
+      )
 
-      content = input_string[left + prefix_length : right].strip()
-      logging.debug("Content: %s", content)
+      if left != -1 and right != -1 and left < right:
+        content = input_string[left + prefix_length : right].strip()
+        logging.debug("Found fenced block, length=%d", len(content))
+        
+        # Check for additional fenced blocks after this one
+        next_fence = input_string.find(left_key, right)
+        if next_fence != -1:
+          logging.error(
+              "Multiple fenced blocks detected. Only one block expected."
+          )
+          raise ResolverParsingError(
+              "Multiple fenced blocks found. Expected exactly one fenced block."
+          )
+      else:
+        if self.strict_fences:
+          logging.error(
+              "No fence markers found. Strict fences enabled; failing."
+          )
+          raise ResolverParsingError("Input string does not contain valid fence markers.")
+        logging.warning(
+            "No fence markers found, attempting to parse without fences."
+        )
+        content = input_string.strip()
     else:
       content = input_string
 
@@ -389,15 +419,33 @@ class Resolver(AbstractResolver):
     """
     parsed_data = self._extract_and_parse_content(input_string)
 
-    if not isinstance(parsed_data, dict):
-      logging.error("Expected content to be a mapping (dict).")
-      raise ResolverParsingError(
-          f"Content must be a mapping with an '{schema.EXTRACTIONS_KEY}' key."
-      )
-    if schema.EXTRACTIONS_KEY not in parsed_data:
-      logging.error("Content does not contain 'extractions' key.")
-      raise ResolverParsingError("Content must contain an 'extractions' key.")
-    extractions = parsed_data[schema.EXTRACTIONS_KEY]
+    # Handle flexible input formats based on require_extractions_key
+    if self.require_extractions_key:
+      # Original strict behavior
+      if not isinstance(parsed_data, dict):
+        logging.error("Expected content to be a mapping (dict).")
+        raise ResolverParsingError(
+            f"Content must be a mapping with an '{schema.EXTRACTIONS_KEY}' key."
+        )
+      if schema.EXTRACTIONS_KEY not in parsed_data:
+        logging.error("Content does not contain 'extractions' key.")
+        raise ResolverParsingError("Content must contain an 'extractions' key.")
+      extractions = parsed_data[schema.EXTRACTIONS_KEY]
+    else:
+      # Flexible format: accept list directly or dict with/without extractions key
+      if isinstance(parsed_data, list):
+        extractions = parsed_data
+      elif isinstance(parsed_data, dict):
+        if schema.EXTRACTIONS_KEY in parsed_data:
+          extractions = parsed_data[schema.EXTRACTIONS_KEY]
+        else:
+          # Single extraction as dict
+          extractions = [parsed_data]
+      else:
+        logging.error("Content must be a list or dict.")
+        raise ResolverParsingError(
+            "Content must be a list of extractions or a dict."
+        )
 
     if not isinstance(extractions, list):
       logging.error("The content must be a sequence (list) of mappings.")
@@ -471,9 +519,7 @@ class Resolver(AbstractResolver):
                 "Index must be a string or integer. Found: %s",
                 type(extraction_value),
             )
-            raise ValueError(
-                "Extraction text must must be a string or integer."
-            )
+            raise ValueError("Index must be a string or integer.")
           continue
 
         if attributes_suffix and extraction_class.endswith(attributes_suffix):

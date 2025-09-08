@@ -292,6 +292,64 @@ class QAPromptGeneratorTest(parameterized.TestCase):
               ```
               """),
       },
+      {
+          "testcase_name": "json_simplified_no_extractions_key",
+          "format_type": data.FormatType.JSON,
+          "example_text": "Patient has diabetes and is prescribed insulin.",
+          "example_extractions": [
+              data.Extraction(
+                  extraction_text="diabetes",
+                  extraction_class="medical_condition",
+                  attributes={"chronicity": "chronic"},
+              ),
+              data.Extraction(
+                  extraction_text="insulin",
+                  extraction_class="medication",
+                  attributes={"prescribed": "prescribed"},
+              ),
+          ],
+          "require_extractions_key": False,
+          "expected_formatted_example": textwrap.dedent("""\
+              Patient has diabetes and is prescribed insulin.
+              ```json
+              [
+                {
+                  "medical_condition": "diabetes",
+                  "medical_condition_attributes": {
+                    "chronicity": "chronic"
+                  }
+                },
+                {
+                  "medication": "insulin",
+                  "medication_attributes": {
+                    "prescribed": "prescribed"
+                  }
+                }
+              ]
+              ```
+              """),
+      },
+      {
+          "testcase_name": "yaml_simplified_no_extractions_key",
+          "format_type": data.FormatType.YAML,
+          "example_text": "Patient has a fever.",
+          "example_extractions": [
+              data.Extraction(
+                  extraction_text="fever",
+                  extraction_class="symptom",
+                  attributes={"severity": "mild"},
+              ),
+          ],
+          "require_extractions_key": False,
+          "expected_formatted_example": textwrap.dedent("""\
+              Patient has a fever.
+              ```yaml
+              - symptom: fever
+                symptom_attributes:
+                  severity: mild
+              ```
+              """),
+      },
   )
   def test_format_example(
       self,
@@ -300,6 +358,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
       example_extractions,
       expected_formatted_example,
       attribute_suffix="_attributes",
+      require_extractions_key=True,
   ):
     """Tests formatting of examples in different formats and scenarios."""
     example_data = data.ExampleData(
@@ -316,6 +375,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
         template=structured_template,
         format_type=format_type,
         attribute_suffix=attribute_suffix,
+        require_extractions_key=require_extractions_key,
         question_prefix="",
         answer_prefix="",
     )

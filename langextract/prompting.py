@@ -91,6 +91,7 @@ class QAPromptGenerator:
   question_prefix: str = "Q: "
   answer_prefix: str = "A: "
   fence_output: bool = True  # whether to wrap answers in ```json/```yaml fences
+  require_extractions_key: bool = True  # whether to wrap in {"extractions": ...}
 
   def __str__(self) -> str:
     """Returns a string representation of the prompt with an empty question."""
@@ -107,8 +108,8 @@ class QAPromptGenerator:
     """
     question = example.text
 
-    # Build a dictionary for serialization
-    data_dict: dict[str, list] = {schema.EXTRACTIONS_KEY: []}
+    # Build the extractions list
+    extractions_list = []
     for extraction in example.extractions:
       data_entry = {
           f"{extraction.extraction_class}": extraction.extraction_text,
@@ -116,18 +117,25 @@ class QAPromptGenerator:
               extraction.attributes or {}
           ),
       }
-      data_dict[schema.EXTRACTIONS_KEY].append(data_entry)
+      extractions_list.append(data_entry)
+
+    # Format based on whether extractions key is required
+    if self.require_extractions_key:
+      data_to_serialize = {schema.EXTRACTIONS_KEY: extractions_list}
+    else:
+      # Simplified format: just the list
+      data_to_serialize = extractions_list
 
     if self.format_type == data.FormatType.YAML:
       formatted_content = yaml.dump(
-          data_dict, default_flow_style=False, sort_keys=False
+          data_to_serialize, default_flow_style=False, sort_keys=False
       )
       if self.fence_output:
         answer = f"```yaml\n{formatted_content.strip()}\n```"
       else:
         answer = formatted_content.strip()
     elif self.format_type == data.FormatType.JSON:
-      formatted_content = json.dumps(data_dict, indent=2, ensure_ascii=False)
+      formatted_content = json.dumps(data_to_serialize, indent=2, ensure_ascii=False)
       if self.fence_output:
         answer = f"```json\n{formatted_content.strip()}\n```"
       else:

@@ -275,7 +275,8 @@ class Annotator:
       logging.warning("No documents to process.")
       return
 
-    annotated_extractions: list[data.Extraction] = []
+    # Track extractions per document to fix attribution bug
+    extractions_by_document: dict[str, list[data.Extraction]] = {}
     chunk_iter = _document_chunk_iterator(doc_iter_for_chunks, max_char_buffer)
 
     batches = chunking.make_batches_of_textchunk(chunk_iter, batch_length)
@@ -346,13 +347,18 @@ class Annotator:
               "Completing annotation for document ID %s.",
               curr_document.document_id,
           )
+          # Get only the extractions that belong to this specific document
+          document_extractions = extractions_by_document.get(
+              curr_document.document_id, []
+          )
           annotated_doc = data.AnnotatedDocument(
               document_id=curr_document.document_id,
-              extractions=annotated_extractions,
+              extractions=document_extractions,
               text=curr_document.text,
           )
           yield annotated_doc
-          annotated_extractions.clear()
+          # Remove completed document from tracking
+          extractions_by_document.pop(curr_document.document_id, None)
 
           curr_document = next(doc_iter, None)
           assert curr_document is not None, (
@@ -378,7 +384,11 @@ class Annotator:
             **kwargs,
         )
 
-        annotated_extractions.extend(aligned_extractions)
+        # Add extractions to the correct document's list
+        doc_id = text_chunk.document_id
+        if doc_id not in extractions_by_document:
+          extractions_by_document[doc_id] = []
+        extractions_by_document[doc_id].extend(aligned_extractions)
 
     progress_bar.close()
 
@@ -389,12 +399,36 @@ class Annotator:
       logging.info(
           "Finalizing annotation for document ID %s.", curr_document.document_id
       )
+      # Get only the extractions that belong to this specific document
+      document_extractions = extractions_by_document.get(
+          curr_document.document_id, []
+      )
       annotated_doc = data.AnnotatedDocument(
           document_id=curr_document.document_id,
-          extractions=annotated_extractions,
+          extractions=document_extractions,
           text=curr_document.text,
       )
 
+      yield annotated_doc
+      # Clean up the processed document
+      extractions_by_document.pop(curr_document.document_id, None)
+
+    # Process any remaining documents that weren't finalized
+    for (
+        remaining_doc_id,
+        remaining_extractions,
+    ) in extractions_by_document.items():
+      logging.warning(
+          "Processing remaining extractions for document ID %s.",
+          remaining_doc_id,
+      )
+      # Note: We don't have the original document text for remaining documents
+      # This should not happen in normal operation but provides safety
+      annotated_doc = data.AnnotatedDocument(
+          document_id=remaining_doc_id,
+          extractions=remaining_extractions,
+          text="",  # Text not available for orphaned extractions
+      )
       yield annotated_doc
 
     logging.info("Document annotation completed.")

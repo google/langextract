@@ -1099,6 +1099,122 @@ class MultiPassHelperFunctionsTest(parameterized.TestCase):
     result = annotation._extractions_overlap(ext1, ext2)
     self.assertEqual(result, expected)
 
+  def test_batch_source_attribution_different_content(self):
+    """Test batch processing correctly attributes unique extractions to source documents.
+
+    This test verifies the fix for the source attribution bug where all
+    extractions were incorrectly attributed to the first document in batch processing.
+    Unlike existing tests that use identical content, this test uses different
+    document content to ensure proper source attribution.
+    """
+    mock_language_model = self.enter_context(
+        mock.patch.object(gemini, "GeminiLanguageModel", autospec=True)
+    )
+
+    # Define different mock responses for different documents
+    def mock_infer_side_effect(batch_prompts, **kwargs):
+      del kwargs  # Unused but required for signature
+      responses = []
+      for prompt in batch_prompts:
+        # Create different responses based on document content
+        if "patient John" in prompt:
+          # First document gets entity_one extraction
+          response_text = textwrap.dedent(f"""\
+            ```yaml
+            {schema.EXTRACTIONS_KEY}:
+            - entity_one: "John"
+              entity_one_index: 1
+            ```""")
+        elif "patient Mary" in prompt:
+          # Second document gets entity_two extraction
+          response_text = textwrap.dedent(f"""\
+            ```yaml
+            {schema.EXTRACTIONS_KEY}:
+            - entity_two: "Mary"
+              entity_two_index: 1
+            ```""")
+        else:
+          # Fallback - no extractions
+          response_text = textwrap.dedent(f"""\
+            ```yaml
+            {schema.EXTRACTIONS_KEY}: []
+            ```""")
+
+        responses.append(
+            [
+                types.ScoredOutput(
+                    score=1.0,
+                    output=response_text,
+                )
+            ]
+        )
+      return responses
+
+    mock_language_model.infer.side_effect = mock_infer_side_effect
+
+    annotator = annotation.Annotator(
+        language_model=mock_language_model,
+        prompt_template=prompting.PromptTemplateStructured(
+            description="Extract entities"
+        ),
+    )
+
+    # Create documents with different content and IDs
+    documents = [
+        data.Document(
+            text="The patient John has diabetes.",
+            document_id="doc_1",
+        ),
+        data.Document(
+            text="The patient Mary has hypertension.",
+            document_id="doc_2",
+        ),
+    ]
+
+    # Process documents in batch (batch_length=10 ensures all in one batch)
+    annotated_docs = list(
+        annotator.annotate_documents(
+            documents=documents,
+            resolver=resolver_lib.Resolver(
+                fence_output=True, format_type=data.FormatType.YAML
+            ),
+            batch_length=10,  # Process all documents in same batch
+            debug=False,
+        )
+    )
+
+    # Verify we get 2 annotated documents
+    self.assertEqual(len(annotated_docs), 2)
+
+    # Verify each document has unique extractions (no cross-contamination)
+    doc_1 = next(doc for doc in annotated_docs if doc.document_id == "doc_1")
+    doc_2 = next(doc for doc in annotated_docs if doc.document_id == "doc_2")
+
+    # Check that each document has different extraction content
+    self.assertNotEqual(
+        doc_1.extractions,
+        doc_2.extractions,
+        "Doc 1 and Doc 2 should have different extractions",
+    )
+
+    # Verify each document has the correct extraction class
+    if doc_1.extractions:
+      self.assertEqual(
+          doc_1.extractions[0].extraction_class,
+          "entity_one",
+          "Doc 1 should have entity_one extraction",
+      )
+    if doc_2.extractions:
+      self.assertEqual(
+          doc_2.extractions[0].extraction_class,
+          "entity_two",
+          "Doc 2 should have entity_two extraction",
+      )
+
+    # Verify document content is preserved correctly
+    self.assertIn("patient John", doc_1.text)
+    self.assertIn("patient Mary", doc_2.text)
+
 
 if __name__ == "__main__":
   absltest.main()

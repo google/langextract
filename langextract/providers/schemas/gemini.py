@@ -71,7 +71,7 @@ class GeminiSchema(schema.BaseSchema):
   def from_examples(
       cls,
       examples_data: Sequence[data.ExampleData],
-      attribute_suffix: str = "_attributes",
+      attribute_suffix: str = schema.ATTRIBUTE_SUFFIX,
   ) -> GeminiSchema:
     """Creates a GeminiSchema from example extractions.
 

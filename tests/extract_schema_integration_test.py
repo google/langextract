@@ -139,9 +139,10 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
                 fence_output=True,  # Explicitly set
             )
 
-            # Annotator should be created with fence_output=True
+            # Annotator should be created with format_handler that has use_fences=True
             call_kwargs = mock_annotator_init.call_args[1]
-            self.assertTrue(call_kwargs["fence_output"])
+            self.assertIn("format_handler", call_kwargs)
+            self.assertTrue(call_kwargs["format_handler"].use_fences)
 
   def test_extract_gemini_schema_deprecation_warning(self):
     """Test that passing gemini_schema triggers deprecation warning."""

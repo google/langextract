@@ -24,7 +24,7 @@ import yaml
 
 from langextract.core import data
 from langextract.core import exceptions
-from langextract.core import schema
+from langextract.core import format_handler
 
 
 class PromptBuilderError(exceptions.LangExtractError):
@@ -85,13 +85,10 @@ class QAPromptGenerator:
   """Generates question-answer prompts from the provided template."""
 
   template: PromptTemplateStructured
-  format_type: data.FormatType = data.FormatType.YAML
-  attribute_suffix: str = "_attributes"
+  format_handler: format_handler.FormatHandler
   examples_heading: str = "Examples"
   question_prefix: str = "Q: "
   answer_prefix: str = "A: "
-  fence_output: bool = True  # whether to wrap answers in ```json/```yaml fences
-  require_extractions_key: bool = True  # whether to wrap in {"extractions": ...}
 
   def __str__(self) -> str:
     """Returns a string representation of the prompt with an empty question."""
@@ -107,41 +104,7 @@ class QAPromptGenerator:
       A string representation of the example, including the question and answer.
     """
     question = example.text
-
-    # Build the extractions list
-    extractions_list = []
-    for extraction in example.extractions:
-      data_entry = {
-          f"{extraction.extraction_class}": extraction.extraction_text,
-          f"{extraction.extraction_class}{self.attribute_suffix}": (
-              extraction.attributes or {}
-          ),
-      }
-      extractions_list.append(data_entry)
-
-    # Format based on whether extractions key is required
-    if self.require_extractions_key:
-      data_to_serialize = {schema.EXTRACTIONS_KEY: extractions_list}
-    else:
-      # Simplified format: just the list
-      data_to_serialize = extractions_list
-
-    if self.format_type == data.FormatType.YAML:
-      formatted_content = yaml.dump(
-          data_to_serialize, default_flow_style=False, sort_keys=False
-      )
-      if self.fence_output:
-        answer = f"```yaml\n{formatted_content.strip()}\n```"
-      else:
-        answer = formatted_content.strip()
-    elif self.format_type == data.FormatType.JSON:
-      formatted_content = json.dumps(data_to_serialize, indent=2, ensure_ascii=False)
-      if self.fence_output:
-        answer = f"```json\n{formatted_content.strip()}\n```"
-      else:
-        answer = formatted_content.strip()
-    else:
-      raise ValueError(f"Unsupported format type: {self.format_type}")
+    answer = self.format_handler.format_extraction_example(example.extractions)
 
     return "\n".join([
         f"{self.question_prefix}{question}",

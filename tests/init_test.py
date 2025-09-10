@@ -23,6 +23,7 @@ from absl.testing import parameterized
 from langextract import prompting
 import langextract as lx
 from langextract.core import data
+from langextract.core import format_handler as fh
 from langextract.core import types
 from langextract.providers import schemas
 
@@ -122,8 +123,15 @@ class InitTest(parameterized.TestCase):
         description=mock_description, examples=mock_examples
     )
 
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=True,
+    )
+    
     prompt_generator = prompting.QAPromptGenerator(
-        template=mock_prompt_template, format_type=lx.data.FormatType.JSON
+        template=mock_prompt_template, format_handler=format_handler
     )
 
     actual_result = lx.extract(
@@ -182,7 +190,6 @@ class InitTest(parameterized.TestCase):
             "enable_fuzzy_alignment": False,
             "fuzzy_alignment_threshold": 0.8,
             "accept_match_lesser": False,
-            "extraction_attributes_suffix": "_attrs",
         },
     )
 
@@ -191,7 +198,6 @@ class InitTest(parameterized.TestCase):
     self.assertFalse(kwargs.get("enable_fuzzy_alignment"))
     self.assertEqual(kwargs.get("fuzzy_alignment_threshold"), 0.8)
     self.assertFalse(kwargs.get("accept_match_lesser"))
-    self.assertNotIn("extraction_attributes_suffix", kwargs)
 
   @mock.patch("langextract.extraction.resolver.Resolver")
   @mock.patch("langextract.extraction.factory.create_model")
@@ -235,16 +241,14 @@ class InitTest(parameterized.TestCase):
           resolver_params={
               "enable_fuzzy_alignment": None,
               "fuzzy_alignment_threshold": 0.8,
-              "extraction_attributes_suffix": "_attrs",
           },
       )
 
       _, resolver_kwargs = mock_resolver_class.call_args
       self.assertNotIn("enable_fuzzy_alignment", resolver_kwargs)
       self.assertNotIn("fuzzy_alignment_threshold", resolver_kwargs)
-      self.assertEqual(
-          resolver_kwargs["extraction_attributes_suffix"], "_attrs"
-      )
+      # extraction_attributes_suffix is now handled by FormatHandler
+      self.assertIn("format_handler", resolver_kwargs)
 
       _, annotate_kwargs = mock_annotate.call_args
       self.assertNotIn("enable_fuzzy_alignment", annotate_kwargs)

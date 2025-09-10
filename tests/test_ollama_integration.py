@@ -111,5 +111,3 @@ def test_ollama_extraction_with_fence_fallback():
       "marie" in extraction.extraction_text.lower()
       or "curie" in extraction.extraction_text.lower()
   )
-
-

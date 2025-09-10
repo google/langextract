@@ -522,9 +522,13 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
   def test_extract_ordered_extractions_success(
       self,
       test_input,
-      resolver=resolver_lib.Resolver(),
+      resolver=None,
       expected_output=None,
   ):
+    if resolver is None:
+      resolver = resolver_lib.Resolver(
+          extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX
+      )
     actual_output = resolver.extract_ordered_extractions(test_input)
     self.assertEqual(actual_output, expected_output)
 
@@ -533,6 +537,7 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
           testcase_name="non_integer_indices",
           resolver=resolver_lib.Resolver(
               format_type=data.FormatType.JSON,
+              extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
           ),
           test_input=[{
               "medication": "Aspirin",
@@ -547,6 +552,7 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
           testcase_name="float_indices",
           resolver=resolver_lib.Resolver(
               format_type=data.FormatType.JSON,
+              extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
           ),
           test_input=[{"medication": "Aspirin", "medication_index": 1.0}],
           expected_exception=ValueError,
@@ -1742,6 +1748,7 @@ class ResolverTest(parameterized.TestCase):
     super().setUp()
     self.default_resolver = resolver_lib.Resolver(
         format_type=data.FormatType.JSON,
+        extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
     )
 
   @parameterized.named_parameters(
@@ -1750,6 +1757,7 @@ class ResolverTest(parameterized.TestCase):
           resolver=resolver_lib.Resolver(
               fence_output=True,
               format_type=data.FormatType.JSON,
+              extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
           ),
           input_text=textwrap.dedent(f"""\
             ```json
@@ -1779,6 +1787,7 @@ class ResolverTest(parameterized.TestCase):
           resolver=resolver_lib.Resolver(
               fence_output=True,
               format_type=data.FormatType.YAML,
+              extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
           ),
           input_text=textwrap.dedent(f"""\
             ```yaml
@@ -1802,6 +1811,7 @@ class ResolverTest(parameterized.TestCase):
           resolver=resolver_lib.Resolver(
               fence_output=False,
               format_type=data.FormatType.JSON,
+              extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
           ),
           input_text=_TWO_MEDICATIONS_JSON_UNDELIMITED,
           expected_output=_EXPECTED_TWO_MEDICATIONS_ANNOTATED,
@@ -1811,6 +1821,7 @@ class ResolverTest(parameterized.TestCase):
           resolver=resolver_lib.Resolver(
               fence_output=False,
               format_type=data.FormatType.YAML,
+              extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
           ),
           input_text=_TWO_MEDICATIONS_YAML_UNDELIMITED,
           expected_output=_EXPECTED_TWO_MEDICATIONS_ANNOTATED,
@@ -2183,7 +2194,12 @@ class FenceFallbackTest(parameterized.TestCase):
       ),
   )
   def test_parsing_scenarios(
-      self, test_input, fence_output, strict_fences, expected_key, expected_value
+      self,
+      test_input,
+      fence_output,
+      strict_fences,
+      expected_key,
+      expected_value,
   ):
     resolver = resolver_lib.Resolver(
         fence_output=fence_output,
@@ -2267,7 +2283,9 @@ class FenceFallbackTest(parameterized.TestCase):
     test_input = textwrap.dedent("""\
         {"extractions": [{"person": "Test"}]}""")
 
-    with self.assertRaisesRegex(resolver_lib.ResolverParsingError, ".*fence markers.*"):
+    with self.assertRaisesRegex(
+        resolver_lib.ResolverParsingError, ".*fence markers.*"
+    ):
       strict_resolver.string_to_extraction_data(test_input)
 
   def test_default_allows_fallback(self):
@@ -2277,7 +2295,7 @@ class FenceFallbackTest(parameterized.TestCase):
     )
     test_input = textwrap.dedent("""\
         {"extractions": [{"person": "Default Test"}]}""")
-    
+
     result = default_resolver.string_to_extraction_data(test_input)
     self.assertLen(result, 1)
     self.assertEqual(result[0]["person"], "Default Test")
@@ -2358,8 +2376,7 @@ class FlexibleSchemaTest(parameterized.TestCase):
         require_extractions_key=True,
     )
     with self.assertRaisesRegex(
-        resolver_lib.ResolverParsingError, 
-        ".*must be a mapping.*"
+        resolver_lib.ResolverParsingError, ".*must be a mapping.*"
     ):
       resolver.string_to_extraction_data(test_input)
 
@@ -2371,7 +2388,7 @@ class FlexibleSchemaTest(parameterized.TestCase):
             "medication_attributes": {"dosage": "100mg", "frequency": "daily"}
           },
           {
-            "medication": "Ibuprofen", 
+            "medication": "Ibuprofen",
             "medication_attributes": {"dosage": "200mg"}
           }
         ]""")

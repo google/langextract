@@ -27,7 +27,10 @@ from langextract import io
 from langextract import prompt_validation as pv
 from langextract import prompting
 from langextract import resolver
+from langextract.core import base_model
 from langextract.core import data
+from langextract.core import format_handler as fh
+from langextract.core import schema
 
 
 def extract(
@@ -111,16 +114,13 @@ def extract(
       resolver_params: Parameters for the `resolver.Resolver`, which parses the
         raw language model output string (e.g., extracting JSON from ```json ...
         ``` blocks) into structured `data.Extraction` objects. This dictionary
-        overrides default settings. Keys include: - 'fence_output' (bool):
-        Whether to expect fenced output. - 'extraction_index_suffix' (str |
-        None): Suffix for keys indicating extraction order. Default is None
-        (order by appearance). - 'extraction_attributes_suffix' (str | None):
-        Suffix for keys containing extraction attributes. Default is
-        "_attributes". Additional alignment parameters can be included:
-        'enable_fuzzy_alignment' (bool): Whether to use fuzzy matching if exact
-        matching fails. Disabling this can improve performance but may reduce
-        recall. Default is True. 'fuzzy_alignment_threshold' (float): Minimum
-        token overlap ratio for fuzzy match (0.0-1.0). Default is 0.75.
+        overrides default settings. Keys include: - 'extraction_index_suffix'
+        (str | None): Suffix for keys indicating extraction order. Default is
+        None (order by appearance). Additional alignment parameters can be
+        included: 'enable_fuzzy_alignment' (bool): Whether to use fuzzy matching
+        if exact matching fails. Disabling this can improve performance but may
+        reduce recall. Default is True. 'fuzzy_alignment_threshold' (float):
+        Minimum token overlap ratio for fuzzy match (0.0-1.0). Default is 0.75.
         'accept_match_lesser' (bool): Whether to accept partial exact matches.
         Default is True.
       language_model_params: Additional parameters for the language model.
@@ -210,7 +210,7 @@ def extract(
   )
   prompt_template.examples.extend(examples)
 
-  language_model = None
+  language_model: base_model.BaseLanguageModel | None = None
 
   if model:
     language_model = model
@@ -281,23 +281,23 @@ def extract(
         fence_output=fence_output,
     )
 
-  fence_output = language_model.requires_fence_output
+  format_handler, remaining_params = fh.FormatHandler.from_resolver_params(
+      resolver_params=resolver_params,
+      base_format_type=format_type,
+      base_use_fences=language_model.requires_fence_output,
+      base_attribute_suffix=schema.ATTRIBUTE_SUFFIX,
+      base_use_wrapper=True,
+      base_wrapper_key=schema.EXTRACTIONS_KEY,
+  )
 
-  resolver_defaults = {
-      "fence_output": fence_output,
-      "format_type": format_type,
-      "extraction_attributes_suffix": "_attributes",
-      "extraction_index_suffix": None,
-  }
-  resolver_defaults.update(resolver_params or {})
-
-  effective_params = dict(resolver_defaults)
-
+  # Pull alignment settings from normalized params
   alignment_kwargs = {}
   for key in resolver.ALIGNMENT_PARAM_KEYS:
-    val = effective_params.pop(key, None)
+    val = remaining_params.pop(key, None)
     if val is not None:
       alignment_kwargs[key] = val
+
+  effective_params = {"format_handler": format_handler, **remaining_params}
 
   try:
     res = resolver.Resolver(**effective_params)
@@ -315,8 +315,7 @@ def extract(
   annotator = annotation.Annotator(
       language_model=language_model,
       prompt_template=prompt_template,
-      format_type=format_type,
-      fence_output=fence_output,
+      format_handler=format_handler,
   )
 
   if isinstance(text_or_documents, str):

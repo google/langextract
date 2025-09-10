@@ -30,6 +30,7 @@ eggs/
 env/
 venv/
 ENV/
+*_env/
 
 # Test & Coverage Reports
 .pytest_cache/

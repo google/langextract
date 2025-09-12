@@ -36,7 +36,7 @@ services:
       - OLLAMA_HOST=http://ollama:11434
     volumes:
       - .:/app
-    command: python quickstart.py
+    command: python demo_ollama.py
 
 volumes:
   ollama-data:

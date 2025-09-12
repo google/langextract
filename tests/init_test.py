@@ -597,17 +597,17 @@ class InitTest(parameterized.TestCase):
 
   def test_gemini_schema_deprecation_warning(self):
     """Test that passing gemini_schema triggers deprecation warning."""
-    self.enter_context(
-        mock.patch(
-            "langextract.providers.gemini.GeminiLanguageModel.__init__",
-            return_value=None,
-        )
+    mock_model = mock.MagicMock(spec=base_model.BaseLanguageModel)
+    mock_model.infer.return_value = iter(
+        [[mock.Mock(output='{"extractions": []}')]]
     )
+    mock_model.requires_fence_output = True
+    mock_model.schema = None
 
     self.enter_context(
         mock.patch(
-            "langextract.providers.gemini.GeminiLanguageModel.infer",
-            return_value=iter([[mock.Mock(output='{"extractions": []}')]]),
+            "langextract.factory.create_model",
+            return_value=mock_model,
         )
     )
 

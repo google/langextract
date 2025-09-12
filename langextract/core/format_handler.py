@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 import warnings
 
 import yaml
@@ -365,13 +365,13 @@ class FormatHandler:
           rp.pop(k, None)
       return handler, rp
 
-    kwargs = dict(
-        format_type=base_format_type,
-        use_fences=base_use_fences,
-        attribute_suffix=base_attribute_suffix,
-        use_wrapper=base_use_wrapper,
-        wrapper_key=base_wrapper_key if base_use_wrapper else None,
-    )
+    kwargs = {
+        "format_type": base_format_type,
+        "use_fences": base_use_fences,
+        "attribute_suffix": base_attribute_suffix,
+        "use_wrapper": base_use_wrapper,
+        "wrapper_key": base_wrapper_key if base_use_wrapper else None,
+    }
 
     mapping = {
         "fence_output": "use_fences",

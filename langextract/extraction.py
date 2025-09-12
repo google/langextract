@@ -30,7 +30,6 @@ from langextract import resolver
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import format_handler as fh
-from langextract.core import schema
 
 
 def extract(

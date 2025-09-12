@@ -23,7 +23,6 @@ from langextract import prompting
 from langextract import resolver
 from langextract.core import data
 from langextract.core import format_handler
-from langextract.core import types
 
 
 class FormatHandlerTest(parameterized.TestCase):
@@ -94,7 +93,7 @@ class FormatHandlerTest(parameterized.TestCase):
           parsed_text="London",
       ),
   )
-  def test_format_and_parse(
+  def test_format_and_parse(  # pylint: disable=too-many-arguments
       self,
       format_type,
       use_wrapper,

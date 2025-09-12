@@ -238,7 +238,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     call_args = mock_post.call_args
     json_payload = call_args.kwargs["json"]
 
-    self.assertEqual(json_payload["options"]["temperature"], 0.8)
+    self.assertEqual(json_payload["options"]["temperature"], 0.1)
     self.assertEqual(json_payload["options"]["keep_alive"], 300)
     self.assertEqual(json_payload["options"]["num_ctx"], 2048)
     self.assertEqual(call_args.kwargs["timeout"], 120)

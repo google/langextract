@@ -109,7 +109,7 @@ _DEFAULT_KEEP_ALIVE = 5 * 60  # 5 minutes
 _DEFAULT_NUM_CTX = 2048
 
 # Pre-configured FormatHandler for consistent Ollama configuration
-# use_wrapper=True creates {"extractions": [...]} vs just [...] 
+# use_wrapper=True creates {"extractions": [...]} vs just [...]
 # Ollama's JSON mode expects a dictionary root, not a bare list
 OLLAMA_FORMAT_HANDLER = fh.FormatHandler(
     format_type=data.FormatType.JSON,

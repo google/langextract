@@ -18,8 +18,6 @@ import socket
 import pytest
 
 import langextract as lx
-from langextract.core import types
-from langextract.providers import ollama
 
 
 def _ollama_available():

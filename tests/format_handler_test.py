@@ -23,6 +23,7 @@ from langextract import prompting
 from langextract import resolver
 from langextract.core import data
 from langextract.core import format_handler
+from langextract.core import types
 
 
 class FormatHandlerTest(parameterized.TestCase):

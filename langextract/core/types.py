@@ -19,7 +19,12 @@ import dataclasses
 import enum
 import textwrap
 
-__all__ = ['ScoredOutput', 'FormatType', 'ConstraintType', 'Constraint']
+__all__ = [
+    'ScoredOutput',
+    'FormatType',
+    'ConstraintType',
+    'Constraint',
+]
 
 
 class FormatType(enum.Enum):

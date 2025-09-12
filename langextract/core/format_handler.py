@@ -25,7 +25,6 @@ import yaml
 
 from langextract.core import data
 from langextract.core import exceptions
-from langextract.core import schema
 
 ExtractionValueType = str | int | float | dict | list | None
 
@@ -68,7 +67,7 @@ class FormatHandler:
       use_wrapper: bool = True,
       wrapper_key: str | None = None,
       use_fences: bool = True,
-      attribute_suffix: str = schema.ATTRIBUTE_SUFFIX,
+      attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
       strict_fences: bool = False,
       allow_top_level_list: bool = True,
   ) -> None:
@@ -177,7 +176,8 @@ class FormatHandler:
         parsed = json.loads(content)
     except (yaml.YAMLError, json.JSONDecodeError) as e:
       msg = (
-          f"Failed to parse {self.format_type.value.upper()} content: {str(e)[:200]}"
+          f"Failed to parse {self.format_type.value.upper()} content:"
+          f" {str(e)[:200]}"
       )
       raise exceptions.FormatParseError(msg) from e
 
@@ -191,9 +191,8 @@ class FormatHandler:
             "Content must be a list of extractions or a dict."
         )
 
-    require_wrapper = (
-        self.wrapper_key is not None
-        and (self.use_wrapper or bool(strict))
+    require_wrapper = self.wrapper_key is not None and (
+        self.use_wrapper or bool(strict)
     )
 
     if isinstance(parsed, dict):
@@ -204,8 +203,8 @@ class FormatHandler:
           )
         items = parsed[self.wrapper_key]
       else:
-        if schema.EXTRACTIONS_KEY in parsed:
-          items = parsed[schema.EXTRACTIONS_KEY]
+        if data.EXTRACTIONS_KEY in parsed:
+          items = parsed[data.EXTRACTIONS_KEY]
         elif self.wrapper_key and self.wrapper_key in parsed:
           items = parsed[self.wrapper_key]
         else:
@@ -251,7 +250,7 @@ class FormatHandler:
     return f"```{fence_type}\n{content.strip()}\n```"
 
   def _is_valid_language_tag(
-      self, lang: str | None, valid_tags: dict[str, set[str]]
+      self, lang: str | None, valid_tags: dict[data.FormatType, set[str]]
   ) -> bool:
     """Check if language tag is valid for the format type."""
     if lang is None:
@@ -335,9 +334,9 @@ class FormatHandler:
       resolver_params: dict | None,
       base_format_type: data.FormatType,
       base_use_fences: bool,
-      base_attribute_suffix: str = schema.ATTRIBUTE_SUFFIX,
+      base_attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
       base_use_wrapper: bool = True,
-      base_wrapper_key: str | None = schema.EXTRACTIONS_KEY,
+      base_wrapper_key: str | None = data.EXTRACTIONS_KEY,
       warn_on_legacy: bool = True,
   ) -> tuple[FormatHandler, dict]:
     """Create FormatHandler from resolver_params with legacy support.
@@ -438,7 +437,7 @@ class FormatHandler:
     format_type = kwargs.pop("format_type", None)
     strict_fences = kwargs.pop("strict_fences", False)
     require_extractions_key = kwargs.pop("require_extractions_key", True)
-    attribute_suffix = kwargs.pop("attribute_suffix", schema.ATTRIBUTE_SUFFIX)
+    attribute_suffix = kwargs.pop("attribute_suffix", data.ATTRIBUTE_SUFFIX)
 
     if format_type is None:
       format_type = data.FormatType.JSON
@@ -446,14 +445,15 @@ class FormatHandler:
       pass
     else:
       format_type = (
-          data.FormatType.JSON if str(format_type).lower() == "json"
+          data.FormatType.JSON
+          if str(format_type).lower() == "json"
           else data.FormatType.YAML
       )
 
     return cls(
         format_type=format_type,
         use_wrapper=require_extractions_key,
-        wrapper_key=schema.EXTRACTIONS_KEY if require_extractions_key else None,
+        wrapper_key=data.EXTRACTIONS_KEY if require_extractions_key else None,
         use_fences=fence_output,
         strict_fences=strict_fences,
         attribute_suffix=attribute_suffix,

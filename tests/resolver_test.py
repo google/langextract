@@ -20,7 +20,6 @@ from absl.testing import parameterized
 
 from langextract import chunking
 from langextract import resolver as resolver_lib
-from langextract import schema
 from langextract.core import data
 from langextract.core import tokenizer
 
@@ -135,7 +134,7 @@ class ParserTest(parameterized.TestCase):
           expected_exception=resolver_lib.ResolverParsingError,
           expected_regex=(
               ".*Content must be a mapping with an"
-              f" '{schema.EXTRACTIONS_KEY}' key.*"
+              f" '{data.EXTRACTIONS_KEY}' key.*"
           ),
       ),
   )
@@ -546,7 +545,7 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
               "dosage_index": "second",
           }],
           expected_exception=ValueError,
-          expected_regex=".*string or integer.*",
+          expected_regex=".*must be an integer.*",
       ),
       dict(
           testcase_name="float_indices",
@@ -556,7 +555,7 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
           ),
           test_input=[{"medication": "Aspirin", "medication_index": 1.0}],
           expected_exception=ValueError,
-          expected_regex=".*string or integer.*",
+          expected_regex=".*must be an integer.*",
       ),
   )
   def test_extract_ordered_extractions_exceptions(
@@ -1678,7 +1677,7 @@ class AlignEntitiesTest(parameterized.TestCase):
 class ResolverTest(parameterized.TestCase):
   _TWO_MEDICATIONS_JSON_UNDELIMITED = textwrap.dedent(f"""\
       {{
-        "{schema.EXTRACTIONS_KEY}": [
+        "{data.EXTRACTIONS_KEY}": [
           {{
             "medication": "Naprosyn",
             "medication_index": 4,
@@ -1697,7 +1696,7 @@ class ResolverTest(parameterized.TestCase):
       }}""")
 
   _TWO_MEDICATIONS_YAML_UNDELIMITED = textwrap.dedent(f"""\
-  {schema.EXTRACTIONS_KEY}:
+  {data.EXTRACTIONS_KEY}:
     - medication: "Naprosyn"
       medication_index: 4
       frequency: "as needed"
@@ -1762,7 +1761,7 @@ class ResolverTest(parameterized.TestCase):
           input_text=textwrap.dedent(f"""\
             ```json
             {{
-              "{schema.EXTRACTIONS_KEY}": [
+              "{data.EXTRACTIONS_KEY}": [
                 {{
                   "medication": "Naprosyn",
                   "medication_index": 4,
@@ -1791,7 +1790,7 @@ class ResolverTest(parameterized.TestCase):
           ),
           input_text=textwrap.dedent(f"""\
             ```yaml
-            {schema.EXTRACTIONS_KEY}:
+            {data.EXTRACTIONS_KEY}:
               - medication: "Naprosyn"
                 medication_index: 4
                 frequency: "as needed"
@@ -1836,7 +1835,7 @@ class ResolverTest(parameterized.TestCase):
     test_input = textwrap.dedent(f"""\
     ```json
     {{
-      "{schema.EXTRACTIONS_KEY}": [
+      "{data.EXTRACTIONS_KEY}": [
         {{
           "year": 2006,
           "year_index": 6

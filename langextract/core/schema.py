@@ -24,16 +24,11 @@ from langextract.core import format_handler as fh
 from langextract.core import types
 
 __all__ = [
-    "EXTRACTIONS_KEY",
-    "ATTRIBUTE_SUFFIX",
     "ConstraintType",
     "Constraint",
     "BaseSchema",
     "FormatModeSchema",
 ]
-
-EXTRACTIONS_KEY = "extractions"  # Shared key for extraction arrays in JSON/YAML
-ATTRIBUTE_SUFFIX = "_attributes"  # Suffix for attribute fields in extractions
 
 # Backward compat re-exports
 ConstraintType = types.ConstraintType
@@ -48,7 +43,7 @@ class BaseSchema(abc.ABC):
   def from_examples(
       cls,
       examples_data: Sequence[data.ExampleData],
-      attribute_suffix: str = ATTRIBUTE_SUFFIX,
+      attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
   ) -> BaseSchema:
     """Factory method to build a schema instance from example data."""
 
@@ -85,7 +80,7 @@ class BaseSchema(abc.ABC):
 
     This allows schemas to adjust their behavior based on caller overrides.
     For example, FormatModeSchema uses this to sync its format when the caller
-    overrides it, ensuring supports_strict_mode stays accurate.
+    overrides it, ensuring requires_raw_output stays accurate.
 
     Default implementation does nothing. Override if your schema needs to
     respond to provider kwargs.
@@ -112,8 +107,8 @@ class FormatModeSchema(BaseSchema):
   @classmethod
   def from_examples(
       cls,
-      examples_data,
-      attribute_suffix: str = ATTRIBUTE_SUFFIX,
+      examples_data: Sequence[data.ExampleData],
+      attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
   ) -> FormatModeSchema:
     """Factory method to build a schema instance from example data."""
     # Default to JSON format

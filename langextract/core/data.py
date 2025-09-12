@@ -24,6 +24,9 @@ from langextract.core import types
 
 FormatType = types.FormatType  # Backward compat
 
+EXTRACTIONS_KEY = "extractions"
+ATTRIBUTE_SUFFIX = "_attributes"
+
 __all__ = [
     "AlignmentStatus",
     "CharInterval",
@@ -32,6 +35,8 @@ __all__ = [
     "AnnotatedDocument",
     "ExampleData",
     "FormatType",
+    "EXTRACTIONS_KEY",
+    "ATTRIBUTE_SUFFIX",
 ]
 
 

@@ -98,14 +98,14 @@ class FormatModeSchemaTest(absltest.TestCase):
         msg="Provider config should contain format: json",
     )
 
-  def test_supports_strict_mode_returns_true(self):
-    """Test that FormatModeSchema supports strict mode (valid JSON output)."""
+  def test_requires_raw_output_returns_true(self):
+    """Test that FormatModeSchema requires raw output for JSON."""
     examples_data = []
     test_schema = schema.FormatModeSchema.from_examples(examples_data)
 
     self.assertTrue(
-        test_schema.supports_strict_mode,
-        msg="FormatModeSchema should support strict mode",
+        test_schema.requires_raw_output,
+        msg="FormatModeSchema with JSON should require raw output",
     )
 
   def test_different_examples_same_output(self):
@@ -407,13 +407,13 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
         msg="response_mime_type should be application/json",
     )
 
-  def test_gemini_supports_strict_mode(self):
-    """Test that GeminiSchema supports strict mode."""
+  def test_gemini_requires_raw_output(self):
+    """Test that GeminiSchema requires raw output."""
     examples_data = []
     gemini_schema = schemas.gemini.GeminiSchema.from_examples(examples_data)
     self.assertTrue(
-        gemini_schema.supports_strict_mode,
-        msg="GeminiSchema should support strict mode",
+        gemini_schema.requires_raw_output,
+        msg="GeminiSchema should require raw output",
     )
 
   def test_gemini_rejects_yaml_with_schema(self):
@@ -543,16 +543,6 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
 
 class SchemaShimTest(absltest.TestCase):
   """Tests for backward compatibility shims in schema module."""
-
-  def test_extractions_key_import(self):
-    """Test that EXTRACTIONS_KEY can be imported from schema module."""
-    from langextract import schema as lx_schema  # pylint: disable=reimported,import-outside-toplevel
-
-    self.assertEqual(
-        lx_schema.EXTRACTIONS_KEY,
-        "extractions",
-        msg="EXTRACTIONS_KEY should be 'extractions'",
-    )
 
   def test_constraint_types_import(self):
     """Test that Constraint and ConstraintType can be imported."""

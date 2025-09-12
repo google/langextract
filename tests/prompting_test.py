@@ -18,7 +18,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import prompting
-from langextract import schema
 from langextract.core import data
 from langextract.core import format_handler as fh
 
@@ -93,7 +92,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
 
         The patient was diagnosed with hypertension and diabetes.
         ```yaml
-        {schema.EXTRACTIONS_KEY}:
+        {data.EXTRACTIONS_KEY}:
         - medical_condition: hypertension
           medical_condition_attributes:
             chronicity: chronic
@@ -129,7 +128,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
               Patient has diabetes and is prescribed insulin.
               ```json
               {{
-                "{schema.EXTRACTIONS_KEY}": [
+                "{data.EXTRACTIONS_KEY}": [
                   {{
                     "medical_condition": "diabetes",
                     "medical_condition_attributes": {{
@@ -166,7 +165,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
           expected_formatted_example=textwrap.dedent(f"""\
               Patient has diabetes and is prescribed insulin.
               ```yaml
-              {schema.EXTRACTIONS_KEY}:
+              {data.EXTRACTIONS_KEY}:
               - medical_condition: diabetes
                 medical_condition_attributes:
                   chronicity: chronic
@@ -191,7 +190,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
           expected_formatted_example=textwrap.dedent(f"""\
               Patient has a fever.
               ```yaml
-              {schema.EXTRACTIONS_KEY}:
+              {data.EXTRACTIONS_KEY}:
               - symptom: fever
                 symptom_props:
                   severity: mild
@@ -206,7 +205,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
           expected_formatted_example=textwrap.dedent(f"""\
               Text with no extractions.
               ```yaml
-              {schema.EXTRACTIONS_KEY}: []
+              {data.EXTRACTIONS_KEY}: []
               ```
               """),
       ),
@@ -219,7 +218,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
               Text with no extractions.
               ```json
               {{
-                "{schema.EXTRACTIONS_KEY}": []
+                "{data.EXTRACTIONS_KEY}": []
               }}
               ```
               """),
@@ -238,7 +237,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
           expected_formatted_example=textwrap.dedent(f"""\
               Patient is resting comfortably.
               ```yaml
-              {schema.EXTRACTIONS_KEY}:
+              {data.EXTRACTIONS_KEY}:
               - person: Patient
                 person_attributes: {{}}
               ```
@@ -259,7 +258,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
               Patient is resting comfortably.
               ```json
               {{
-                "{schema.EXTRACTIONS_KEY}": [
+                "{data.EXTRACTIONS_KEY}": [
                   {{
                     "person": "Patient",
                     "person_attributes": {{}}
@@ -290,7 +289,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
           expected_formatted_example=textwrap.dedent(f"""\
               Patient has multiple medications: aspirin and lisinopril.
               ```yaml
-              {schema.EXTRACTIONS_KEY}:
+              {data.EXTRACTIONS_KEY}:
               - medication: aspirin
                 medication_attributes:
                   dosage: 81mg

@@ -39,7 +39,6 @@ from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
-from langextract.core import schema
 
 
 class DocumentRepeatError(exceptions.LangExtractError):
@@ -165,7 +164,7 @@ class Annotator:
       language_model: base_model.BaseLanguageModel,
       prompt_template: prompting.PromptTemplateStructured,
       format_type: data.FormatType = data.FormatType.YAML,
-      attribute_suffix: str = schema.ATTRIBUTE_SUFFIX,
+      attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
       fence_output: bool = False,
       format_handler: fh.FormatHandler | None = None,
   ):
@@ -189,7 +188,7 @@ class Annotator:
       format_handler = fh.FormatHandler(
           format_type=format_type,
           use_wrapper=True,
-          wrapper_key=schema.EXTRACTIONS_KEY,
+          wrapper_key=data.EXTRACTIONS_KEY,
           use_fences=fence_output,
           attribute_suffix=attribute_suffix,
       )

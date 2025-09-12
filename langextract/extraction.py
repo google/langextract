@@ -98,7 +98,7 @@ def extract(
         ```yaml). When True, the model is prompted to generate fenced output and
         the resolver expects it. When False, raw JSON/YAML is expected. When None,
         automatically determined based on provider schema capabilities: if a schema
-        is applied and supports_strict_mode is True, defaults to False; otherwise
+        is applied and requires_raw_output is True, defaults to False; otherwise
         True. If your model utilizes schema constraints, this can generally be set
         to False unless the constraint also accounts for code fence delimiters.
       use_schema_constraints: Whether to generate schema constraints for models.
@@ -285,10 +285,13 @@ def extract(
       resolver_params=resolver_params,
       base_format_type=format_type,
       base_use_fences=language_model.requires_fence_output,
-      base_attribute_suffix=schema.ATTRIBUTE_SUFFIX,
+      base_attribute_suffix=data.ATTRIBUTE_SUFFIX,
       base_use_wrapper=True,
-      base_wrapper_key=schema.EXTRACTIONS_KEY,
+      base_wrapper_key=data.EXTRACTIONS_KEY,
   )
+
+  if language_model.schema is not None:
+    language_model.schema.validate_format(format_handler)
 
   # Pull alignment settings from normalized params
   alignment_kwargs = {}

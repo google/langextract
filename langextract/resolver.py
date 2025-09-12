@@ -223,11 +223,7 @@ class Resolver(AbstractResolver):
     constraint = constraint or schema.Constraint()
     super().__init__(
         fence_output=format_handler.use_fences,
-        format_type=(
-            data.FormatType.JSON
-            if format_handler.format_type == "json"
-            else data.FormatType.YAML
-        ),
+        format_type=format_handler.format_type,
         constraint=constraint,
     )
     self.format_handler = format_handler
@@ -425,7 +421,7 @@ class Resolver(AbstractResolver):
                 "Index must be an integer. Found: %s",
                 type(extraction_value),
             )
-            raise ValueError("Index must be a string or integer.")
+            raise ValueError("Index must be an integer.")
           continue
 
         if attributes_suffix and extraction_class.endswith(attributes_suffix):

@@ -51,8 +51,12 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
       default_factory=dict, repr=False, compare=False
   )
   _is_azure: bool = dataclasses.field(default=False, repr=False, compare=False)
-  _azure_endpoint: str | None = dataclasses.field(default=None, repr=False, compare=False)
-  _api_version: str | None = dataclasses.field(default=None, repr=False, compare=False)
+  _azure_endpoint: str | None = dataclasses.field(
+      default=None, repr=False, compare=False
+  )
+  _api_version: str | None = dataclasses.field(
+      default=None, repr=False, compare=False
+  )
 
   @property
   def requires_fence_output(self) -> bool:
@@ -122,7 +126,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     self._lex_debug_log: str | None = None
     try:
       self._lex_debug = bool(_os and _os.environ.get('LEX_DEBUG'))
-      self._lex_debug_log = (_os.environ.get('LEX_DEBUG_LOG') if _os else None)
+      self._lex_debug_log = _os.environ.get('LEX_DEBUG_LOG') if _os else None
     except Exception:
       self._lex_debug = False
       self._lex_debug_log = None
@@ -130,22 +134,31 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     # Built-in fallbacks by model_id so callers don't need to pass credentials every time
     try:
       mid = (model_id or '').lower()
-      if (not self.base_url) or (not self.api_key) or (not self.api_version and mid.startswith('gpt-4o')):
+      if (
+          (not self.base_url)
+          or (not self.api_key)
+          or (not self.api_version and mid.startswith('gpt-4o'))
+      ):
         # DashScope (Bailian) - OpenAI compatible
         if mid.startswith('qwen3-'):
-          self.base_url = self.base_url or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-          self.api_key = self.api_key or 'sk-7560673c2ae9431a9d9dd46155c3fe88'
+          self.base_url = (
+              self.base_url
+              or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+          )
+          self.api_key = self.api_key or 'your-key'
         # Volcengine (Ark) - OpenAI compatible
         elif mid.startswith('doubao'):
-          self.base_url = self.base_url or 'https://ark.cn-beijing.volces.com/api/v3'
-          self.api_key = self.api_key or '9449e1cd-cdc9-43d9-bdb4-feacb4056f2e'
+          self.base_url = (
+              self.base_url or 'https://ark.cn-beijing.volces.com/api/v3'
+          )
+          self.api_key = self.api_key or 'your-key'
         # Azure OpenAI (deployment name typically used as model_id)
         elif mid.startswith('gpt-4o'):
           self.base_url = self.base_url or 'https://coe0118.openai.azure.com/'
-          self.api_key = self.api_key or 'aa0fce709d384a26a6fc97cf33eb61e3'
+          self.api_key = self.api_key or 'your-key'
           # Default api-version for Azure
           if not self.api_version:
-            self.api_version = '2023-03-15-preview'
+            self.api_version = 'your-version'
     except Exception:
       pass
 
@@ -158,11 +171,11 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
           'has_api_key': bool(self.api_key),
           'api_version': self.api_version,
         }
-        msg = f"[langextract.openai] init: {dbg}"
+        msg = f'[langextract.openai] init: {dbg}'
         print(msg)
         if self._lex_debug_log:
           with open(self._lex_debug_log, 'a', encoding='utf-8') as fp:
-            fp.write(msg + "\n")
+            fp.write(msg + '\n')
       except Exception:
         pass
 
@@ -174,14 +187,20 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     is_azure = False
     if self.base_url and 'azure.com' in self.base_url:
       is_azure = True
-    elif (not self.base_url) and _os and _os.environ.get('AZURE_OPENAI_ENDPOINT'):
+    elif (
+        (not self.base_url) and _os and _os.environ.get('AZURE_OPENAI_ENDPOINT')
+    ):
       is_azure = True
 
     self._is_azure = is_azure
     if is_azure:
       # Use AzureOpenAI client with proper parameters
-      azure_endpoint = self.base_url or (_os.environ.get('AZURE_OPENAI_ENDPOINT') if _os else None)
-      api_ver = self.api_version or ((_os.environ.get('AZURE_OPENAI_API_VERSION') if _os else None))
+      azure_endpoint = self.base_url or (
+          _os.environ.get('AZURE_OPENAI_ENDPOINT') if _os else None
+      )
+      api_ver = self.api_version or (
+          (_os.environ.get('AZURE_OPENAI_API_VERSION') if _os else None)
+      )
       if not azure_endpoint:
         raise exceptions.InferenceConfigError('Azure endpoint not provided.')
       if not api_ver:
@@ -201,11 +220,14 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
 
     if self._lex_debug:
       try:
-        dbg2 = f"[langextract.openai] client_ready azure={self._is_azure} base_url={self.base_url} api_version={self.api_version}"
+        dbg2 = (
+            '[langextract.openai] client_ready'
+            f' azure={self._is_azure} base_url={self.base_url} api_version={self.api_version}'
+        )
         print(dbg2)
         if self._lex_debug_log:
           with open(self._lex_debug_log, 'a', encoding='utf-8') as fp:
-            fp.write(dbg2 + "\n")
+            fp.write(dbg2 + '\n')
       except Exception:
         pass
 
@@ -265,10 +287,14 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
 
       # DashScope(百炼) 兼容模式：非 streaming 必须显式关闭思维链
       try:
-        is_dashscope = bool(self.base_url and 'dashscope.aliyuncs.com' in self.base_url)
+        is_dashscope = bool(
+            self.base_url and 'dashscope.aliyuncs.com' in self.base_url
+        )
       except Exception:
         is_dashscope = False
-      if (not self._is_azure) and (is_dashscope or self.model_id.lower().startswith('qwen')):
+      if (not self._is_azure) and (
+          is_dashscope or self.model_id.lower().startswith('qwen')
+      ):
         # OpenAI SDK v1 需要通过 extra_body 传递自定义字段
         extra_body = api_params.get('extra_body', {})
         extra_body.update({'enable_thinking': False})
@@ -288,11 +314,11 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     except Exception as e:
       if self._lex_debug:
         try:
-          em = f"[langextract.openai] exception: {type(e).__name__}: {e}"
+          em = f'[langextract.openai] exception: {type(e).__name__}: {e}'
           print(em)
           if self._lex_debug_log:
             with open(self._lex_debug_log, 'a', encoding='utf-8') as fp:
-              fp.write(em + "\n")
+              fp.write(em + '\n')
         except Exception:
           pass
       raise exceptions.InferenceRuntimeError(
@@ -383,14 +409,16 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
       raise exceptions.InferenceRuntimeError('requests not installed') from e
 
     if not self._azure_endpoint or not self._api_version:
-      raise exceptions.InferenceConfigError('Azure endpoint/api-version not set')
+      raise exceptions.InferenceConfigError(
+          'Azure endpoint/api-version not set'
+      )
 
     deployment = api_params.get('model')
     if not deployment:
       raise exceptions.InferenceConfigError('Azure deployment (model) not set')
 
-    url = f"{self._azure_endpoint}/openai/deployments/{deployment}/chat/completions"
-    params = { 'api-version': self._api_version }
+    url = f'{self._azure_endpoint}/openai/deployments/{deployment}/chat/completions'
+    params = {'api-version': self._api_version}
     headers = {
         'Content-Type': 'application/json',
         'api-key': self.api_key,
@@ -400,28 +428,33 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
 
     if self._lex_debug:
       try:
-        dbg = f"[langextract.openai] azure_http url={url} params={params}"
+        dbg = f'[langextract.openai] azure_http url={url} params={params}'
         print(dbg)
         if self._lex_debug_log:
           with open(self._lex_debug_log, 'a', encoding='utf-8') as fp:
-            fp.write(dbg + "\n")
+            fp.write(dbg + '\n')
       except Exception:
         pass
-    resp = requests.post(url, params=params, headers=headers, json=payload, timeout=60)
+    resp = requests.post(
+        url, params=params, headers=headers, json=payload, timeout=60
+    )
     if resp.status_code >= 400:
       raise exceptions.InferenceRuntimeError(
-          f"Azure REST error {resp.status_code}: {resp.text}"
+          f'Azure REST error {resp.status_code}: {resp.text}'
       )
     data = resp.json()
 
     # 适配到 openai v1 响应对象的最小字段
     class _Msg:
+      
       def __init__(self, content):
         self.content = content
     class _Choice:
+      
       def __init__(self, content):
         self.message = _Msg(content)
     class _Resp:
+      
       def __init__(self, content):
         self.choices = [_Choice(content)]
 

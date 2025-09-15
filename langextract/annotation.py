@@ -23,6 +23,8 @@ Usage example:
     annotated_documents = annotator.annotate_documents(documents, resolver)
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterable, Iterator
 import itertools
 import time
@@ -36,8 +38,7 @@ from langextract import resolver as resolver_lib
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
-
-ATTRIBUTE_SUFFIX = "_attributes"
+from langextract.core import format_handler as fh
 
 
 class DocumentRepeatError(exceptions.LangExtractError):
@@ -163,8 +164,9 @@ class Annotator:
       language_model: base_model.BaseLanguageModel,
       prompt_template: prompting.PromptTemplateStructured,
       format_type: data.FormatType = data.FormatType.YAML,
-      attribute_suffix: str = ATTRIBUTE_SUFFIX,
+      attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
       fence_output: bool = False,
+      format_handler: fh.FormatHandler | None = None,
   ):
     """Initializes Annotator.
 
@@ -176,31 +178,39 @@ class Annotator:
       attribute_suffix: Suffix to append to attribute keys in the output.
       fence_output: Whether to expect/generate fenced output (```json or
         ```yaml). When True, the model is prompted to generate fenced output and
-        the resolver expects it. When False, raw JSON/YAML is expected. Defaults
-        to True.
+        the resolver expects it. When False, raw JSON/YAML is expected.
+        Defaults to False. If format_handler is provided, it takes precedence.
+      format_handler: Optional FormatHandler for managing format-specific logic.
     """
     self._language_model = language_model
+
+    if format_handler is None:
+      format_handler = fh.FormatHandler(
+          format_type=format_type,
+          use_wrapper=True,
+          wrapper_key=data.EXTRACTIONS_KEY,
+          use_fences=fence_output,
+          attribute_suffix=attribute_suffix,
+      )
+
     self._prompt_generator = prompting.QAPromptGenerator(
-        prompt_template,
-        format_type=format_type,
-        attribute_suffix=attribute_suffix,
-        fence_output=fence_output,
+        template=prompt_template,
+        format_handler=format_handler,
     )
 
     logging.debug(
-        "Initialized Annotator with prompt:\n%s", self._prompt_generator
+        "Annotator initialized with format_handler: %s", format_handler
     )
 
   def annotate_documents(
       self,
       documents: Iterable[data.Document],
-      resolver: resolver_lib.AbstractResolver = resolver_lib.Resolver(
-          format_type=data.FormatType.YAML,
-      ),
+      resolver: resolver_lib.AbstractResolver | None = None,
       max_char_buffer: int = 200,
       batch_length: int = 1,
       debug: bool = True,
       extraction_passes: int = 1,
+      show_progress: bool = True,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Annotates a sequence of documents with NLP extractions.
@@ -223,6 +233,7 @@ class Annotator:
         standard single extraction.
         Values > 1 reprocess tokens multiple times, potentially increasing
         costs with the potential for a more thorough extraction.
+      show_progress: Whether to show progress bar. Defaults to True.
       **kwargs: Additional arguments passed to LanguageModel.infer and Resolver.
 
     Yields:
@@ -231,10 +242,18 @@ class Annotator:
     Raises:
       ValueError: If there are no scored outputs during inference.
     """
+    if resolver is None:
+      resolver = resolver_lib.Resolver(format_type=data.FormatType.YAML)
 
     if extraction_passes == 1:
       yield from self._annotate_documents_single_pass(
-          documents, resolver, max_char_buffer, batch_length, debug, **kwargs
+          documents,
+          resolver,
+          max_char_buffer,
+          batch_length,
+          debug,
+          show_progress,
+          **kwargs,
       )
     else:
       yield from self._annotate_documents_sequential_passes(
@@ -244,6 +263,7 @@ class Annotator:
           batch_length,
           debug,
           extraction_passes,
+          show_progress,
           **kwargs,
       )
 
@@ -254,6 +274,7 @@ class Annotator:
       max_char_buffer: int,
       batch_length: int,
       debug: bool,
+      show_progress: bool = True,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Single-pass annotation logic (original implementation)."""
@@ -273,7 +294,7 @@ class Annotator:
     model_info = progress.get_model_info(self._language_model)
 
     progress_bar = progress.create_extraction_progress_bar(
-        batches, model_info=model_info, disable=not debug
+        batches, model_info=model_info, disable=not show_progress
     )
 
     chars_processed = 0
@@ -397,6 +418,7 @@ class Annotator:
       batch_length: int,
       debug: bool,
       extraction_passes: int,
+      show_progress: bool = True,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Sequential extraction passes logic for improved recall."""
@@ -423,7 +445,8 @@ class Annotator:
           max_char_buffer,
           batch_length,
           debug=(debug and pass_num == 0),
-          **kwargs,  # Only show progress on first pass
+          show_progress=show_progress if pass_num == 0 else False,
+          **kwargs,
       ):
         doc_id = annotated_doc.document_id
 
@@ -464,14 +487,13 @@ class Annotator:
   def annotate_text(
       self,
       text: str,
-      resolver: resolver_lib.AbstractResolver = resolver_lib.Resolver(
-          format_type=data.FormatType.YAML,
-      ),
+      resolver: resolver_lib.AbstractResolver | None = None,
       max_char_buffer: int = 200,
       batch_length: int = 1,
       additional_context: str | None = None,
       debug: bool = True,
       extraction_passes: int = 1,
+      show_progress: bool = True,
       **kwargs,
   ) -> data.AnnotatedDocument:
     """Annotates text with NLP extractions for text input.
@@ -488,11 +510,17 @@ class Annotator:
         recall by finding additional entities. Defaults to 1, which performs
         standard single extraction. Values > 1 reprocess tokens multiple times,
         potentially increasing costs.
+      show_progress: Whether to show progress bar. Defaults to True.
       **kwargs: Additional arguments for inference and resolver_lib.
 
     Returns:
       Resolved annotations from text for document.
     """
+    if resolver is None:
+      resolver = resolver_lib.Resolver(
+          format_type=data.FormatType.YAML,
+      )
+
     start_time = time.time() if debug else None
 
     documents = [
@@ -511,6 +539,7 @@ class Annotator:
             batch_length,
             debug,
             extraction_passes,
+            show_progress,
             **kwargs,
         )
     )

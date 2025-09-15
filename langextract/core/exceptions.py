@@ -28,6 +28,8 @@ __all__ = [
     "InferenceOutputError",
     "ProviderError",
     "SchemaError",
+    "FormatError",
+    "FormatParseError",
 ]
 
 
@@ -92,3 +94,19 @@ class ProviderError(LangExtractError):
 
 class SchemaError(LangExtractError):
   """Schema validation/serialization error."""
+
+
+class FormatError(LangExtractError):
+  """Base exception for format handling errors."""
+
+
+class FormatParseError(FormatError):
+  """Raised when format parsing fails.
+
+  This consolidates all parsing errors including:
+  - Missing fence markers when required
+  - Multiple fenced blocks
+  - JSON/YAML decode errors
+  - Missing wrapper keys
+  - Invalid structure
+  """

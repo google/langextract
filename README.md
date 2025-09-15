@@ -10,6 +10,7 @@
 [![Conda version](https://img.shields.io/conda/v/conda-forge/langextract?color=green)](https://anaconda.org/conda-forge/langextract)
 [![GitHub stars](https://img.shields.io/github/stars/google/langextract.svg?style=social&label=Star)](https://github.com/google/langextract)
 ![Tests](https://github.com/google/langextract/actions/workflows/ci.yaml/badge.svg)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17015089.svg)](https://doi.org/10.5281/zenodo.17015089)
 
 ## Table of Contents
 

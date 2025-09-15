@@ -50,6 +50,8 @@ dependencies = [
 "Repository" = "https://github.com/google/langextract"
 "Documentation" = "https://github.com/google/langextract/blob/main/README.md"
 "Bug Tracker" = "https://github.com/google/langextract/issues"
+"Changelog" = "https://github.com/google/langextract/releases"
+"DOI" = "https://doi.org/10.5281/zenodo.17015089"
 
 [project.optional-dependencies]
 openai = ["openai>=1.50.0"]

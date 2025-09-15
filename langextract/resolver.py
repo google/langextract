@@ -18,24 +18,35 @@ In the context of this module, a "resolver" is a component designed to parse and
 transform the textual output of an LLM into structured data.
 """
 
+from __future__ import annotations
+
 import abc
 import collections
 from collections.abc import Iterator, Mapping, Sequence
 import difflib
 import functools
 import itertools
-import json
 import operator
+from typing import Final
 
 from absl import logging
-import yaml
 
 from langextract.core import data
 from langextract.core import exceptions
+from langextract.core import format_handler as fh
 from langextract.core import schema
 from langextract.core import tokenizer
 
 _FUZZY_ALIGNMENT_MIN_THRESHOLD = 0.75
+
+# Default suffix for extraction index keys (e.g., "entity_index")
+DEFAULT_INDEX_SUFFIX = "_index"  # Suffix for index fields in extraction sorting
+
+ALIGNMENT_PARAM_KEYS: Final[frozenset[str]] = frozenset({
+    "enable_fuzzy_alignment",
+    "fuzzy_alignment_threshold",
+    "accept_match_lesser",
+})
 
 
 class AbstractResolver(abc.ABC):
@@ -151,9 +162,6 @@ class AbstractResolver(abc.ABC):
     """
 
 
-ExtractionValueType = str | int | float | dict | list | None
-
-
 class ResolverParsingError(exceptions.LangExtractError):
   """Error raised when content cannot be parsed as the given format."""
 
@@ -161,41 +169,66 @@ class ResolverParsingError(exceptions.LangExtractError):
 class Resolver(AbstractResolver):
   """Resolver for YAML/JSON-based information extraction.
 
-  Allows for customized parsing of YAML or JSON content within text. Extracted
-  extractions are either sorted by a specified index suffix, or, if this is not
-  present, extractions are ordered by their appearance in the order they appear.
-  Attributes associated with extractions are extracted if an attributes suffix
-  is
-  provided. Both the index and attributes suffixes are dictated by prompt
-  examples.
+  By default, extractions are returned in the order they appear in the model
+  output. To enable index-based sorting, set extraction_index_suffix to a
+  value like "_index" (the DEFAULT_INDEX_SUFFIX constant). This will sort
+  extractions by fields ending with that suffix (e.g., "entity_index").
+
+  Uses FormatHandler for parsing model output into extractions.
   """
 
   def __init__(
       self,
-      fence_output: bool = True,
-      extraction_index_suffix: str | None = "_index",
-      extraction_attributes_suffix: str | None = "_attributes",
-      constraint: schema.Constraint = schema.Constraint(),
-      format_type: data.FormatType = data.FormatType.JSON,
+      format_handler: fh.FormatHandler | None = None,
+      extraction_index_suffix: str | None = None,
+      **kwargs,  # Collect legacy parameters
   ):
     """Constructor.
 
     Args:
-      fence_output: Whether to expect fenced output (```json or ```yaml).
+      format_handler: The format handler that knows how to parse output.
       extraction_index_suffix: Suffix identifying index keys that determine the
         ordering of extractions.
-      extraction_attributes_suffix: Suffix identifying attribute keys associated
-        with extractions.
-      constraint: Applies constraints when decoding the output.
-      format_type: The format to parse (YAML or JSON).
+      **kwargs: Legacy parameters (fence_output, format_type, etc.) for backward
+        compatibility. These will be used to create a FormatHandler if one is not
+        provided. Support for these parameters will be removed in v2.0.0.
     """
+    constraint = kwargs.pop("constraint", None)
+    extraction_attributes_suffix = kwargs.pop(
+        "extraction_attributes_suffix", None
+    )
+
+    if format_handler is None:
+      if kwargs or extraction_attributes_suffix is not None:
+        handler_kwargs = dict(kwargs)
+        if extraction_attributes_suffix is not None:
+          handler_kwargs["attribute_suffix"] = extraction_attributes_suffix
+        format_handler = fh.FormatHandler.from_kwargs(**handler_kwargs)
+        for param in [
+            "fence_output",
+            "format_type",
+            "strict_fences",
+            "require_extractions_key",
+            "attribute_suffix",
+        ]:
+          kwargs.pop(param, None)
+      else:
+        format_handler = fh.FormatHandler()
+
+    if kwargs:
+      raise TypeError(
+          f"got an unexpected keyword argument '{list(kwargs.keys())[0]}'"
+      )
+
+    constraint = constraint or schema.Constraint()
     super().__init__(
-        fence_output=fence_output,
+        fence_output=format_handler.use_fences,
+        format_type=format_handler.format_type,
         constraint=constraint,
     )
+    self.format_handler = format_handler
     self.extraction_index_suffix = extraction_index_suffix
-    self.extraction_attributes_suffix = extraction_attributes_suffix
-    self.format_type = format_type
+    self._constraint = constraint
 
   def resolve(
       self,
@@ -221,16 +254,20 @@ class Resolver(AbstractResolver):
     logging.debug("Input Text: %s", input_text)
 
     try:
-      extraction_data = self.string_to_extraction_data(input_text)
+      constraint = getattr(self, "_constraint", schema.Constraint())
+      strict = getattr(constraint, "strict", False)
+      extraction_data = self.format_handler.parse_output(
+          input_text, strict=strict
+      )
       logging.debug("Parsed content: %s", extraction_data)
 
-    except (ResolverParsingError, ValueError) as e:
+    except exceptions.FormatError as e:
       if suppress_parse_errors:
         logging.exception(
             "Failed to parse input_text: %s, error: %s", input_text, e
         )
         return []
-      raise ResolverParsingError("Failed to parse content.") from e
+      raise ResolverParsingError(str(e)) from e
 
     processed_extractions = self.extract_ordered_extractions(extraction_data)
 
@@ -304,124 +341,44 @@ class Resolver(AbstractResolver):
 
     logging.info("Completed alignment process for the provided source_text.")
 
-  def _extract_and_parse_content(
-      self,
-      input_string: str,
-  ) -> (
-      Mapping[str, ExtractionValueType]
-      | Sequence[Mapping[str, ExtractionValueType]]
-  ):
-    """Helper function to extract and parse content based on the delimiter.
-
-    delimiter, and parse it as YAML or JSON.
-
-    Args:
-        input_string: The input string to be processed.
-
-    Raises:
-        ValueError: If the input is invalid or does not contain expected format.
-        ResolverParsingError: If parsing fails.
-
-    Returns:
-        The parsed Python object (dict or list).
-    """
-    logging.info("Starting string parsing.")
-    logging.debug("input_string: %s", input_string)
-
-    if not input_string or not isinstance(input_string, str):
-      logging.error("Input string must be a non-empty string.")
-      raise ValueError("Input string must be a non-empty string.")
-
-    if self.fence_output:
-      left_key = "```" + self.format_type.value
-      left = input_string.find(left_key)
-      right = input_string.rfind("```")
-      prefix_length = len(left_key)
-      if left == -1 or right == -1 or left >= right:
-        logging.error("Input string does not contain valid markers.")
-        raise ValueError("Input string does not contain valid markers.")
-
-      content = input_string[left + prefix_length : right].strip()
-      logging.debug("Content: %s", content)
-    else:
-      content = input_string
-
-    try:
-      if self.format_type == data.FormatType.YAML:
-        parsed_data = yaml.safe_load(content)
-      else:
-        parsed_data = json.loads(content)
-      logging.debug("Successfully parsed content.")
-    except (yaml.YAMLError, json.JSONDecodeError) as e:
-      logging.exception("Failed to parse content.")
-      raise ResolverParsingError("Failed to parse content.") from e
-
-    return parsed_data
-
   def string_to_extraction_data(
       self,
       input_string: str,
-  ) -> Sequence[Mapping[str, ExtractionValueType]]:
+  ) -> Sequence[Mapping[str, fh.ExtractionValueType]]:
     """Parses a YAML or JSON-formatted string into extraction data.
 
-    This function extracts data from a string containing YAML or JSON content.
-    The content is expected to be enclosed within triple backticks (e.g. ```yaml
-    or ```json ...```) if delimiters are set. If `fence_output` is False, it
-    attempts to parse the entire input.
+    This method is kept for backward compatibility with tests.
+    It delegates to the FormatHandler for actual parsing.
 
     Args:
-        input_string (str): A string containing YAML or JSON content enclosed in
-          triple backticks if delimiter is provided.
+        input_string: A string containing YAML or JSON content.
 
     Returns:
-        Sequence[Mapping[str, YamlValueType]]: A sequence of parsed objects.
+        Sequence[Mapping[str, fh.ExtractionValueType]]: A sequence of parsed objects.
 
     Raises:
         ResolverParsingError: If the content within the string cannot be parsed.
         ValueError: If the input is invalid or does not contain expected format.
     """
-    parsed_data = self._extract_and_parse_content(input_string)
+    if not input_string or not isinstance(input_string, str):
+      logging.error("Input string must be a non-empty string.")
+      raise ValueError("Input string must be a non-empty string.")
 
-    if not isinstance(parsed_data, dict):
-      logging.error("Expected content to be a mapping (dict).")
-      raise ResolverParsingError(
-          f"Content must be a mapping with an '{schema.EXTRACTIONS_KEY}' key."
-      )
-    if schema.EXTRACTIONS_KEY not in parsed_data:
-      logging.error("Content does not contain 'extractions' key.")
-      raise ResolverParsingError("Content must contain an 'extractions' key.")
-    extractions = parsed_data[schema.EXTRACTIONS_KEY]
+    try:
+      constraint = getattr(self, "_constraint", schema.Constraint())
+      strict = getattr(constraint, "strict", False)
+      return self.format_handler.parse_output(input_string, strict=strict)
 
-    if not isinstance(extractions, list):
-      logging.error("The content must be a sequence (list) of mappings.")
-      raise ResolverParsingError(
-          "The extractions must be a sequence (list) of mappings."
-      )
+    except exceptions.FormatError as e:
+      raise ResolverParsingError(str(e)) from e
 
-    # Validate each item in the extractions list
-    for item in extractions:
-      if not isinstance(item, dict):
-        logging.error("Each item in the sequence must be a mapping.")
-        raise ResolverParsingError(
-            "Each item in the sequence must be a mapping."
-        )
-
-      for key, value in item.items():
-        if not isinstance(key, str) or not isinstance(
-            value, ExtractionValueType
-        ):
-          logging.error("Invalid key or value type detected in content.")
-          raise ResolverParsingError(
-              "All keys must be strings and values must be either strings,"
-              " integers, floats, dicts, or None."
-          )
-
-    logging.info("Completed parsing of string.")
-    return extractions
+    except Exception as e:
+      logging.exception("Failed to parse content.")
+      raise ResolverParsingError("Failed to parse content.") from e
 
   def extract_ordered_extractions(
       self,
-      extraction_data: Sequence[Mapping[str, ExtractionValueType]],
+      extraction_data: Sequence[Mapping[str, fh.ExtractionValueType]],
   ) -> Sequence[data.Extraction]:
     """Extracts and orders extraction data based on their associated indexes.
 
@@ -454,19 +411,17 @@ class Resolver(AbstractResolver):
     processed_extractions = []
     extraction_index = 0
     index_suffix = self.extraction_index_suffix
-    attributes_suffix = self.extraction_attributes_suffix
+    attributes_suffix = self.format_handler.attribute_suffix
 
     for group_index, group in enumerate(extraction_data):
       for extraction_class, extraction_value in group.items():
         if index_suffix and extraction_class.endswith(index_suffix):
           if not isinstance(extraction_value, int):
             logging.error(
-                "Index must be a string or integer. Found: %s",
+                "Index must be an integer. Found: %s",
                 type(extraction_value),
             )
-            raise ValueError(
-                "Extraction text must must be a string or integer."
-            )
+            raise ValueError("Index must be an integer.")
           continue
 
         if attributes_suffix and extraction_class.endswith(attributes_suffix):
@@ -480,12 +435,14 @@ class Resolver(AbstractResolver):
             )
           continue
 
-        if not isinstance(extraction_value, ExtractionValueType):
+        if not isinstance(extraction_value, (str, int, float)):
           logging.error(
-              "Extraction text must be a string or integer. Found: %s",
+              "Extraction text must be a string, integer, or float. Found: %s",
               type(extraction_value),
           )
-          raise ValueError("Extraction text must must be a string or integer.")
+          raise ValueError(
+              "Extraction text must be a string, integer, or float."
+          )
 
         if not isinstance(extraction_value, str):
           extraction_value = str(extraction_value)
@@ -704,7 +661,7 @@ class WordAligner:
       delim: str = "\u241F",  # Unicode Symbol for unit separator
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
-      accept_match_lesser: bool = False,
+      accept_match_lesser: bool = True,
   ) -> Sequence[Sequence[data.Extraction]]:
     """Aligns extractions with their positions in the source text.
 

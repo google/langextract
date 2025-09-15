@@ -20,11 +20,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 import dataclasses
 from typing import Any
+import warnings
 
 from langextract.core import data
+from langextract.core import format_handler as fh
 from langextract.core import schema
-
-EXTRACTIONS_KEY = schema.EXTRACTIONS_KEY
 
 
 @dataclasses.dataclass
@@ -35,15 +35,15 @@ class GeminiSchema(schema.BaseSchema):
   that Gemini can interpret via 'response_schema'.
   """
 
-  _schema_dict: dict
+  _schema_dict: dict[str, Any]
 
   @property
-  def schema_dict(self) -> dict:
+  def schema_dict(self) -> dict[str, Any]:
     """Returns the schema dictionary."""
     return self._schema_dict
 
   @schema_dict.setter
-  def schema_dict(self, schema_dict: dict) -> None:
+  def schema_dict(self, schema_dict: dict[str, Any]) -> None:
     """Sets the schema dictionary."""
     self._schema_dict = schema_dict
 
@@ -59,19 +59,46 @@ class GeminiSchema(schema.BaseSchema):
     }
 
   @property
-  def supports_strict_mode(self) -> bool:
-    """Gemini enforces strict JSON schema constraints.
-
-    Returns:
-      True, as Gemini can enforce structure strictly via response_schema.
-    """
+  def requires_raw_output(self) -> bool:
+    """Gemini outputs raw JSON via response_mime_type."""
     return True
+
+  def validate_format(self, format_handler: fh.FormatHandler) -> None:
+    """Validate Gemini's format requirements.
+
+    Gemini requires:
+    - No fence markers (outputs raw JSON via response_mime_type)
+    - Wrapper with EXTRACTIONS_KEY (built into response_schema)
+    """
+    # Check for fence usage with raw JSON output
+    if format_handler.use_fences:
+      warnings.warn(
+          "Gemini outputs native JSON via"
+          " response_mime_type='application/json'. Using fence_output=True may"
+          " cause parsing issues. Set fence_output=False.",
+          UserWarning,
+          stacklevel=3,
+      )
+
+    # Verify wrapper is enabled with correct key
+    if (
+        not format_handler.use_wrapper
+        or format_handler.wrapper_key != data.EXTRACTIONS_KEY
+    ):
+      warnings.warn(
+          "Gemini's response_schema expects"
+          f" wrapper_key='{data.EXTRACTIONS_KEY}'. Current settings:"
+          f" use_wrapper={format_handler.use_wrapper},"
+          f" wrapper_key='{format_handler.wrapper_key}'",
+          UserWarning,
+          stacklevel=3,
+      )
 
   @classmethod
   def from_examples(
       cls,
       examples_data: Sequence[data.ExampleData],
-      attribute_suffix: str = "_attributes",
+      attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
   ) -> GeminiSchema:
     """Creates a GeminiSchema from example extractions.
 
@@ -119,7 +146,7 @@ class GeminiSchema(schema.BaseSchema):
           if list in attr_types:
             attr_properties[attr_name] = {
                 "type": "array",
-                "items": {"type": "string"},
+                "items": {"type": "string"},  # type: ignore[dict-item]
             }
           else:
             attr_properties[attr_name] = {"type": "string"}
@@ -138,9 +165,9 @@ class GeminiSchema(schema.BaseSchema):
     schema_dict = {
         "type": "object",
         "properties": {
-            EXTRACTIONS_KEY: {"type": "array", "items": extraction_schema}
+            data.EXTRACTIONS_KEY: {"type": "array", "items": extraction_schema}
         },
-        "required": [EXTRACTIONS_KEY],
+        "required": [data.EXTRACTIONS_KEY],
     }
 
     return cls(_schema_dict=schema_dict)

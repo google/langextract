@@ -57,15 +57,13 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
           config=config,
           examples=self.examples,
           use_schema_constraints=True,
-          fence_output=None,  # Let it compute default
+          fence_output=None,
       )
 
-      # Should have called init with response_schema in kwargs
       mock_init.assert_called_once()
       call_kwargs = mock_init.call_args[1]
       self.assertIn("response_schema", call_kwargs)
 
-      # Fence should be False for strict schema
       self.assertFalse(model.requires_fence_output)
 
   @mock.patch.dict("os.environ", {"OLLAMA_BASE_URL": "http://localhost:11434"})
@@ -81,16 +79,14 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
           config=config,
           examples=self.examples,
           use_schema_constraints=True,
-          fence_output=None,  # Let it compute default
+          fence_output=None,
       )
 
-      # Should have called init with format in kwargs
       mock_init.assert_called_once()
       call_kwargs = mock_init.call_args[1]
       self.assertIn("format", call_kwargs)
       self.assertEqual(call_kwargs["format"], "json")
 
-      # Fence should be False since Ollama JSON mode outputs valid JSON
       self.assertFalse(model.requires_fence_output)
 
   def test_explicit_fence_output_respected(self):
@@ -103,15 +99,13 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
         "langextract.providers.gemini.GeminiLanguageModel.__init__",
         return_value=None,
     ):
-      # Explicitly set fence to True (opposite of default for Gemini)
       model = factory._create_model_with_schema(
           config=config,
           examples=self.examples,
           use_schema_constraints=True,
-          fence_output=True,  # Explicit value
+          fence_output=True,
       )
 
-      # Should respect explicit value
       self.assertTrue(model.requires_fence_output)
 
   def test_no_schema_defaults_to_true_fence(self):
@@ -135,7 +129,6 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
             fence_output=None,
         )
 
-        # Should default to True for backward compatibility
         self.assertTrue(model.requires_fence_output)
 
   def test_schema_disabled_returns_true_fence(self):
@@ -151,23 +144,20 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
       model = factory._create_model_with_schema(
           config=config,
           examples=self.examples,
-          use_schema_constraints=False,  # Disabled
+          use_schema_constraints=False,
           fence_output=None,
       )
 
-      # Should not have response_schema in kwargs
       call_kwargs = mock_init.call_args[1]
       self.assertNotIn("response_schema", call_kwargs)
 
-      # Should default to True when no schema
       self.assertTrue(model.requires_fence_output)
 
   def test_caller_overrides_schema_config(self):
     """Test that caller's provider_kwargs override schema configuration."""
-    # Use Ollama which normally sets format=json
     config = factory.ModelConfig(
         model_id="gemma2:2b",
-        provider_kwargs={"format": "yaml"},  # Caller wants YAML
+        provider_kwargs={"format": "yaml"},
     )
 
     with mock.patch(
@@ -181,11 +171,10 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
           fence_output=None,
       )
 
-      # Should have called init with caller's YAML override
       mock_init.assert_called_once()
       call_kwargs = mock_init.call_args[1]
       self.assertIn("format", call_kwargs)
-      self.assertEqual(call_kwargs["format"], "yaml")  # Caller wins!
+      self.assertEqual(call_kwargs["format"], "yaml")
 
   def test_no_examples_no_schema(self):
     """Test that no examples means no schema is created."""
@@ -204,11 +193,9 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
           fence_output=None,
       )
 
-      # Should not have response_schema in kwargs
       call_kwargs = mock_init.call_args[1]
       self.assertNotIn("response_schema", call_kwargs)
 
-      # Should default to True when no schema
       self.assertTrue(model.requires_fence_output)
 
 
@@ -248,7 +235,6 @@ class SchemaApplicationTest(absltest.TestCase):
               use_schema_constraints=True,
           )
 
-          # apply_schema should have been called with the schema instance
           mock_apply.assert_called_once()
           schema_arg = mock_apply.call_args[0][0]
           self.assertIsInstance(schema_arg, schema.GeminiSchema)

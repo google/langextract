@@ -24,28 +24,33 @@ from langextract.providers import patterns
 
 
 class ProviderConfig(TypedDict):
-  """Configuration for a provider registration."""
+    """Configuration for a provider registration."""
 
-  patterns: tuple[str, ...]
-  target: str
-  priority: int
+    patterns: tuple[str, ...]
+    target: str
+    priority: int
 
 
 # Built-in provider configurations using centralized patterns
 BUILTIN_PROVIDERS: list[ProviderConfig] = [
     {
-        'patterns': patterns.GEMINI_PATTERNS,
-        'target': 'langextract.providers.gemini:GeminiLanguageModel',
-        'priority': patterns.GEMINI_PRIORITY,
+        "patterns": patterns.GEMINI_PATTERNS,
+        "target": "langextract.providers.gemini:GeminiLanguageModel",
+        "priority": patterns.GEMINI_PRIORITY,
     },
     {
-        'patterns': patterns.OLLAMA_PATTERNS,
-        'target': 'langextract.providers.ollama:OllamaLanguageModel',
-        'priority': patterns.OLLAMA_PRIORITY,
+        "patterns": patterns.DASHSCOPE_PATTERNS,
+        "target": "langextract.providers.dashscope:DashScopeLanguageModel",
+        "priority": patterns.DASHSCOPE_PRIORITY,
     },
     {
-        'patterns': patterns.OPENAI_PATTERNS,
-        'target': 'langextract.providers.openai:OpenAILanguageModel',
-        'priority': patterns.OPENAI_PRIORITY,
+        "patterns": patterns.OLLAMA_PATTERNS,
+        "target": "langextract.providers.ollama:OllamaLanguageModel",
+        "priority": patterns.OLLAMA_PRIORITY,
+    },
+    {
+        "patterns": patterns.OPENAI_PATTERNS,
+        "target": "langextract.providers.openai:OpenAILanguageModel",
+        "priority": patterns.OPENAI_PRIORITY,
     },
 ]

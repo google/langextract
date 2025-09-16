@@ -24,21 +24,21 @@ from langextract.core import exceptions
 
 # Re-export exceptions from core.exceptions with a warning-on-first-access
 def __getattr__(name: str):
-  allowed = {
-      "LangExtractError",
-      "InferenceError",
-      "InferenceConfigError",
-      "InferenceRuntimeError",
-      "InferenceOutputError",
-      "ProviderError",
-      "SchemaError",
-  }
-  if name in allowed:
-    warnings.warn(
-        "`langextract.exceptions` is deprecated; import from"
-        " `langextract.core.exceptions`.",
-        FutureWarning,
-        stacklevel=2,
-    )
-    return getattr(exceptions, name)
-  raise AttributeError(name)
+    allowed = {
+        "LangExtractError",
+        "InferenceError",
+        "InferenceConfigError",
+        "InferenceRuntimeError",
+        "InferenceOutputError",
+        "ProviderError",
+        "SchemaError",
+    }
+    if name in allowed:
+        warnings.warn(
+            "`langextract.exceptions` is deprecated; import from"
+            " `langextract.core.exceptions`.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return getattr(exceptions, name)
+    raise AttributeError(name)

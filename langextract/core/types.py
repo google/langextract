@@ -20,47 +20,47 @@ import enum
 import textwrap
 
 __all__ = [
-    'ScoredOutput',
-    'FormatType',
-    'ConstraintType',
-    'Constraint',
+    "ScoredOutput",
+    "FormatType",
+    "ConstraintType",
+    "Constraint",
 ]
 
 
 class FormatType(enum.Enum):
-  """Enumeration of prompt output formats."""
+    """Enumeration of prompt output formats."""
 
-  YAML = 'yaml'
-  JSON = 'json'
+    YAML = "yaml"
+    JSON = "json"
 
 
 class ConstraintType(enum.Enum):
-  """Enumeration of constraint types."""
+    """Enumeration of constraint types."""
 
-  NONE = 'none'
+    NONE = "none"
 
 
 @dataclasses.dataclass
 class Constraint:
-  """Represents a constraint for model output decoding.
+    """Represents a constraint for model output decoding.
 
-  Attributes:
-    constraint_type: The type of constraint applied.
-  """
+    Attributes:
+      constraint_type: The type of constraint applied.
+    """
 
-  constraint_type: ConstraintType = ConstraintType.NONE
+    constraint_type: ConstraintType = ConstraintType.NONE
 
 
 @dataclasses.dataclass(frozen=True)
 class ScoredOutput:
-  """Scored output from language model inference."""
+    """Scored output from language model inference."""
 
-  score: float | None = None
-  output: str | None = None
+    score: float | None = None
+    output: str | None = None
 
-  def __str__(self) -> str:
-    score_str = '-' if self.score is None else f'{self.score:.2f}'
-    if self.output is None:
-      return f'Score: {score_str}\nOutput: None'
-    formatted_lines = textwrap.indent(self.output, prefix='  ')
-    return f'Score: {score_str}\nOutput:\n{formatted_lines}'
+    def __str__(self) -> str:
+        score_str = "-" if self.score is None else f"{self.score:.2f}"
+        if self.output is None:
+            return f"Score: {score_str}\nOutput: None"
+        formatted_lines = textwrap.indent(self.output, prefix="  ")
+        return f"Score: {score_str}\nOutput:\n{formatted_lines}"

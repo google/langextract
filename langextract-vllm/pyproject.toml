@@ -1,22 +1,161 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "langextract-vllm"
-version = "0.1.0"
+version = "0.1.2"
 description = "LangExtract provider plugin for VLLM"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+authors = [
+    {name = "wuli666", email = "421774554@qq.com"},
+]
+maintainers = [
+    {name = "LangExtract Team", email = "contact@langextract.dev"},
+]
+keywords = ["langextract", "vllm", "llm", "nlp", "extraction", "inference", "gpu", "pytorch"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = [
     "langextract>=1.0.0",
-    # Add your provider's SDK dependencies here
+    "vllm>=0.5.0",
+    "transformers>=4.30.0",
 ]
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+]
+docs = [
+    "sphinx>=5.0.0",
+    "sphinx-rtd-theme>=1.2.0",
+    "myst-parser>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/langextract/langextract-vllm"
+Repository = "https://github.com/langextract/langextract-vllm"
+Documentation = "https://langextract-vllm.readthedocs.io"
+"Bug Tracker" = "https://github.com/langextract/langextract-vllm/issues"
+Changelog = "https://github.com/langextract/langextract-vllm/blob/main/CHANGELOG.md"
+
+[project.scripts]
+langextract-vllm-test = "langextract_vllm.test:main"
 
 [project.entry-points."langextract.providers"]
 vllm = "langextract_vllm.provider:VLLMLanguageModel"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["langextract_vllm*"]
+[tool.hatch.build.targets.wheel]
+packages = ["langextract_vllm"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/langextract_vllm",
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
+# uv 配置
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+
+# 代码格式化配置
+[tool.black]
+line-length = 88
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["langextract_vllm"]
+
+# 类型检查配置
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "vllm.*",
+    "torch.*",
+    "transformers.*",
+]
+ignore_missing_imports = true
+
+# pytest 配置
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=langextract_vllm",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]

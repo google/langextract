@@ -21,41 +21,41 @@ import warnings
 
 
 class InferenceType(enum.Enum):
-  """Enum for inference types - kept for backward compatibility."""
+    """Enum for inference types - kept for backward compatibility."""
 
-  ITERATIVE = "iterative"
-  MULTIPROCESS = "multiprocess"
+    ITERATIVE = "iterative"
+    MULTIPROCESS = "multiprocess"
 
 
 def __getattr__(name: str):
-  moved = {
-      "BaseLanguageModel": ("langextract.core.base_model", "BaseLanguageModel"),
-      "ScoredOutput": ("langextract.core.types", "ScoredOutput"),
-      "InferenceOutputError": (
-          "langextract.core.exceptions",
-          "InferenceOutputError",
-      ),
-      "GeminiLanguageModel": (
-          "langextract.providers.gemini",
-          "GeminiLanguageModel",
-      ),
-      "OpenAILanguageModel": (
-          "langextract.providers.openai",
-          "OpenAILanguageModel",
-      ),
-      "OllamaLanguageModel": (
-          "langextract.providers.ollama",
-          "OllamaLanguageModel",
-      ),
-  }
-  if name in moved:
-    mod, attr = moved[name]
-    warnings.warn(
-        f"`langextract.inference.{name}` is deprecated and will be removed in"
-        f" v2.0.0; use `{mod}.{attr}` instead.",
-        FutureWarning,
-        stacklevel=2,
-    )
-    module = __import__(mod, fromlist=[attr])
-    return getattr(module, attr)
-  raise AttributeError(name)
+    moved = {
+        "BaseLanguageModel": ("langextract.core.base_model", "BaseLanguageModel"),
+        "ScoredOutput": ("langextract.core.types", "ScoredOutput"),
+        "InferenceOutputError": (
+            "langextract.core.exceptions",
+            "InferenceOutputError",
+        ),
+        "GeminiLanguageModel": (
+            "langextract.providers.gemini",
+            "GeminiLanguageModel",
+        ),
+        "OpenAILanguageModel": (
+            "langextract.providers.openai",
+            "OpenAILanguageModel",
+        ),
+        "OllamaLanguageModel": (
+            "langextract.providers.ollama",
+            "OllamaLanguageModel",
+        ),
+    }
+    if name in moved:
+        mod, attr = moved[name]
+        warnings.warn(
+            f"`langextract.inference.{name}` is deprecated and will be removed in"
+            f" v2.0.0; use `{mod}.{attr}` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        module = __import__(mod, fromlist=[attr])
+        return getattr(module, attr)
+    raise AttributeError(name)

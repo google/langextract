@@ -26,31 +26,31 @@ import langextract as lx
 
 
 def main():
-  """Test the custom provider."""
-  api_key = os.getenv("GEMINI_API_KEY") or os.getenv("LANGEXTRACT_API_KEY")
+    """Test the custom provider."""
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("LANGEXTRACT_API_KEY")
 
-  if not api_key:
-    print("Set GEMINI_API_KEY or LANGEXTRACT_API_KEY to test")
-    return
+    if not api_key:
+        print("Set GEMINI_API_KEY or LANGEXTRACT_API_KEY to test")
+        return
 
-  config = lx.factory.ModelConfig(
-      model_id="gemini-2.5-flash",
-      provider="CustomGeminiProvider",
-      provider_kwargs={"api_key": api_key},
-  )
-  model = lx.factory.create_model(config)
+    config = lx.factory.ModelConfig(
+        model_id="gemini-2.5-flash",
+        provider="CustomGeminiProvider",
+        provider_kwargs={"api_key": api_key},
+    )
+    model = lx.factory.create_model(config)
 
-  print(f"✓ Created {model.__class__.__name__}")
+    print(f"✓ Created {model.__class__.__name__}")
 
-  # Test inference
-  prompts = ["Say hello"]
-  results = list(model.infer(prompts))
+    # Test inference
+    prompts = ["Say hello"]
+    results = list(model.infer(prompts))
 
-  if results and results[0]:
-    print(f"✓ Inference worked: {results[0][0].output[:50]}...")
-  else:
-    print("✗ No response")
+    if results and results[0]:
+        print(f"✓ Inference worked: {results[0][0].output[:50]}...")
+    else:
+        print("✗ No response")
 
 
 if __name__ == "__main__":
-  main()
+    main()

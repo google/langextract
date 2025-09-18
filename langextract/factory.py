@@ -33,58 +33,54 @@ from langextract.providers import router
 
 @dataclasses.dataclass(slots=True, frozen=True)
 class ModelConfig:
-  """Configuration for instantiating a language model provider.
+    """Configuration for instantiating a language model provider.
 
-  Attributes:
-    model_id: The model identifier (e.g., "gemini-2.5-flash", "gpt-4o").
-    provider: Optional explicit provider name or class name. Use this to
-      disambiguate when multiple providers support the same model_id.
-    provider_kwargs: Optional provider-specific keyword arguments.
-  """
+    Attributes:
+      model_id: The model identifier (e.g., "gemini-2.5-flash", "gpt-4o").
+      provider: Optional explicit provider name or class name. Use this to
+        disambiguate when multiple providers support the same model_id.
+      provider_kwargs: Optional provider-specific keyword arguments.
+    """
 
-  model_id: str | None = None
-  provider: str | None = None
-  provider_kwargs: dict[str, typing.Any] = dataclasses.field(
-      default_factory=dict
-  )
+    model_id: str | None = None
+    provider: str | None = None
+    provider_kwargs: dict[str, typing.Any] = dataclasses.field(default_factory=dict)
 
 
 def _kwargs_with_environment_defaults(
     model_id: str, kwargs: dict[str, typing.Any]
 ) -> dict[str, typing.Any]:
-  """Add environment-based defaults to provider kwargs.
+    """Add environment-based defaults to provider kwargs.
 
-  Args:
-    model_id: The model identifier.
-    kwargs: Existing keyword arguments.
+    Args:
+      model_id: The model identifier.
+      kwargs: Existing keyword arguments.
 
-  Returns:
-    Updated kwargs with environment defaults.
-  """
-  resolved = dict(kwargs)
+    Returns:
+      Updated kwargs with environment defaults.
+    """
+    resolved = dict(kwargs)
 
-  if "api_key" not in resolved:
-    model_lower = model_id.lower()
-    env_vars_by_provider = {
-        "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
-        "gpt": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
-    }
+    if "api_key" not in resolved:
+        model_lower = model_id.lower()
+        env_vars_by_provider = {
+            "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
+            "gpt": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
+        }
 
-    for provider_prefix, env_vars in env_vars_by_provider.items():
-      if provider_prefix in model_lower:
-        for env_var in env_vars:
-          api_key = os.getenv(env_var)
-          if api_key:
-            resolved["api_key"] = api_key
-            break
-        break
+        for provider_prefix, env_vars in env_vars_by_provider.items():
+            if provider_prefix in model_lower:
+                for env_var in env_vars:
+                    api_key = os.getenv(env_var)
+                    if api_key:
+                        resolved["api_key"] = api_key
+                        break
+                break
 
-  if "ollama" in model_id.lower() and "base_url" not in resolved:
-    resolved["base_url"] = os.getenv(
-        "OLLAMA_BASE_URL", "http://localhost:11434"
-    )
+    if "ollama" in model_id.lower() and "base_url" not in resolved:
+        resolved["base_url"] = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-  return resolved
+    return resolved
 
 
 def create_model(
@@ -94,72 +90,72 @@ def create_model(
     fence_output: bool | None = None,
     return_fence_output: bool = False,
 ) -> base_model.BaseLanguageModel | tuple[base_model.BaseLanguageModel, bool]:
-  """Create a language model instance from configuration.
+    """Create a language model instance from configuration.
 
-  Args:
-    config: Model configuration with optional model_id and/or provider.
-    examples: Optional examples for schema generation (if use_schema_constraints=True).
-    use_schema_constraints: Whether to apply schema constraints from examples.
-    fence_output: Explicit fence output preference. If None, computed from schema.
-    return_fence_output: If True, also return computed fence_output value.
+    Args:
+      config: Model configuration with optional model_id and/or provider.
+      examples: Optional examples for schema generation (if use_schema_constraints=True).
+      use_schema_constraints: Whether to apply schema constraints from examples.
+      fence_output: Explicit fence output preference. If None, computed from schema.
+      return_fence_output: If True, also return computed fence_output value.
 
-  Returns:
-    An instantiated language model provider.
-    If return_fence_output=True: Tuple of (model, model.requires_fence_output).
+    Returns:
+      An instantiated language model provider.
+      If return_fence_output=True: Tuple of (model, model.requires_fence_output).
 
-  Raises:
-    ValueError: If neither model_id nor provider is specified.
-    ValueError: If no provider is registered for the model_id.
-    InferenceConfigError: If provider instantiation fails.
-  """
-  if use_schema_constraints or fence_output is not None:
-    model = _create_model_with_schema(
-        config=config,
-        examples=examples,
-        use_schema_constraints=use_schema_constraints,
-        fence_output=fence_output,
+    Raises:
+      ValueError: If neither model_id nor provider is specified.
+      ValueError: If no provider is registered for the model_id.
+      InferenceConfigError: If provider instantiation fails.
+    """
+    if use_schema_constraints or fence_output is not None:
+        model = _create_model_with_schema(
+            config=config,
+            examples=examples,
+            use_schema_constraints=use_schema_constraints,
+            fence_output=fence_output,
+        )
+        if return_fence_output:
+            return model, model.requires_fence_output
+        return model
+
+    if not config.model_id and not config.provider:
+        raise ValueError("Either model_id or provider must be specified")
+
+    # Load providers before any resolution
+    providers.load_builtins_once()
+    providers.load_plugins_once()
+
+    try:
+        if config.provider:
+            provider_class = router.resolve_provider(config.provider)
+        else:
+            provider_class = router.resolve(config.model_id)
+    except (ModuleNotFoundError, ImportError) as e:
+        raise exceptions.InferenceConfigError(
+            "Failed to load provider. "
+            "This may be due to missing dependencies. "
+            f"Check that all required packages are installed. Error: {e}"
+        ) from e
+
+    model_id = config.model_id
+
+    kwargs = _kwargs_with_environment_defaults(
+        model_id or config.provider or "", config.provider_kwargs
     )
-    if return_fence_output:
-      return model, model.requires_fence_output
-    return model
 
-  if not config.model_id and not config.provider:
-    raise ValueError("Either model_id or provider must be specified")
+    if model_id:
+        kwargs["model_id"] = model_id
 
-  # Load providers before any resolution
-  providers.load_builtins_once()
-  providers.load_plugins_once()
-
-  try:
-    if config.provider:
-      provider_class = router.resolve_provider(config.provider)
-    else:
-      provider_class = router.resolve(config.model_id)
-  except (ModuleNotFoundError, ImportError) as e:
-    raise exceptions.InferenceConfigError(
-        "Failed to load provider. "
-        "This may be due to missing dependencies. "
-        f"Check that all required packages are installed. Error: {e}"
-    ) from e
-
-  model_id = config.model_id
-
-  kwargs = _kwargs_with_environment_defaults(
-      model_id or config.provider or "", config.provider_kwargs
-  )
-
-  if model_id:
-    kwargs["model_id"] = model_id
-
-  try:
-    model = provider_class(**kwargs)
-    if return_fence_output:
-      return model, model.requires_fence_output
-    return model
-  except (ValueError, TypeError) as e:
-    raise exceptions.InferenceConfigError(
-        f"Failed to create provider {provider_class.__name__}: {e}"
-    ) from e
+    try:
+        model = provider_class(**kwargs)
+        if return_fence_output:
+            return model, model.requires_fence_output
+        return model
+    except (ValueError, TypeError) as e:
+        raise exceptions.InferenceConfigError(
+            f"Failed to create provider {provider_class.__name__}: {e}"
+        ) from e
 
 
 def create_model_from_id(
@@ -167,20 +163,20 @@ def create_model_from_id(
     provider: str | None = None,
     **provider_kwargs: typing.Any,
 ) -> base_model.BaseLanguageModel:
-  """Convenience function to create a model.
+    """Convenience function to create a model.
 
-  Args:
-    model_id: The model identifier (e.g., "gemini-2.5-flash").
-    provider: Optional explicit provider name to disambiguate.
-    **provider_kwargs: Optional provider-specific keyword arguments.
+    Args:
+      model_id: The model identifier (e.g., "gemini-2.5-flash").
+      provider: Optional explicit provider name to disambiguate.
+      **provider_kwargs: Optional provider-specific keyword arguments.
 
-  Returns:
-    An instantiated language model provider.
-  """
-  config = ModelConfig(
-      model_id=model_id, provider=provider, provider_kwargs=provider_kwargs
-  )
-  return create_model(config)
+    Returns:
+      An instantiated language model provider.
+    """
+    config = ModelConfig(
+        model_id=model_id, provider=provider, provider_kwargs=provider_kwargs
+    )
+    return create_model(config)
 
 
 def _create_model_with_schema(
@@ -189,62 +185,62 @@ def _create_model_with_schema(
     use_schema_constraints: bool = True,
     fence_output: bool | None = None,
 ) -> base_model.BaseLanguageModel:
-  """Internal helper to create a model with optional schema constraints.
+    """Internal helper to create a model with optional schema constraints.
 
-  This function creates a language model and optionally configures it with
-  schema constraints derived from the provided examples. It also computes
-  appropriate fence defaulting based on the schema's capabilities.
+    This function creates a language model and optionally configures it with
+    schema constraints derived from the provided examples. It also computes
+    appropriate fence defaulting based on the schema's capabilities.
 
-  Args:
-    config: Model configuration with model_id and/or provider.
-    examples: Optional sequence of ExampleData for schema generation.
-    use_schema_constraints: Whether to generate and apply schema constraints.
-    fence_output: Whether to wrap output in markdown fences. If None,
-      will be computed based on schema's requires_raw_output.
+    Args:
+      config: Model configuration with model_id and/or provider.
+      examples: Optional sequence of ExampleData for schema generation.
+      use_schema_constraints: Whether to generate and apply schema constraints.
+      fence_output: Whether to wrap output in markdown fences. If None,
+        will be computed based on schema's requires_raw_output.
 
-  Returns:
-    A model instance with fence_output configured appropriately.
-  """
+    Returns:
+      A model instance with fence_output configured appropriately.
+    """
 
-  if config.provider:
-    provider_class = router.resolve_provider(config.provider)
-  else:
-    providers.load_builtins_once()
-    providers.load_plugins_once()
-    provider_class = router.resolve(config.model_id)
+    if config.provider:
+        provider_class = router.resolve_provider(config.provider)
+    else:
+        providers.load_builtins_once()
+        providers.load_plugins_once()
+        provider_class = router.resolve(config.model_id)
 
-  schema_instance = None
-  if use_schema_constraints and examples:
-    schema_class = provider_class.get_schema_class()
-    if schema_class is not None:
-      schema_instance = schema_class.from_examples(examples)
+    schema_instance = None
+    if use_schema_constraints and examples:
+        schema_class = provider_class.get_schema_class()
+        if schema_class is not None:
+            schema_instance = schema_class.from_examples(examples)
 
-  if schema_instance:
-    kwargs = schema_instance.to_provider_config()
-    kwargs.update(config.provider_kwargs)
-  else:
-    kwargs = dict(config.provider_kwargs)
+    if schema_instance:
+        kwargs = schema_instance.to_provider_config()
+        kwargs.update(config.provider_kwargs)
+    else:
+        kwargs = dict(config.provider_kwargs)
 
-  if schema_instance:
-    schema_instance.sync_with_provider_kwargs(kwargs)
+    if schema_instance:
+        schema_instance.sync_with_provider_kwargs(kwargs)
 
-  # Add environment defaults
-  model_id = config.model_id
-  kwargs = _kwargs_with_environment_defaults(
-      model_id or config.provider or "", kwargs
-  )
+    # Add environment defaults
+    model_id = config.model_id
+    kwargs = _kwargs_with_environment_defaults(
+        model_id or config.provider or "", kwargs
+    )
 
-  if model_id:
-    kwargs["model_id"] = model_id
+    if model_id:
+        kwargs["model_id"] = model_id
 
-  try:
-    model = provider_class(**kwargs)
-  except (ValueError, TypeError) as e:
-    raise exceptions.InferenceConfigError(
-        f"Failed to create provider {provider_class.__name__}: {e}"
-    ) from e
+    try:
+        model = provider_class(**kwargs)
+    except (ValueError, TypeError) as e:
+        raise exceptions.InferenceConfigError(
+            f"Failed to create provider {provider_class.__name__}: {e}"
+        ) from e
 
-  model.apply_schema(schema_instance)
-  model.set_fence_output(fence_output)
+    model.apply_schema(schema_instance)
+    model.set_fence_output(fence_output)
 
-  return model
+    return model

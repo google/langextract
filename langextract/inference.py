@@ -24,9 +24,9 @@ from langextract._compat import inference
 
 
 def __getattr__(name: str):
-  """Forward to _compat.inference for backward compatibility."""
-  # Handle InferenceType specially since it's defined in _compat
-  if name == "InferenceType":
-    return inference.InferenceType
+    """Forward to _compat.inference for backward compatibility."""
+    # Handle InferenceType specially since it's defined in _compat
+    if name == "InferenceType":
+        return inference.InferenceType
 
-  return inference.__getattr__(name)
+    return inference.__getattr__(name)

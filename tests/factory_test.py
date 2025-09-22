@@ -32,394 +32,392 @@ from langextract.providers import router
 
 
 class FakeGeminiProvider(base_model.BaseLanguageModel):
-  """Fake Gemini provider for testing."""
+    """Fake Gemini provider for testing."""
 
-  def __init__(self, model_id, api_key=None, **kwargs):
-    self.model_id = model_id
-    self.api_key = api_key
-    self.kwargs = kwargs
-    super().__init__()
+    def __init__(self, model_id, api_key=None, **kwargs):
+        self.model_id = model_id
+        self.api_key = api_key
+        self.kwargs = kwargs
+        super().__init__()
 
-  def infer(self, batch_prompts, **kwargs):
-    return [[types.ScoredOutput(score=1.0, output="gemini")]]
+    def infer(self, batch_prompts, **kwargs):
+        return [[types.ScoredOutput(score=1.0, output="gemini")]]
 
-  def infer_batch(self, prompts, batch_size=32):
-    return self.infer(prompts)
+    def infer_batch(self, prompts, batch_size=32):
+        return self.infer(prompts)
 
 
 class FakeOpenAIProvider(base_model.BaseLanguageModel):
-  """Fake OpenAI provider for testing."""
+    """Fake OpenAI provider for testing."""
 
-  def __init__(self, model_id, api_key=None, **kwargs):
-    if not api_key:
-      raise ValueError("API key required")
-    self.model_id = model_id
-    self.api_key = api_key
-    self.kwargs = kwargs
-    super().__init__()
+    def __init__(self, model_id, api_key=None, **kwargs):
+        if not api_key:
+            raise ValueError("API key required")
+        self.model_id = model_id
+        self.api_key = api_key
+        self.kwargs = kwargs
+        super().__init__()
 
-  def infer(self, batch_prompts, **kwargs):
-    return [[types.ScoredOutput(score=1.0, output="openai")]]
+    def infer(self, batch_prompts, **kwargs):
+        return [[types.ScoredOutput(score=1.0, output="openai")]]
 
-  def infer_batch(self, prompts, batch_size=32):
-    return self.infer(prompts)
+    def infer_batch(self, prompts, batch_size=32):
+        return self.infer(prompts)
 
 
 class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
+    def setUp(self):
+        super().setUp()
+        router.clear()
+        import langextract.providers as providers_module  # pylint: disable=import-outside-toplevel
 
-  def setUp(self):
-    super().setUp()
-    router.clear()
-    import langextract.providers as providers_module  # pylint: disable=import-outside-toplevel
+        providers_module._PLUGINS_LOADED = True
+        # Use direct registration for test providers to avoid module path issues
+        router.register(r"^gemini", priority=100)(FakeGeminiProvider)
+        router.register(r"^gpt", r"^o1", priority=100)(FakeOpenAIProvider)
 
-    providers_module._PLUGINS_LOADED = True
-    # Use direct registration for test providers to avoid module path issues
-    router.register(r"^gemini", priority=100)(FakeGeminiProvider)
-    router.register(r"^gpt", r"^o1", priority=100)(FakeOpenAIProvider)
+    def tearDown(self):
+        super().tearDown()
+        router.clear()
+        import langextract.providers as providers_module  # pylint: disable=import-outside-toplevel
 
-  def tearDown(self):
-    super().tearDown()
-    router.clear()
-    import langextract.providers as providers_module  # pylint: disable=import-outside-toplevel
+        providers_module._PLUGINS_LOADED = False
 
-    providers_module._PLUGINS_LOADED = False
+    def test_create_model_basic(self):
+        """Test basic model creation."""
+        config = factory.ModelConfig(
+            model_id="gemini-pro", provider_kwargs={"api_key": "test-key"}
+        )
 
-  def test_create_model_basic(self):
-    """Test basic model creation."""
-    config = factory.ModelConfig(
-        model_id="gemini-pro", provider_kwargs={"api_key": "test-key"}
+        model = factory.create_model(config)
+        self.assertIsInstance(model, FakeGeminiProvider)
+        self.assertEqual(model.model_id, "gemini-pro")
+        self.assertEqual(model.api_key, "test-key")
+
+    def test_create_model_from_id(self):
+        """Test convenience function for creating model from ID."""
+        model = factory.create_model_from_id("gemini-flash", api_key="test-key")
+
+        self.assertIsInstance(model, FakeGeminiProvider)
+        self.assertEqual(model.model_id, "gemini-flash")
+        self.assertEqual(model.api_key, "test-key")
+
+    @mock.patch.dict(os.environ, {"GEMINI_API_KEY": "env-gemini-key"})
+    def test_uses_gemini_api_key_from_environment(self):
+        """Factory should use GEMINI_API_KEY from environment for Gemini models."""
+        config = factory.ModelConfig(model_id="gemini-pro")
+
+        model = factory.create_model(config)
+        self.assertEqual(model.api_key, "env-gemini-key")
+
+    @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "env-openai-key"})
+    def test_uses_openai_api_key_from_environment(self):
+        """Factory should use OPENAI_API_KEY from environment for OpenAI models."""
+        config = factory.ModelConfig(model_id="gpt-4")
+
+        model = factory.create_model(config)
+        self.assertEqual(model.api_key, "env-openai-key")
+
+    @mock.patch.dict(
+        os.environ, {"LANGEXTRACT_API_KEY": "env-langextract-key"}, clear=True
     )
+    def test_falls_back_to_langextract_api_key_when_provider_key_missing(self):
+        """Factory uses LANGEXTRACT_API_KEY when provider-specific key is missing."""
+        config = factory.ModelConfig(model_id="gemini-pro")
 
-    model = factory.create_model(config)
-    self.assertIsInstance(model, FakeGeminiProvider)
-    self.assertEqual(model.model_id, "gemini-pro")
-    self.assertEqual(model.api_key, "test-key")
+        model = factory.create_model(config)
+        self.assertEqual(model.api_key, "env-langextract-key")
 
-  def test_create_model_from_id(self):
-    """Test convenience function for creating model from ID."""
-    model = factory.create_model_from_id("gemini-flash", api_key="test-key")
-
-    self.assertIsInstance(model, FakeGeminiProvider)
-    self.assertEqual(model.model_id, "gemini-flash")
-    self.assertEqual(model.api_key, "test-key")
-
-  @mock.patch.dict(os.environ, {"GEMINI_API_KEY": "env-gemini-key"})
-  def test_uses_gemini_api_key_from_environment(self):
-    """Factory should use GEMINI_API_KEY from environment for Gemini models."""
-    config = factory.ModelConfig(model_id="gemini-pro")
-
-    model = factory.create_model(config)
-    self.assertEqual(model.api_key, "env-gemini-key")
-
-  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "env-openai-key"})
-  def test_uses_openai_api_key_from_environment(self):
-    """Factory should use OPENAI_API_KEY from environment for OpenAI models."""
-    config = factory.ModelConfig(model_id="gpt-4")
-
-    model = factory.create_model(config)
-    self.assertEqual(model.api_key, "env-openai-key")
-
-  @mock.patch.dict(
-      os.environ, {"LANGEXTRACT_API_KEY": "env-langextract-key"}, clear=True
-  )
-  def test_falls_back_to_langextract_api_key_when_provider_key_missing(self):
-    """Factory uses LANGEXTRACT_API_KEY when provider-specific key is missing."""
-    config = factory.ModelConfig(model_id="gemini-pro")
-
-    model = factory.create_model(config)
-    self.assertEqual(model.api_key, "env-langextract-key")
-
-  @mock.patch.dict(
-      os.environ,
-      {
-          "GEMINI_API_KEY": "gemini-key",
-          "LANGEXTRACT_API_KEY": "langextract-key",
-      },
-  )
-  def test_provider_specific_key_takes_priority_over_langextract_key(self):
-    """Factory prefers provider-specific API key over LANGEXTRACT_API_KEY."""
-    config = factory.ModelConfig(model_id="gemini-pro")
-
-    model = factory.create_model(config)
-    self.assertEqual(model.api_key, "gemini-key")
-
-  def test_explicit_kwargs_override_env(self):
-    """Test that explicit kwargs override environment variables."""
-    with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}):
-      config = factory.ModelConfig(
-          model_id="gemini-pro", provider_kwargs={"api_key": "explicit-key"}
-      )
-
-      model = factory.create_model(config)
-      self.assertEqual(model.api_key, "explicit-key")
-
-  @mock.patch.dict(os.environ, {}, clear=True)
-  def test_wraps_provider_initialization_error_in_inference_config_error(self):
-    """Factory should wrap provider errors in InferenceConfigError."""
-    config = factory.ModelConfig(model_id="gpt-4")
-
-    with self.assertRaises(exceptions.InferenceConfigError) as cm:
-      factory.create_model(config)
-
-    self.assertIn("Failed to create provider", str(cm.exception))
-    self.assertIn("API key required", str(cm.exception))
-
-  def test_raises_error_when_no_provider_matches_model_id(self):
-    """Factory should raise InferenceConfigError for unregistered model IDs."""
-    config = factory.ModelConfig(model_id="unknown-model")
-
-    with self.assertRaises(exceptions.InferenceConfigError) as cm:
-      factory.create_model(config)
-
-    self.assertIn("No provider registered", str(cm.exception))
-
-  def test_additional_kwargs_passed_through(self):
-    """Test that additional kwargs are passed to provider."""
-    config = factory.ModelConfig(
-        model_id="gemini-pro",
-        provider_kwargs={
-            "api_key": "test-key",
-            "temperature": 0.5,
-            "max_tokens": 100,
-            "custom_param": "value",
+    @mock.patch.dict(
+        os.environ,
+        {
+            "GEMINI_API_KEY": "gemini-key",
+            "LANGEXTRACT_API_KEY": "langextract-key",
         },
     )
+    def test_provider_specific_key_takes_priority_over_langextract_key(self):
+        """Factory prefers provider-specific API key over LANGEXTRACT_API_KEY."""
+        config = factory.ModelConfig(model_id="gemini-pro")
 
-    model = factory.create_model(config)
-    self.assertEqual(model.kwargs["temperature"], 0.5)
-    self.assertEqual(model.kwargs["max_tokens"], 100)
-    self.assertEqual(model.kwargs["custom_param"], "value")
+        model = factory.create_model(config)
+        self.assertEqual(model.api_key, "gemini-key")
 
-  @mock.patch.dict(os.environ, {"OLLAMA_BASE_URL": "http://custom:11434"})
-  def test_ollama_uses_base_url_from_environment(self):
-    """Factory should use OLLAMA_BASE_URL from environment for Ollama models."""
+    def test_explicit_kwargs_override_env(self):
+        """Test that explicit kwargs override environment variables."""
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}):
+            config = factory.ModelConfig(
+                model_id="gemini-pro", provider_kwargs={"api_key": "explicit-key"}
+            )
 
-    @router.register(r"^ollama")
-    class FakeOllamaProvider(base_model.BaseLanguageModel):  # pylint: disable=unused-variable
+            model = factory.create_model(config)
+            self.assertEqual(model.api_key, "explicit-key")
 
-      def __init__(self, model_id, base_url=None, **kwargs):
-        self.model_id = model_id
-        self.base_url = base_url
-        super().__init__()
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_wraps_provider_initialization_error_in_inference_config_error(self):
+        """Factory should wrap provider errors in InferenceConfigError."""
+        config = factory.ModelConfig(model_id="gpt-4")
 
-      def infer(self, batch_prompts, **kwargs):
-        return [[types.ScoredOutput(score=1.0, output="ollama")]]
+        with self.assertRaises(exceptions.InferenceConfigError) as cm:
+            factory.create_model(config)
 
-      def infer_batch(self, prompts, batch_size=32):
-        return self.infer(prompts)
+        self.assertIn("Failed to create provider", str(cm.exception))
+        self.assertIn("API key required", str(cm.exception))
 
-    config = factory.ModelConfig(model_id="ollama/llama2")
-    model = factory.create_model(config)
+    def test_raises_error_when_no_provider_matches_model_id(self):
+        """Factory should raise InferenceConfigError for unregistered model IDs."""
+        config = factory.ModelConfig(model_id="unknown-model")
 
-    self.assertEqual(model.base_url, "http://custom:11434")
+        with self.assertRaises(exceptions.InferenceConfigError) as cm:
+            factory.create_model(config)
 
-  def test_ollama_models_select_without_api_keys(self):
-    """Test that Ollama models resolve without API keys or explicit type."""
+        self.assertIn("No provider registered", str(cm.exception))
 
-    @router.register(r"^llama", r"^gemma", r"^mistral", r"^qwen", priority=100)
-    class FakeOllamaProvider(base_model.BaseLanguageModel):
+    def test_additional_kwargs_passed_through(self):
+        """Test that additional kwargs are passed to provider."""
+        config = factory.ModelConfig(
+            model_id="gemini-pro",
+            provider_kwargs={
+                "api_key": "test-key",
+                "temperature": 0.5,
+                "max_tokens": 100,
+                "custom_param": "value",
+            },
+        )
 
-      def __init__(self, model_id, **kwargs):
-        self.model_id = model_id
-        super().__init__()
+        model = factory.create_model(config)
+        self.assertEqual(model.kwargs["temperature"], 0.5)
+        self.assertEqual(model.kwargs["max_tokens"], 100)
+        self.assertEqual(model.kwargs["custom_param"], "value")
 
-      def infer(self, batch_prompts, **kwargs):
-        return [[types.ScoredOutput(score=1.0, output="test")]]
+    @mock.patch.dict(os.environ, {"OLLAMA_BASE_URL": "http://custom:11434"})
+    def test_ollama_uses_base_url_from_environment(self):
+        """Factory should use OLLAMA_BASE_URL from environment for Ollama models."""
 
-      def infer_batch(self, prompts, batch_size=32):
-        return self.infer(prompts)
+        @router.register(r"^ollama")
+        class FakeOllamaProvider(
+            base_model.BaseLanguageModel
+        ):  # pylint: disable=unused-variable
+            def __init__(self, model_id, base_url=None, **kwargs):
+                self.model_id = model_id
+                self.base_url = base_url
+                super().__init__()
 
-    test_models = ["llama3", "gemma2:2b", "mistral:7b", "qwen3:0.6b"]
+            def infer(self, batch_prompts, **kwargs):
+                return [[types.ScoredOutput(score=1.0, output="ollama")]]
 
-    for model_id in test_models:
-      with self.subTest(model_id=model_id):
-        with mock.patch.dict(os.environ, {}, clear=True):
-          config = factory.ModelConfig(model_id=model_id)
-          model = factory.create_model(config)
-          self.assertIsInstance(model, FakeOllamaProvider)
-          self.assertEqual(model.model_id, model_id)
+            def infer_batch(self, prompts, batch_size=32):
+                return self.infer(prompts)
 
-  def test_model_config_fields_are_immutable(self):
-    """ModelConfig fields should not be modifiable after creation."""
-    config = factory.ModelConfig(
-        model_id="gemini-pro", provider_kwargs={"api_key": "test"}
-    )
+        config = factory.ModelConfig(model_id="ollama/llama2")
+        model = factory.create_model(config)
 
-    with self.assertRaises(AttributeError):
-      config.model_id = "different"
+        self.assertEqual(model.base_url, "http://custom:11434")
 
-  def test_model_config_allows_dict_contents_modification(self):
-    """ModelConfig allows modification of dict contents (not deeply frozen)."""
-    config = factory.ModelConfig(
-        model_id="gemini-pro", provider_kwargs={"api_key": "test"}
-    )
+    def test_ollama_models_select_without_api_keys(self):
+        """Test that Ollama models resolve without API keys or explicit type."""
 
-    config.provider_kwargs["new_key"] = "value"
+        @router.register(r"^llama", r"^gemma", r"^mistral", r"^qwen", priority=100)
+        class FakeOllamaProvider(base_model.BaseLanguageModel):
+            def __init__(self, model_id, **kwargs):
+                self.model_id = model_id
+                super().__init__()
 
-    self.assertEqual(config.provider_kwargs["new_key"], "value")
+            def infer(self, batch_prompts, **kwargs):
+                return [[types.ScoredOutput(score=1.0, output="test")]]
 
-  def test_uses_highest_priority_provider_when_multiple_match(self):
-    """Factory uses highest priority provider when multiple patterns match."""
+            def infer_batch(self, prompts, batch_size=32):
+                return self.infer(prompts)
 
-    @router.register(r"^gemini", priority=90)
-    class AnotherGeminiProvider(base_model.BaseLanguageModel):  # pylint: disable=unused-variable
+        test_models = ["llama3", "gemma2:2b", "mistral:7b", "qwen3:0.6b"]
 
-      def __init__(self, model_id=None, **kwargs):
-        self.model_id = model_id or "default-model"
-        self.kwargs = kwargs
-        super().__init__()
+        for model_id in test_models:
+            with self.subTest(model_id=model_id):
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    config = factory.ModelConfig(model_id=model_id)
+                    model = factory.create_model(config)
+                    self.assertIsInstance(model, FakeOllamaProvider)
+                    self.assertEqual(model.model_id, model_id)
 
-      def infer(self, batch_prompts, **kwargs):
-        return [[types.ScoredOutput(score=1.0, output="another")]]
+    def test_model_config_fields_are_immutable(self):
+        """ModelConfig fields should not be modifiable after creation."""
+        config = factory.ModelConfig(
+            model_id="gemini-pro", provider_kwargs={"api_key": "test"}
+        )
 
-      def infer_batch(self, prompts, batch_size=32):
-        return self.infer(prompts)
+        with self.assertRaises(AttributeError):
+            config.model_id = "different"
 
-    config = factory.ModelConfig(model_id="gemini-pro")
-    model = factory.create_model(config)
+    def test_model_config_allows_dict_contents_modification(self):
+        """ModelConfig allows modification of dict contents (not deeply frozen)."""
+        config = factory.ModelConfig(
+            model_id="gemini-pro", provider_kwargs={"api_key": "test"}
+        )
 
-    self.assertIsInstance(model, FakeGeminiProvider)  # Priority 100 wins
+        config.provider_kwargs["new_key"] = "value"
 
-  def test_explicit_provider_overrides_pattern_matching(self):
-    """Factory should use explicit provider even when pattern doesn't match."""
+        self.assertEqual(config.provider_kwargs["new_key"], "value")
 
-    @router.register(r"^another", priority=90)
-    class AnotherProvider(base_model.BaseLanguageModel):
+    def test_uses_highest_priority_provider_when_multiple_match(self):
+        """Factory uses highest priority provider when multiple patterns match."""
 
-      def __init__(self, model_id=None, **kwargs):
-        self.model_id = model_id or "default-model"
-        self.kwargs = kwargs
-        super().__init__()
+        @router.register(r"^gemini", priority=90)
+        class AnotherGeminiProvider(
+            base_model.BaseLanguageModel
+        ):  # pylint: disable=unused-variable
+            def __init__(self, model_id=None, **kwargs):
+                self.model_id = model_id or "default-model"
+                self.kwargs = kwargs
+                super().__init__()
 
-      def infer(self, batch_prompts, **kwargs):
-        return [[types.ScoredOutput(score=1.0, output="another")]]
+            def infer(self, batch_prompts, **kwargs):
+                return [[types.ScoredOutput(score=1.0, output="another")]]
 
-      def infer_batch(self, prompts, batch_size=32):
-        return self.infer(prompts)
+            def infer_batch(self, prompts, batch_size=32):
+                return self.infer(prompts)
 
-    config = factory.ModelConfig(
-        model_id="gemini-pro", provider="AnotherProvider"
-    )
-    model = factory.create_model(config)
+        config = factory.ModelConfig(model_id="gemini-pro")
+        model = factory.create_model(config)
 
-    self.assertIsInstance(model, AnotherProvider)
-    self.assertEqual(model.model_id, "gemini-pro")
+        self.assertIsInstance(model, FakeGeminiProvider)  # Priority 100 wins
 
-  def test_provider_without_model_id_uses_provider_default(self):
-    """Factory should use provider's default model_id when none specified."""
+    def test_explicit_provider_overrides_pattern_matching(self):
+        """Factory should use explicit provider even when pattern doesn't match."""
 
-    @router.register(r"^default-provider$", priority=50)
-    class DefaultProvider(base_model.BaseLanguageModel):
+        @router.register(r"^another", priority=90)
+        class AnotherProvider(base_model.BaseLanguageModel):
+            def __init__(self, model_id=None, **kwargs):
+                self.model_id = model_id or "default-model"
+                self.kwargs = kwargs
+                super().__init__()
 
-      def __init__(self, model_id="default-model", **kwargs):
-        self.model_id = model_id
-        self.kwargs = kwargs
-        super().__init__()
+            def infer(self, batch_prompts, **kwargs):
+                return [[types.ScoredOutput(score=1.0, output="another")]]
 
-      def infer(self, batch_prompts, **kwargs):
-        return [[types.ScoredOutput(score=1.0, output="default")]]
+            def infer_batch(self, prompts, batch_size=32):
+                return self.infer(prompts)
 
-      def infer_batch(self, prompts, batch_size=32):
-        return self.infer(prompts)
+        config = factory.ModelConfig(model_id="gemini-pro", provider="AnotherProvider")
+        model = factory.create_model(config)
 
-    config = factory.ModelConfig(provider="DefaultProvider")
-    model = factory.create_model(config)
+        self.assertIsInstance(model, AnotherProvider)
+        self.assertEqual(model.model_id, "gemini-pro")
 
-    self.assertIsInstance(model, DefaultProvider)
-    self.assertEqual(model.model_id, "default-model")
+    def test_provider_without_model_id_uses_provider_default(self):
+        """Factory should use provider's default model_id when none specified."""
 
-  def test_raises_error_when_neither_model_id_nor_provider_specified(self):
-    """Factory raises ValueError when config has neither model_id nor provider."""
-    config = factory.ModelConfig()
+        @router.register(r"^default-provider$", priority=50)
+        class DefaultProvider(base_model.BaseLanguageModel):
+            def __init__(self, model_id="default-model", **kwargs):
+                self.model_id = model_id
+                self.kwargs = kwargs
+                super().__init__()
 
-    with self.assertRaises(ValueError) as cm:
-      factory.create_model(config)
+            def infer(self, batch_prompts, **kwargs):
+                return [[types.ScoredOutput(score=1.0, output="default")]]
 
-    self.assertIn(
-        "Either model_id or provider must be specified", str(cm.exception)
-    )
+            def infer_batch(self, prompts, batch_size=32):
+                return self.infer(prompts)
 
-  def test_gemini_vertexai_parameters_accepted(self):
-    """Test that Vertex AI parameters are properly passed to Gemini provider."""
-    original_entries = router._ENTRIES.copy()  # pylint: disable=protected-access
-    original_keys = router._ENTRY_KEYS.copy()  # pylint: disable=protected-access
+        config = factory.ModelConfig(provider="DefaultProvider")
+        model = factory.create_model(config)
 
-    try:
+        self.assertIsInstance(model, DefaultProvider)
+        self.assertEqual(model.model_id, "default-model")
 
-      @router.register(r"^gemini", priority=200)
-      class MockGeminiWithVertexAI(base_model.BaseLanguageModel):  # pylint: disable=unused-variable
+    def test_raises_error_when_neither_model_id_nor_provider_specified(self):
+        """Factory raises ValueError when config has neither model_id nor provider."""
+        config = factory.ModelConfig()
 
-        def __init__(
-            self,
-            model_id="gemini-2.5-flash",
-            api_key=None,
-            vertexai=False,
-            credentials=None,
-            project=None,
-            location=None,
-            **kwargs,
-        ):
-          self.model_id = model_id
-          self.api_key = api_key
-          self.vertexai = vertexai
-          self.credentials = credentials
-          self.project = project
-          self.location = location
-          super().__init__()
+        with self.assertRaises(ValueError) as cm:
+            factory.create_model(config)
 
-        def infer(self, batch_prompts, **kwargs):
-          return [[types.ScoredOutput(score=1.0, output="vertexai-test")]]
+        self.assertIn(
+            "Either model_id or provider must be specified", str(cm.exception)
+        )
 
-      config = factory.ModelConfig(
-          model_id="gemini-pro",
-          provider_kwargs={
-              "vertexai": True,
-              "project": "test-project",
-              "location": "us-central1",
-          },
-      )
-      model = factory.create_model(config)
+    def test_gemini_vertexai_parameters_accepted(self):
+        """Test that Vertex AI parameters are properly passed to Gemini provider."""
+        original_entries = router._ENTRIES.copy()  # pylint: disable=protected-access
+        original_keys = router._ENTRY_KEYS.copy()  # pylint: disable=protected-access
 
-      self.assertTrue(model.vertexai)
-      self.assertEqual(model.project, "test-project")
-      self.assertEqual(model.location, "us-central1")
-      self.assertIsNone(model.api_key)
-    finally:
-      router._ENTRIES = original_entries  # pylint: disable=protected-access
-      router._ENTRY_KEYS = original_keys  # pylint: disable=protected-access
+        try:
 
-  def test_gemini_vertexai_with_credentials(self):
-    """Test that Vertex AI credentials can be passed through."""
-    original_entries = router._ENTRIES.copy()  # pylint: disable=protected-access
-    original_keys = router._ENTRY_KEYS.copy()  # pylint: disable=protected-access
+            @router.register(r"^gemini", priority=200)
+            class MockGeminiWithVertexAI(
+                base_model.BaseLanguageModel
+            ):  # pylint: disable=unused-variable
+                def __init__(
+                    self,
+                    model_id="gemini-2.5-flash",
+                    api_key=None,
+                    vertexai=False,
+                    credentials=None,
+                    project=None,
+                    location=None,
+                    **kwargs,
+                ):
+                    self.model_id = model_id
+                    self.api_key = api_key
+                    self.vertexai = vertexai
+                    self.credentials = credentials
+                    self.project = project
+                    self.location = location
+                    super().__init__()
 
-    try:
+                def infer(self, batch_prompts, **kwargs):
+                    return [[types.ScoredOutput(score=1.0, output="vertexai-test")]]
 
-      @router.register(r"^gemini", priority=200)
-      class MockGeminiWithCredentials(base_model.BaseLanguageModel):  # pylint: disable=unused-variable
+            config = factory.ModelConfig(
+                model_id="gemini-pro",
+                provider_kwargs={
+                    "vertexai": True,
+                    "project": "test-project",
+                    "location": "us-central1",
+                },
+            )
+            model = factory.create_model(config)
 
-        def __init__(
-            self, model_id="gemini-2.5-flash", credentials=None, **kwargs
-        ):
-          self.model_id = model_id
-          self.credentials = credentials
-          super().__init__()
+            self.assertTrue(model.vertexai)
+            self.assertEqual(model.project, "test-project")
+            self.assertEqual(model.location, "us-central1")
+            self.assertIsNone(model.api_key)
+        finally:
+            router._ENTRIES = original_entries  # pylint: disable=protected-access
+            router._ENTRY_KEYS = original_keys  # pylint: disable=protected-access
 
-        def infer(self, batch_prompts, **kwargs):
-          return [[types.ScoredOutput(score=1.0, output="creds-test")]]
+    def test_gemini_vertexai_with_credentials(self):
+        """Test that Vertex AI credentials can be passed through."""
+        original_entries = router._ENTRIES.copy()  # pylint: disable=protected-access
+        original_keys = router._ENTRY_KEYS.copy()  # pylint: disable=protected-access
 
-      mock_credentials = {"type": "service_account"}  # Simplified mock
-      config = factory.ModelConfig(
-          model_id="gemini-2.5-flash",
-          provider_kwargs={"credentials": mock_credentials},
-      )
-      model = factory.create_model(config)
+        try:
 
-      self.assertEqual(model.credentials, mock_credentials)
-    finally:
-      router._ENTRIES = original_entries  # pylint: disable=protected-access
-      router._ENTRY_KEYS = original_keys  # pylint: disable=protected-access
+            @router.register(r"^gemini", priority=200)
+            class MockGeminiWithCredentials(
+                base_model.BaseLanguageModel
+            ):  # pylint: disable=unused-variable
+                def __init__(
+                    self, model_id="gemini-2.5-flash", credentials=None, **kwargs
+                ):
+                    self.model_id = model_id
+                    self.credentials = credentials
+                    super().__init__()
+
+                def infer(self, batch_prompts, **kwargs):
+                    return [[types.ScoredOutput(score=1.0, output="creds-test")]]
+
+            mock_credentials = {"type": "service_account"}  # Simplified mock
+            config = factory.ModelConfig(
+                model_id="gemini-2.5-flash",
+                provider_kwargs={"credentials": mock_credentials},
+            )
+            model = factory.create_model(config)
+
+            self.assertEqual(model.credentials, mock_credentials)
+        finally:
+            router._ENTRIES = original_entries  # pylint: disable=protected-access
+            router._ENTRY_KEYS = original_keys  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":
-  absltest.main()
+    absltest.main()

@@ -26,11 +26,11 @@ from langextract import plugins
 
 
 def __getattr__(name: str):
-  """Redirect to plugins module with deprecation warning."""
-  warnings.warn(
-      "`langextract.registry` is deprecated and will be removed in v2.0.0; "
-      "use `langextract.plugins` instead.",
-      FutureWarning,
-      stacklevel=2,
-  )
-  return getattr(plugins, name)
+    """Redirect to plugins module with deprecation warning."""
+    warnings.warn(
+        "`langextract.registry` is deprecated and will be removed in v2.0.0; "
+        "use `langextract.plugins` instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+    return getattr(plugins, name)

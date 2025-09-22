@@ -27,28 +27,28 @@ from langextract._compat import schema
 
 
 def __getattr__(name: str):
-  """Handle imports with appropriate warnings."""
-  core_items = {
-      "BaseSchema": ("langextract.core.schema", "BaseSchema"),
-      "Constraint": ("langextract.core.schema", "Constraint"),
-      "ConstraintType": ("langextract.core.schema", "ConstraintType"),
-      "EXTRACTIONS_KEY": ("langextract.core.data", "EXTRACTIONS_KEY"),
-      "ATTRIBUTE_SUFFIX": ("langextract.core.data", "ATTRIBUTE_SUFFIX"),
-      "FormatModeSchema": ("langextract.core.schema", "FormatModeSchema"),
-  }
+    """Handle imports with appropriate warnings."""
+    core_items = {
+        "BaseSchema": ("langextract.core.schema", "BaseSchema"),
+        "Constraint": ("langextract.core.schema", "Constraint"),
+        "ConstraintType": ("langextract.core.schema", "ConstraintType"),
+        "EXTRACTIONS_KEY": ("langextract.core.data", "EXTRACTIONS_KEY"),
+        "ATTRIBUTE_SUFFIX": ("langextract.core.data", "ATTRIBUTE_SUFFIX"),
+        "FormatModeSchema": ("langextract.core.schema", "FormatModeSchema"),
+    }
 
-  if name in core_items:
-    mod, attr = core_items[name]
-    warnings.warn(
-        f"`langextract.schema.{name}` has moved to `{mod}.{attr}`. Please"
-        " update your imports. This compatibility layer will be removed in"
-        " v2.0.0.",
-        FutureWarning,
-        stacklevel=2,
-    )
-    module = __import__(mod, fromlist=[attr])
-    return getattr(module, attr)
-  elif name == "GeminiSchema":
-    return schema.__getattr__(name)
+    if name in core_items:
+        mod, attr = core_items[name]
+        warnings.warn(
+            f"`langextract.schema.{name}` has moved to `{mod}.{attr}`. Please"
+            " update your imports. This compatibility layer will be removed in"
+            " v2.0.0.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        module = __import__(mod, fromlist=[attr])
+        return getattr(module, attr)
+    elif name == "GeminiSchema":
+        return schema.__getattr__(name)
 
-  raise AttributeError(f"module 'langextract.schema' has no attribute '{name}'")
+    raise AttributeError(f"module 'langextract.schema' has no attribute '{name}'")

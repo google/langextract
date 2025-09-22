@@ -21,21 +21,21 @@ import warnings
 
 
 def __getattr__(name: str):
-  moved = {
-      "BaseSchema": ("langextract.core.schema", "BaseSchema"),
-      "Constraint": ("langextract.core.schema", "Constraint"),
-      "ConstraintType": ("langextract.core.schema", "ConstraintType"),
-      "EXTRACTIONS_KEY": ("langextract.core.schema", "EXTRACTIONS_KEY"),
-      "GeminiSchema": ("langextract.providers.schemas.gemini", "GeminiSchema"),
-  }
-  if name in moved:
-    mod, attr = moved[name]
-    warnings.warn(
-        f"`langextract.schema.{name}` is deprecated and will be removed in"
-        f" v2.0.0; use `{mod}.{attr}` instead.",
-        FutureWarning,
-        stacklevel=2,
-    )
-    module = __import__(mod, fromlist=[attr])
-    return getattr(module, attr)
-  raise AttributeError(name)
+    moved = {
+        "BaseSchema": ("langextract.core.schema", "BaseSchema"),
+        "Constraint": ("langextract.core.schema", "Constraint"),
+        "ConstraintType": ("langextract.core.schema", "ConstraintType"),
+        "EXTRACTIONS_KEY": ("langextract.core.schema", "EXTRACTIONS_KEY"),
+        "GeminiSchema": ("langextract.providers.schemas.gemini", "GeminiSchema"),
+    }
+    if name in moved:
+        mod, attr = moved[name]
+        warnings.warn(
+            f"`langextract.schema.{name}` is deprecated and will be removed in"
+            f" v2.0.0; use `{mod}.{attr}` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        module = __import__(mod, fromlist=[attr])
+        return getattr(module, attr)
+    raise AttributeError(name)

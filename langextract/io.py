@@ -36,226 +36,226 @@ DEFAULT_TIMEOUT_SECONDS = 30
 
 
 class InvalidDatasetError(exceptions.LangExtractError):
-  """Error raised when Dataset is empty or invalid."""
+    """Error raised when Dataset is empty or invalid."""
 
 
 @dataclasses.dataclass(frozen=True)
 class Dataset(abc.ABC):
-  """A dataset for inputs to LLM Labeler."""
+    """A dataset for inputs to LLM Labeler."""
 
-  input_path: pathlib.Path
-  id_key: str
-  text_key: str
+    input_path: pathlib.Path
+    id_key: str
+    text_key: str
 
-  def load(self, delimiter: str = ',') -> Iterator[data.Document]:
-    """Loads the dataset from a CSV file.
+    def load(self, delimiter: str = ",") -> Iterator[data.Document]:
+        """Loads the dataset from a CSV file.
 
-    Args:
-      delimiter: The delimiter to use when reading the CSV file.
+        Args:
+          delimiter: The delimiter to use when reading the CSV file.
 
-    Yields:
-      A Document for each row in the dataset.
+        Yields:
+          A Document for each row in the dataset.
 
-    Raises:
-      IOError: If the file does not exist.
-      InvalidDatasetError: If the dataset is empty or invalid.
-      NotImplementedError: If the file type is not supported.
-    """
-    if not os.path.exists(self.input_path):
-      raise IOError(f'File does not exist: {self.input_path}')
+        Raises:
+          IOError: If the file does not exist.
+          InvalidDatasetError: If the dataset is empty or invalid.
+          NotImplementedError: If the file type is not supported.
+        """
+        if not os.path.exists(self.input_path):
+            raise IOError(f"File does not exist: {self.input_path}")
 
-    if str(self.input_path).endswith('.csv'):
-      try:
-        csv_data = _read_csv(
-            self.input_path,
-            column_names=[self.text_key, self.id_key],
-            delimiter=delimiter,
-        )
-      except InvalidDatasetError as e:
-        raise InvalidDatasetError(f'Empty dataset: {self.input_path}') from e
-      for row in csv_data:
-        yield data.Document(
-            text=row[self.text_key],
-            document_id=row[self.id_key],
-        )
-    else:
-      raise NotImplementedError(f'Unsupported file type: {self.input_path}')
+        if str(self.input_path).endswith(".csv"):
+            try:
+                csv_data = _read_csv(
+                    self.input_path,
+                    column_names=[self.text_key, self.id_key],
+                    delimiter=delimiter,
+                )
+            except InvalidDatasetError as e:
+                raise InvalidDatasetError(f"Empty dataset: {self.input_path}") from e
+            for row in csv_data:
+                yield data.Document(
+                    text=row[self.text_key],
+                    document_id=row[self.id_key],
+                )
+        else:
+            raise NotImplementedError(f"Unsupported file type: {self.input_path}")
 
 
 def save_annotated_documents(
     annotated_documents: Iterator[data.AnnotatedDocument],
     output_dir: pathlib.Path | str | None = None,
-    output_name: str = 'data.jsonl',
+    output_name: str = "data.jsonl",
     show_progress: bool = True,
 ) -> None:
-  """Saves annotated documents to a JSON Lines file.
+    """Saves annotated documents to a JSON Lines file.
 
-  Args:
-    annotated_documents: Iterator over AnnotatedDocument objects to save.
-    output_dir: The directory to which the JSONL file should be written.
-      Can be a Path object or a string. Defaults to 'test_output/' if None.
-    output_name: File name for the JSONL file.
-    show_progress: Whether to show a progress bar during saving.
+    Args:
+      annotated_documents: Iterator over AnnotatedDocument objects to save.
+      output_dir: The directory to which the JSONL file should be written.
+        Can be a Path object or a string. Defaults to 'test_output/' if None.
+      output_name: File name for the JSONL file.
+      show_progress: Whether to show a progress bar during saving.
 
-  Raises:
-    IOError: If the output directory cannot be created.
-    InvalidDatasetError: If no documents are produced.
-  """
-  if output_dir is None:
-    output_dir = pathlib.Path('test_output')
-  else:
-    output_dir = pathlib.Path(output_dir)
+    Raises:
+      IOError: If the output directory cannot be created.
+      InvalidDatasetError: If no documents are produced.
+    """
+    if output_dir is None:
+        output_dir = pathlib.Path("test_output")
+    else:
+        output_dir = pathlib.Path(output_dir)
 
-  output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-  output_file = output_dir / output_name
-  has_data = False
-  doc_count = 0
+    output_file = output_dir / output_name
+    has_data = False
+    doc_count = 0
 
-  # Create progress bar
-  progress_bar = progress.create_save_progress_bar(
-      output_path=str(output_file), disable=not show_progress
-  )
+    # Create progress bar
+    progress_bar = progress.create_save_progress_bar(
+        output_path=str(output_file), disable=not show_progress
+    )
 
-  with open(output_file, 'w', encoding='utf-8') as f:
-    for adoc in annotated_documents:
-      if not adoc.document_id:
-        continue
+    with open(output_file, "w", encoding="utf-8") as f:
+        for adoc in annotated_documents:
+            if not adoc.document_id:
+                continue
 
-      doc_dict = data_lib.annotated_document_to_dict(adoc)
-      f.write(json.dumps(doc_dict, ensure_ascii=False) + '\n')
-      has_data = True
-      doc_count += 1
-      progress_bar.update(1)
+            doc_dict = data_lib.annotated_document_to_dict(adoc)
+            f.write(json.dumps(doc_dict, ensure_ascii=False) + "\n")
+            has_data = True
+            doc_count += 1
+            progress_bar.update(1)
 
-  progress_bar.close()
+    progress_bar.close()
 
-  if not has_data:
-    raise InvalidDatasetError(f'No documents to save in: {output_file}')
+    if not has_data:
+        raise InvalidDatasetError(f"No documents to save in: {output_file}")
 
-  if show_progress:
-    progress.print_save_complete(doc_count, str(output_file))
+    if show_progress:
+        progress.print_save_complete(doc_count, str(output_file))
 
 
 def load_annotated_documents_jsonl(
     jsonl_path: pathlib.Path,
     show_progress: bool = True,
 ) -> Iterator[data.AnnotatedDocument]:
-  """Loads annotated documents from a JSON Lines file.
+    """Loads annotated documents from a JSON Lines file.
 
-  Args:
-    jsonl_path: The file path to the JSON Lines file.
-    show_progress: Whether to show a progress bar during loading.
+    Args:
+      jsonl_path: The file path to the JSON Lines file.
+      show_progress: Whether to show a progress bar during loading.
 
-  Yields:
-    AnnotatedDocument objects.
+    Yields:
+      AnnotatedDocument objects.
 
-  Raises:
-    IOError: If the file does not exist or is invalid.
-  """
-  if not os.path.exists(jsonl_path):
-    raise IOError(f'File does not exist: {jsonl_path}')
+    Raises:
+      IOError: If the file does not exist or is invalid.
+    """
+    if not os.path.exists(jsonl_path):
+        raise IOError(f"File does not exist: {jsonl_path}")
 
-  # Get file size for progress bar
-  file_size = os.path.getsize(jsonl_path)
+    # Get file size for progress bar
+    file_size = os.path.getsize(jsonl_path)
 
-  # Create progress bar
-  progress_bar = progress.create_load_progress_bar(
-      file_path=str(jsonl_path),
-      total_size=file_size if show_progress else None,
-      disable=not show_progress,
-  )
+    # Create progress bar
+    progress_bar = progress.create_load_progress_bar(
+        file_path=str(jsonl_path),
+        total_size=file_size if show_progress else None,
+        disable=not show_progress,
+    )
 
-  doc_count = 0
-  bytes_read = 0
+    doc_count = 0
+    bytes_read = 0
 
-  with open(jsonl_path, 'r', encoding='utf-8') as f:
-    for line in f:
-      line_bytes = len(line.encode('utf-8'))
-      bytes_read += line_bytes
-      progress_bar.update(line_bytes)
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line_bytes = len(line.encode("utf-8"))
+            bytes_read += line_bytes
+            progress_bar.update(line_bytes)
 
-      line = line.strip()
-      if not line:
-        continue
-      doc_dict = json.loads(line)
-      doc_count += 1
-      yield data_lib.dict_to_annotated_document(doc_dict)
+            line = line.strip()
+            if not line:
+                continue
+            doc_dict = json.loads(line)
+            doc_count += 1
+            yield data_lib.dict_to_annotated_document(doc_dict)
 
-  progress_bar.close()
+    progress_bar.close()
 
-  if show_progress:
-    progress.print_load_complete(doc_count, str(jsonl_path))
+    if show_progress:
+        progress.print_load_complete(doc_count, str(jsonl_path))
 
 
 def _read_csv(
-    filepath: pathlib.Path, column_names: list[str], delimiter: str = ','
+    filepath: pathlib.Path, column_names: list[str], delimiter: str = ","
 ) -> Iterator[dict[str, Any]]:
-  """Reads a CSV file and yields rows as dicts.
+    """Reads a CSV file and yields rows as dicts.
 
-  Args:
-    filepath: The path to the file.
-    column_names: The names of the columns to read.
-    delimiter: The delimiter to use when reading the CSV file.
+    Args:
+      filepath: The path to the file.
+      column_names: The names of the columns to read.
+      delimiter: The delimiter to use when reading the CSV file.
 
-  Yields:
-    An iterator of dicts representing each row.
+    Yields:
+      An iterator of dicts representing each row.
 
-  Raises:
-    IOError: If the file does not exist.
-    InvalidDatasetError: If the dataset is empty or invalid.
-  """
-  if not os.path.exists(filepath):
-    raise IOError(f'File does not exist: {filepath}')
+    Raises:
+      IOError: If the file does not exist.
+      InvalidDatasetError: If the dataset is empty or invalid.
+    """
+    if not os.path.exists(filepath):
+        raise IOError(f"File does not exist: {filepath}")
 
-  try:
-    with open(filepath, 'r', encoding='utf-8') as f:
-      df = pd.read_csv(f, usecols=column_names, dtype=str, delimiter=delimiter)
-      for _, row in df.iterrows():
-        yield row.to_dict()
-  except pd.errors.EmptyDataError as e:
-    raise InvalidDatasetError(f'Empty dataset: {filepath}') from e
-  except ValueError as e:
-    raise InvalidDatasetError(f'Invalid dataset file: {filepath}') from e
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            df = pd.read_csv(f, usecols=column_names, dtype=str, delimiter=delimiter)
+            for _, row in df.iterrows():
+                yield row.to_dict()
+    except pd.errors.EmptyDataError as e:
+        raise InvalidDatasetError(f"Empty dataset: {filepath}") from e
+    except ValueError as e:
+        raise InvalidDatasetError(f"Invalid dataset file: {filepath}") from e
 
 
 def is_url(text: str) -> bool:
-  """Check if the given text is a valid URL.
+    """Check if the given text is a valid URL.
 
-  Uses urllib.parse to validate that the text is a properly formed URL
-  with http or https scheme and a valid network location.
+    Uses urllib.parse to validate that the text is a properly formed URL
+    with http or https scheme and a valid network location.
 
-  Args:
-    text: The string to check.
+    Args:
+      text: The string to check.
 
-  Returns:
-    True if the text is a valid URL with http(s) scheme, False otherwise.
-  """
-  if not text or not isinstance(text, str):
-    return False
+    Returns:
+      True if the text is a valid URL with http(s) scheme, False otherwise.
+    """
+    if not text or not isinstance(text, str):
+        return False
 
-  text = text.strip()
+    text = text.strip()
 
-  # Reject text with whitespace (not a pure URL)
-  if ' ' in text or '\n' in text or '\t' in text:
-    return False
+    # Reject text with whitespace (not a pure URL)
+    if " " in text or "\n" in text or "\t" in text:
+        return False
 
-  try:
-    result = urlparse.urlparse(text)
-    hostname = result.hostname
-
-    # Must have valid scheme, netloc, and hostname
-    if not (result.scheme in ('http', 'https') and result.netloc and hostname):
-      return False
-
-    # Accept IPs, localhost, or domains with dots
     try:
-      ipaddress.ip_address(hostname)
-      return True
-    except ValueError:
-      return hostname == 'localhost' or '.' in hostname
-  except (ValueError, AttributeError):
-    return False
+        result = urlparse.urlparse(text)
+        hostname = result.hostname
+
+        # Must have valid scheme, netloc, and hostname
+        if not (result.scheme in ("http", "https") and result.netloc and hostname):
+            return False
+
+        # Accept IPs, localhost, or domains with dots
+        try:
+            ipaddress.ip_address(hostname)
+            return True
+        except ValueError:
+            return hostname == "localhost" or "." in hostname
+    except (ValueError, AttributeError):
+        return False
 
 
 def download_text_from_url(
@@ -264,84 +264,84 @@ def download_text_from_url(
     show_progress: bool = True,
     chunk_size: int = 8192,
 ) -> str:
-  """Download text content from a URL with optional progress bar.
+    """Download text content from a URL with optional progress bar.
 
-  Args:
-    url: The URL to download from.
-    timeout: Request timeout in seconds.
-    show_progress: Whether to show a progress bar during download.
-    chunk_size: Size of chunks to download at a time.
+    Args:
+      url: The URL to download from.
+      timeout: Request timeout in seconds.
+      show_progress: Whether to show a progress bar during download.
+      chunk_size: Size of chunks to download at a time.
 
-  Returns:
-    The text content of the URL.
+    Returns:
+      The text content of the URL.
 
-  Raises:
-    requests.RequestException: If the download fails.
-    ValueError: If the content is not text-based.
-  """
-  try:
-    # Make initial request to get headers
-    response = requests.get(url, stream=True, timeout=timeout)
-    response.raise_for_status()
+    Raises:
+      requests.RequestException: If the download fails.
+      ValueError: If the content is not text-based.
+    """
+    try:
+        # Make initial request to get headers
+        response = requests.get(url, stream=True, timeout=timeout)
+        response.raise_for_status()
 
-    # Check content type
-    content_type = response.headers.get('Content-Type', '').lower()
-    if not any(
-        ct in content_type
-        for ct in ['text/', 'application/json', 'application/xml']
-    ):
-      # Try to proceed anyway, but warn
-      print(f"Warning: Content-Type '{content_type}' may not be text-based")
+        # Check content type
+        content_type = response.headers.get("Content-Type", "").lower()
+        if not any(
+            ct in content_type
+            for ct in ["text/", "application/json", "application/xml"]
+        ):
+            # Try to proceed anyway, but warn
+            print(f"Warning: Content-Type '{content_type}' may not be text-based")
 
-    # Get content length for progress bar
-    total_size = int(response.headers.get('Content-Length', 0))
+        # Get content length for progress bar
+        total_size = int(response.headers.get("Content-Length", 0))
 
-    filename = url.split('/')[-1][:50]
+        filename = url.split("/")[-1][:50]
 
-    # Download content with progress bar
-    chunks = []
-    if show_progress and total_size > 0:
-      progress_bar = progress.create_download_progress_bar(
-          total_size=total_size, url=url
-      )
+        # Download content with progress bar
+        chunks = []
+        if show_progress and total_size > 0:
+            progress_bar = progress.create_download_progress_bar(
+                total_size=total_size, url=url
+            )
 
-      for chunk in response.iter_content(chunk_size=chunk_size):
-        if chunk:
-          chunks.append(chunk)
-          progress_bar.update(len(chunk))
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    chunks.append(chunk)
+                    progress_bar.update(len(chunk))
 
-      progress_bar.close()
-    else:
-      # Download without progress bar
-      for chunk in response.iter_content(chunk_size=chunk_size):
-        if chunk:
-          chunks.append(chunk)
+            progress_bar.close()
+        else:
+            # Download without progress bar
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    chunks.append(chunk)
 
-    # Combine chunks and decode
-    content = b''.join(chunks)
+        # Combine chunks and decode
+        content = b"".join(chunks)
 
-    # Try to decode as text
-    encodings = ['utf-8', 'latin-1', 'ascii', 'utf-16']
-    text_content = None
-    for encoding in encodings:
-      try:
-        text_content = content.decode(encoding)
-        break
-      except UnicodeDecodeError:
-        continue
+        # Try to decode as text
+        encodings = ["utf-8", "latin-1", "ascii", "utf-16"]
+        text_content = None
+        for encoding in encodings:
+            try:
+                text_content = content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
 
-    if text_content is None:
-      raise ValueError(f'Could not decode content from {url} as text')
+        if text_content is None:
+            raise ValueError(f"Could not decode content from {url} as text")
 
-    # Show content summary with clean formatting
-    if show_progress:
-      char_count = len(text_content)
-      word_count = len(text_content.split())
-      progress.print_download_complete(char_count, word_count, filename)
+        # Show content summary with clean formatting
+        if show_progress:
+            char_count = len(text_content)
+            word_count = len(text_content.split())
+            progress.print_download_complete(char_count, word_count, filename)
 
-    return text_content
+        return text_content
 
-  except requests.RequestException as e:
-    raise requests.RequestException(
-        f'Failed to download from {url}: {str(e)}'
-    ) from e
+    except requests.RequestException as e:
+        raise requests.RequestException(
+            f"Failed to download from {url}: {str(e)}"
+        ) from e

@@ -35,10 +35,12 @@ from langextract import chunking
 from langextract import progress
 from langextract import prompting
 from langextract import resolver as resolver_lib
+from langextract import retry_utils
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
+from langextract.core import types as core_types
 
 
 class DocumentRepeatError(exceptions.LangExtractError):
@@ -202,6 +204,173 @@ class Annotator:
         "Annotator initialized with format_handler: %s", format_handler
     )
 
+  def _process_batch_with_retry(
+      self,
+      batch_prompts: list[str],
+      batch: list[chunking.TextChunk],
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
+      **kwargs,
+  ) -> Iterator[list[core_types.ScoredOutput]]:
+    """Process a batch of prompts with individual chunk retry capability.
+
+    This method processes each chunk individually and retries failed chunks
+    due to transient errors (like 503 "model overloaded") while preserving
+    successful chunks from the same batch.
+
+    Args:
+      batch_prompts: List of prompts for the batch
+      batch: List of TextChunk objects corresponding to the prompts
+      **kwargs: Additional arguments passed to the language model
+
+    Yields:
+      Lists of ScoredOutputs, with retries for failed chunks
+    """
+    try:
+      batch_results = list(
+          self._language_model.infer(
+              batch_prompts=batch_prompts,
+              **kwargs,
+          )
+      )
+
+      for result in batch_results:
+        yield result
+      return
+
+    except Exception as e:
+      if not retry_utils.is_transient_error(e):
+        raise
+
+      logging.warning(
+          "Batch processing failed with transient error: %s. "
+          "Falling back to individual chunk processing with retry.",
+          str(e),
+      )
+
+    individual_results = []
+
+    for i, (prompt, chunk) in enumerate(zip(batch_prompts, batch)):
+      try:
+        chunk_result = self._process_single_chunk_with_retry(
+            prompt=prompt,
+            chunk=chunk,
+            retry_transient_errors=retry_transient_errors,
+            max_retries=max_retries,
+            retry_initial_delay=retry_initial_delay,
+            retry_backoff_factor=retry_backoff_factor,
+            retry_max_delay=retry_max_delay,
+            **kwargs,
+        )
+        individual_results.append(chunk_result)
+
+      except Exception as e:
+        logging.error(
+            "Failed to process chunk %d after retries: %s. "
+            "Chunk info: document_id=%s, text_length=%d. "
+            "Stopping document processing.",
+            i,
+            str(e),
+            chunk.document_id,
+            len(chunk.chunk_text),
+        )
+        raise
+
+    for result in individual_results:
+      yield result
+
+  def _process_single_chunk_with_retry(
+      self,
+      prompt: str,
+      chunk: chunking.TextChunk,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
+      **kwargs,
+  ) -> list[core_types.ScoredOutput]:
+    """Process a single chunk with retry logic.
+
+    Args:
+      prompt: The prompt for this chunk
+      chunk: The TextChunk object
+      retry_transient_errors: Whether to retry on transient errors
+      max_retries: Maximum number of retry attempts
+      retry_initial_delay: Initial delay before retry
+      retry_backoff_factor: Backoff multiplier for retries
+      retry_max_delay: Maximum delay between retries
+      **kwargs: Additional arguments for the language model
+
+    Returns:
+      List containing a single ScoredOutput for this chunk
+    """
+    last_exception = None
+    delay = retry_initial_delay
+
+    for attempt in range(max_retries + 1):
+      try:
+        batch_results = list(
+            self._language_model.infer(
+                batch_prompts=[prompt],
+                **kwargs,
+            )
+        )
+
+        if not batch_results:
+          raise exceptions.InferenceOutputError(
+              f"No results returned for chunk in document {chunk.document_id}"
+          )
+
+        return batch_results[0]
+
+      except Exception as e:
+        last_exception = e
+
+        if not retry_transient_errors or not retry_utils.is_transient_error(e):
+          logging.debug(
+              "Not retrying chunk processing: retry_disabled=%s,"
+              " is_transient=%s, error=%s",
+              not retry_transient_errors,
+              retry_utils.is_transient_error(e),
+              str(e),
+          )
+          raise
+
+        if attempt >= max_retries:
+          logging.error(
+              "Chunk processing failed after %d retries: %s",
+              max_retries,
+              str(e),
+          )
+          raise
+
+        current_delay = min(delay, retry_max_delay)
+
+        import random
+
+        jitter_amount = current_delay * 0.1 * random.random()
+        current_delay += jitter_amount
+
+        logging.warning(
+            "Chunk processing failed on attempt %d/%d due to transient error:"
+            " %s. Retrying in %.2f seconds...",
+            attempt + 1,
+            max_retries + 1,
+            str(e),
+            current_delay,
+        )
+
+        time.sleep(current_delay)
+        delay = min(delay * retry_backoff_factor, retry_max_delay)
+
+    if last_exception:
+      raise last_exception
+    raise RuntimeError("Chunk retry logic failed unexpectedly")
+
   def annotate_documents(
       self,
       documents: Iterable[data.Document],
@@ -211,6 +380,11 @@ class Annotator:
       debug: bool = True,
       extraction_passes: int = 1,
       show_progress: bool = True,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Annotates a sequence of documents with NLP extractions.
@@ -253,6 +427,11 @@ class Annotator:
           batch_length,
           debug,
           show_progress,
+          retry_transient_errors,
+          max_retries,
+          retry_initial_delay,
+          retry_backoff_factor,
+          retry_max_delay,
           **kwargs,
       )
     else:
@@ -264,6 +443,11 @@ class Annotator:
           debug,
           extraction_passes,
           show_progress,
+          retry_transient_errors,
+          max_retries,
+          retry_initial_delay,
+          retry_backoff_factor,
+          retry_max_delay,
           **kwargs,
       )
 
@@ -275,6 +459,11 @@ class Annotator:
       batch_length: int,
       debug: bool,
       show_progress: bool = True,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Single-pass annotation logic (original implementation)."""
@@ -321,8 +510,15 @@ class Annotator:
         )
         progress_bar.set_description(desc)
 
-      batch_scored_outputs = self._language_model.infer(
+      # Process batch with individual chunk retry capability
+      batch_scored_outputs = self._process_batch_with_retry(
           batch_prompts=batch_prompts,
+          batch=batch,
+          retry_transient_errors=retry_transient_errors,
+          max_retries=max_retries,
+          retry_initial_delay=retry_initial_delay,
+          retry_backoff_factor=retry_backoff_factor,
+          retry_max_delay=retry_max_delay,
           **kwargs,
       )
 
@@ -419,6 +615,11 @@ class Annotator:
       debug: bool,
       extraction_passes: int,
       show_progress: bool = True,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Sequential extraction passes logic for improved recall."""
@@ -446,6 +647,11 @@ class Annotator:
           batch_length,
           debug=(debug and pass_num == 0),
           show_progress=show_progress if pass_num == 0 else False,
+          retry_transient_errors=retry_transient_errors,
+          max_retries=max_retries,
+          retry_initial_delay=retry_initial_delay,
+          retry_backoff_factor=retry_backoff_factor,
+          retry_max_delay=retry_max_delay,
           **kwargs,
       ):
         doc_id = annotated_doc.document_id
@@ -494,6 +700,11 @@ class Annotator:
       debug: bool = True,
       extraction_passes: int = 1,
       show_progress: bool = True,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
       **kwargs,
   ) -> data.AnnotatedDocument:
     """Annotates text with NLP extractions for text input.
@@ -540,6 +751,11 @@ class Annotator:
             debug,
             extraction_passes,
             show_progress,
+            retry_transient_errors,
+            max_retries,
+            retry_initial_delay,
+            retry_backoff_factor,
+            retry_max_delay,
             **kwargs,
         )
     )

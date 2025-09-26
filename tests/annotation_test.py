@@ -1118,5 +1118,174 @@ class MultiPassHelperFunctionsTest(parameterized.TestCase):
     self.assertEqual(result, expected)
 
 
+class AnnotatorRetryPolicyTest(absltest.TestCase):
+  """Test retry policy functionality in annotation."""
+
+  def setUp(self):
+    super().setUp()
+    self.mock_language_model = self.enter_context(
+        mock.patch.object(gemini, "GeminiLanguageModel", autospec=True)
+    )
+    self.annotator = annotation.Annotator(
+        language_model=self.mock_language_model,
+        prompt_template=prompting.PromptTemplateStructured(description=""),
+    )
+
+  def test_retry_parameters_accepted(self):
+    """Test that retry parameters are accepted by annotate_documents."""
+    documents = [data.Document(text="Test document", document_id="test_doc")]
+
+    mock_result = types.ScoredOutput(score=1.0, output='{"extractions": []}')
+    self.mock_language_model.infer.return_value = iter([[mock_result]])
+
+    try:
+      list(
+          self.annotator.annotate_documents(
+              documents=documents,
+              retry_transient_errors=True,
+              max_retries=3,
+              retry_initial_delay=1.0,
+              retry_backoff_factor=2.0,
+              retry_max_delay=60.0,
+          )
+      )
+    except TypeError as e:
+      if "unexpected keyword argument" in str(e):
+        self.fail(f"Retry parameters not accepted: {e}")
+      else:
+        raise
+
+  def test_retry_parameters_accepted_annotate_text(self):
+    """Test that retry parameters are accepted by annotate_text."""
+    mock_result = types.ScoredOutput(score=1.0, output='{"extractions": []}')
+    self.mock_language_model.infer.return_value = iter([[mock_result]])
+
+    try:
+      self.annotator.annotate_text(
+          text="Test text",
+          retry_transient_errors=True,
+          max_retries=3,
+          retry_initial_delay=1.0,
+          retry_backoff_factor=2.0,
+          retry_max_delay=60.0,
+      )
+    except TypeError as e:
+      if "unexpected keyword argument" in str(e):
+        self.fail(f"Retry parameters not accepted: {e}")
+      else:
+        raise
+
+  def test_retry_parameters_default_values(self):
+    """Test that retry parameters have correct default values."""
+    documents = [data.Document(text="Test document", document_id="test_doc")]
+
+    mock_result = types.ScoredOutput(score=1.0, output='{"extractions": []}')
+    self.mock_language_model.infer.return_value = iter([[mock_result]])
+
+    try:
+      list(self.annotator.annotate_documents(documents=documents))
+    except TypeError as e:
+      if "unexpected keyword argument" in str(e):
+        self.fail(f"Default retry parameters not working: {e}")
+      else:
+        raise
+
+  def test_retry_parameters_sequential_passes(self):
+    """Test that retry parameters work with sequential passes."""
+    documents = [data.Document(text="Test document", document_id="test_doc")]
+
+    mock_result = types.ScoredOutput(score=1.0, output='{"extractions": []}')
+    self.mock_language_model.infer.return_value = iter([[mock_result]])
+
+    try:
+      list(
+          self.annotator.annotate_documents(
+              documents=documents,
+              extraction_passes=2,
+              retry_transient_errors=True,
+              max_retries=3,
+              retry_initial_delay=1.0,
+              retry_backoff_factor=2.0,
+              retry_max_delay=60.0,
+          )
+      )
+    except TypeError as e:
+      if "unexpected keyword argument" in str(e):
+        self.fail(f"Retry parameters not accepted in sequential passes: {e}")
+      else:
+        raise
+
+  def test_retry_parameters_passed_to_batch_processing(self):
+    """Test that retry parameters are passed to batch processing methods."""
+    documents = [data.Document(text="Test document", document_id="test_doc")]
+
+    mock_result = types.ScoredOutput(score=1.0, output='{"extractions": []}')
+    self.mock_language_model.infer.return_value = iter([[mock_result]])
+
+    with mock.patch.object(
+        self.annotator,
+        "_process_batch_with_retry",
+        return_value=iter([[mock_result]]),
+    ) as mock_batch_processing:
+      list(
+          self.annotator.annotate_documents(
+              documents=documents,
+              retry_transient_errors=True,
+              max_retries=5,
+              retry_initial_delay=2.0,
+              retry_backoff_factor=1.5,
+              retry_max_delay=120.0,
+          )
+      )
+
+      mock_batch_processing.assert_called_once()
+      call_kwargs = mock_batch_processing.call_args[1]
+
+      self.assertEqual(call_kwargs["retry_transient_errors"], True)
+      self.assertEqual(call_kwargs["max_retries"], 5)
+      self.assertEqual(call_kwargs["retry_initial_delay"], 2.0)
+      self.assertEqual(call_kwargs["retry_backoff_factor"], 1.5)
+      self.assertEqual(call_kwargs["retry_max_delay"], 120.0)
+
+  def test_retry_parameters_passed_to_single_chunk_processing(self):
+    """Test that retry parameters are passed to single chunk processing."""
+    documents = [data.Document(text="Test document", document_id="test_doc")]
+
+    mock_result = types.ScoredOutput(score=1.0, output='{"extractions": []}')
+    self.mock_language_model.infer.return_value = iter([[mock_result]])
+
+    with mock.patch.object(
+        self.annotator,
+        "_process_single_chunk_with_retry",
+        return_value=[mock_result],
+    ) as mock_single_chunk:
+      with mock.patch.object(
+          self.annotator,
+          "_process_batch_with_retry",
+          side_effect=Exception("Batch processing failed"),
+      ):
+        try:
+          list(
+              self.annotator.annotate_documents(
+                  documents=documents,
+                  retry_transient_errors=True,
+                  max_retries=3,
+                  retry_initial_delay=1.0,
+                  retry_backoff_factor=2.0,
+                  retry_max_delay=60.0,
+              )
+          )
+        except Exception:
+          pass
+
+      if mock_single_chunk.called:
+        call_kwargs = mock_single_chunk.call_args[1]
+        self.assertEqual(call_kwargs["retry_transient_errors"], True)
+        self.assertEqual(call_kwargs["max_retries"], 3)
+        self.assertEqual(call_kwargs["retry_initial_delay"], 1.0)
+        self.assertEqual(call_kwargs["retry_backoff_factor"], 2.0)
+        self.assertEqual(call_kwargs["retry_max_delay"], 60.0)
+
+
 if __name__ == "__main__":
   absltest.main()

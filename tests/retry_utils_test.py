@@ -14,7 +14,6 @@
 
 
 import time
-from unittest import mock
 
 from absl.testing import absltest
 
@@ -157,9 +156,7 @@ class RetryUtilsTest(absltest.TestCase):
         raise exceptions.InferenceRuntimeError("503 The model is overloaded")
       return "success"
 
-    start_time = time.time()
     result = timing_test_function()
-    end_time = time.time()
 
     self.assertEqual(result, "success")
     self.assertEqual(len(call_times), 3)

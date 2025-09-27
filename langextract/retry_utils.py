@@ -17,12 +17,11 @@
 from __future__ import annotations
 
 import functools
+import random
 import time
 from typing import Any, Callable, TypeVar
 
 from absl import logging
-
-from langextract.core import exceptions
 
 T = TypeVar("T")
 
@@ -79,8 +78,58 @@ def is_transient_error(error: Exception) -> bool:
 
   # Check for transient exception types
   is_transient_type = error_type in TRANSIENT_EXCEPTION_TYPES
-
   return is_transient_pattern or is_transient_type
+
+
+def execute_retry_with_backoff(
+    attempt: int,
+    max_retries: int,
+    delay: float,
+    max_delay: float,
+    backoff_factor: float,
+    error: Exception,
+    operation_name: str = "operation",
+) -> float:
+  """Execute retry logic with exponential backoff and jitter.
+
+  Args:
+      attempt: Current attempt number (0-based)
+      max_retries: Maximum number of retries
+      delay: Current delay value
+      max_delay: Maximum delay value
+      backoff_factor: Factor to multiply delay by
+      error: The exception that occurred
+      operation_name: Name of the operation for logging
+
+  Returns:
+      New delay value for next iteration
+  """
+  if attempt >= max_retries:
+    logging.error(
+        "%s failed after %d retries: %s",
+        operation_name,
+        max_retries,
+        str(error),
+    )
+    raise error
+
+  current_delay = min(delay, max_delay)
+
+  jitter_amount = current_delay * 0.1 * random.random()
+  current_delay += jitter_amount
+
+  logging.warning(
+      "%s failed on attempt %d/%d due to transient error: %s. "
+      "Retrying in %.2f seconds...",
+      operation_name,
+      attempt + 1,
+      max_retries + 1,
+      str(error),
+      current_delay,
+  )
+
+  time.sleep(current_delay)
+  return min(delay * backoff_factor, max_delay)
 
 
 def retry_on_transient_errors(
@@ -136,8 +185,6 @@ def retry_on_transient_errors(
 
           # Add jitter to prevent thundering herd.
           if jitter:
-            import random
-
             jitter_amount = current_delay * 0.1 * random.random()
             current_delay += jitter_amount
 
@@ -210,35 +257,16 @@ def retry_chunk_processing(
             )
             raise
 
-          # If we've exhausted retries, raise the exception
-          if attempt >= max_retries:
-            logging.error(
-                "Chunk processing failed after %d retries: %s",
-                max_retries,
-                str(e),
-            )
-            raise
-
-          # Calculate delay with exponential backoff
-          current_delay = min(delay, max_delay)
-
-          # Add jitter to prevent thundering herd
-          import random
-
-          jitter_amount = current_delay * 0.1 * random.random()
-          current_delay += jitter_amount
-
-          logging.warning(
-              "Chunk processing failed on attempt %d/%d due to transient error:"
-              " %s. Retrying in %.2f seconds...",
-              attempt + 1,
-              max_retries + 1,
-              str(e),
-              current_delay,
+          # Execute retry logic with backoff
+          delay = execute_retry_with_backoff(
+              attempt=attempt,
+              max_retries=max_retries,
+              delay=delay,
+              max_delay=max_delay,
+              backoff_factor=backoff_factor,
+              error=e,
+              operation_name="Chunk processing",
           )
-
-          time.sleep(current_delay)
-          delay = min(delay * backoff_factor, max_delay)
 
       # This should never be reached, but just in case
       if last_exception:

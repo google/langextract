@@ -224,6 +224,11 @@ class Annotator:
     Args:
       batch_prompts: List of prompts for the batch
       batch: List of TextChunk objects corresponding to the prompts
+      retry_transient_errors: Whether to retry on transient errors
+      max_retries: Maximum number of retry attempts
+      retry_initial_delay: Initial delay before retry
+      retry_backoff_factor: Backoff multiplier for retries
+      retry_max_delay: Maximum delay between retries
       **kwargs: Additional arguments passed to the language model
 
     Yields:
@@ -237,8 +242,7 @@ class Annotator:
           )
       )
 
-      for result in batch_results:
-        yield result
+      yield from batch_results
       return
 
     except Exception as e:
@@ -279,8 +283,7 @@ class Annotator:
         )
         raise
 
-    for result in individual_results:
-      yield result
+    yield from individual_results
 
   def _process_single_chunk_with_retry(
       self,
@@ -308,68 +311,31 @@ class Annotator:
     Returns:
       List containing a single ScoredOutput for this chunk
     """
-    last_exception = None
-    delay = retry_initial_delay
 
-    for attempt in range(max_retries + 1):
-      try:
-        batch_results = list(
-            self._language_model.infer(
-                batch_prompts=[prompt],
-                **kwargs,
-            )
+    # Use the retry decorator with custom parameters
+    @retry_utils.retry_chunk_processing(
+        max_retries=max_retries,
+        initial_delay=retry_initial_delay,
+        backoff_factor=retry_backoff_factor,
+        max_delay=retry_max_delay,
+        enabled=retry_transient_errors,
+    )
+    def _process_chunk():
+      batch_results = list(
+          self._language_model.infer(
+              batch_prompts=[prompt],
+              **kwargs,
+          )
+      )
+
+      if not batch_results:
+        raise exceptions.InferenceOutputError(
+            f"No results returned for chunk in document {chunk.document_id}"
         )
 
-        if not batch_results:
-          raise exceptions.InferenceOutputError(
-              f"No results returned for chunk in document {chunk.document_id}"
-          )
+      return batch_results[0]
 
-        return batch_results[0]
-
-      except Exception as e:
-        last_exception = e
-
-        if not retry_transient_errors or not retry_utils.is_transient_error(e):
-          logging.debug(
-              "Not retrying chunk processing: retry_disabled=%s,"
-              " is_transient=%s, error=%s",
-              not retry_transient_errors,
-              retry_utils.is_transient_error(e),
-              str(e),
-          )
-          raise
-
-        if attempt >= max_retries:
-          logging.error(
-              "Chunk processing failed after %d retries: %s",
-              max_retries,
-              str(e),
-          )
-          raise
-
-        current_delay = min(delay, retry_max_delay)
-
-        import random
-
-        jitter_amount = current_delay * 0.1 * random.random()
-        current_delay += jitter_amount
-
-        logging.warning(
-            "Chunk processing failed on attempt %d/%d due to transient error:"
-            " %s. Retrying in %.2f seconds...",
-            attempt + 1,
-            max_retries + 1,
-            str(e),
-            current_delay,
-        )
-
-        time.sleep(current_delay)
-        delay = min(delay * retry_backoff_factor, retry_max_delay)
-
-    if last_exception:
-      raise last_exception
-    raise RuntimeError("Chunk retry logic failed unexpectedly")
+    return _process_chunk()
 
   def annotate_documents(
       self,
@@ -408,6 +374,11 @@ class Annotator:
         Values > 1 reprocess tokens multiple times, potentially increasing
         costs with the potential for a more thorough extraction.
       show_progress: Whether to show progress bar. Defaults to True.
+      retry_transient_errors: Whether to retry on transient errors. Defaults to True.
+      max_retries: Maximum number of retry attempts. Defaults to 3.
+      retry_initial_delay: Initial delay before retry in seconds. Defaults to 1.0.
+      retry_backoff_factor: Backoff multiplier for retries. Defaults to 2.0.
+      retry_max_delay: Maximum delay between retries in seconds. Defaults to 60.0.
       **kwargs: Additional arguments passed to LanguageModel.infer and Resolver.
 
     Yields:
@@ -466,7 +437,25 @@ class Annotator:
       retry_max_delay: float = 60.0,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
-    """Single-pass annotation logic (original implementation)."""
+    """Single-pass annotation logic (original implementation).
+
+    Args:
+      documents: Iterable of documents to annotate
+      resolver: Resolver for processing inference results
+      max_char_buffer: Maximum character buffer for chunking
+      batch_length: Number of chunks to process in each batch
+      debug: Whether to enable debug logging
+      show_progress: Whether to show progress bar
+      retry_transient_errors: Whether to retry on transient errors
+      max_retries: Maximum number of retry attempts
+      retry_initial_delay: Initial delay before retry
+      retry_backoff_factor: Backoff multiplier for retries
+      retry_max_delay: Maximum delay between retries
+      **kwargs: Additional arguments passed to language model
+
+    Yields:
+      AnnotatedDocument objects with extracted data
+    """
 
     logging.info("Starting document annotation.")
     doc_iter, doc_iter_for_chunks = itertools.tee(documents, 2)
@@ -622,7 +611,26 @@ class Annotator:
       retry_max_delay: float = 60.0,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
-    """Sequential extraction passes logic for improved recall."""
+    """Sequential extraction passes logic for improved recall.
+
+    Args:
+      documents: Iterable of documents to annotate
+      resolver: Resolver for processing inference results
+      max_char_buffer: Maximum character buffer for chunking
+      batch_length: Number of chunks to process in each batch
+      debug: Whether to enable debug logging
+      extraction_passes: Number of extraction passes to perform
+      show_progress: Whether to show progress bar
+      retry_transient_errors: Whether to retry on transient errors
+      max_retries: Maximum number of retry attempts
+      retry_initial_delay: Initial delay before retry
+      retry_backoff_factor: Backoff multiplier for retries
+      retry_max_delay: Maximum delay between retries
+      **kwargs: Additional arguments passed to language model
+
+    Yields:
+      AnnotatedDocument objects with merged extracted data
+    """
 
     logging.info(
         "Starting sequential extraction passes for improved recall with %d"
@@ -722,6 +730,11 @@ class Annotator:
         standard single extraction. Values > 1 reprocess tokens multiple times,
         potentially increasing costs.
       show_progress: Whether to show progress bar. Defaults to True.
+      retry_transient_errors: Whether to retry on transient errors. Defaults to True.
+      max_retries: Maximum number of retry attempts. Defaults to 3.
+      retry_initial_delay: Initial delay before retry in seconds. Defaults to 1.0.
+      retry_backoff_factor: Backoff multiplier for retries. Defaults to 2.0.
+      retry_max_delay: Maximum delay between retries in seconds. Defaults to 60.0.
       **kwargs: Additional arguments for inference and resolver_lib.
 
     Returns:

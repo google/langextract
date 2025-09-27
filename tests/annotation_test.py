@@ -1252,39 +1252,34 @@ class AnnotatorRetryPolicyTest(absltest.TestCase):
     documents = [data.Document(text="Test document", document_id="test_doc")]
 
     mock_result = types.ScoredOutput(score=1.0, output='{"extractions": []}')
-    self.mock_language_model.infer.return_value = iter([[mock_result]])
 
     with mock.patch.object(
         self.annotator,
         "_process_single_chunk_with_retry",
         return_value=[mock_result],
     ) as mock_single_chunk:
-      with mock.patch.object(
-          self.annotator,
-          "_process_batch_with_retry",
-          side_effect=Exception("Batch processing failed"),
-      ):
-        try:
-          list(
-              self.annotator.annotate_documents(
-                  documents=documents,
-                  retry_transient_errors=True,
-                  max_retries=3,
-                  retry_initial_delay=1.0,
-                  retry_backoff_factor=2.0,
-                  retry_max_delay=60.0,
-              )
-          )
-        except Exception:
-          pass
+      self.mock_language_model.infer.side_effect = Exception(
+          "503 The model is overloaded"
+      )
 
-      if mock_single_chunk.called:
-        call_kwargs = mock_single_chunk.call_args[1]
-        self.assertEqual(call_kwargs["retry_transient_errors"], True)
-        self.assertEqual(call_kwargs["max_retries"], 3)
-        self.assertEqual(call_kwargs["retry_initial_delay"], 1.0)
-        self.assertEqual(call_kwargs["retry_backoff_factor"], 2.0)
-        self.assertEqual(call_kwargs["retry_max_delay"], 60.0)
+      results = list(
+          self.annotator.annotate_documents(
+              documents=documents,
+              retry_transient_errors=True,
+              max_retries=3,
+              retry_initial_delay=1.0,
+              retry_backoff_factor=2.0,
+              retry_max_delay=60.0,
+          )
+      )
+
+      self.assertTrue(mock_single_chunk.called)
+      call_kwargs = mock_single_chunk.call_args[1]
+      self.assertEqual(call_kwargs["retry_transient_errors"], True)
+      self.assertEqual(call_kwargs["max_retries"], 3)
+      self.assertEqual(call_kwargs["retry_initial_delay"], 1.0)
+      self.assertEqual(call_kwargs["retry_backoff_factor"], 2.0)
+      self.assertEqual(call_kwargs["retry_max_delay"], 60.0)
 
 
 if __name__ == "__main__":

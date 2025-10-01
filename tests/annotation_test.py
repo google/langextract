@@ -1262,7 +1262,7 @@ class AnnotatorRetryPolicyTest(absltest.TestCase):
           "503 The model is overloaded"
       )
 
-      results = list(
+      list(
           self.annotator.annotate_documents(
               documents=documents,
               retry_transient_errors=True,

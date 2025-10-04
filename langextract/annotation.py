@@ -357,13 +357,14 @@ class Annotator:
               "Completing annotation for document ID %s.",
               curr_document.document_id,
           )
+          doc_extractions = list(annotated_extractions)
           annotated_doc = data.AnnotatedDocument(
               document_id=curr_document.document_id,
-              extractions=annotated_extractions,
+              extractions=doc_extractions,
               text=curr_document.text,
           )
           yield annotated_doc
-          annotated_extractions.clear()
+          annotated_extractions = []  # Ensure next document gets a fresh list.
 
           curr_document = next(doc_iter, None)
           assert curr_document is not None, (
@@ -400,13 +401,15 @@ class Annotator:
       logging.info(
           "Finalizing annotation for document ID %s.", curr_document.document_id
       )
+      doc_extractions = list(annotated_extractions)
       annotated_doc = data.AnnotatedDocument(
           document_id=curr_document.document_id,
-          extractions=annotated_extractions,
+          extractions=doc_extractions,
           text=curr_document.text,
       )
 
       yield annotated_doc
+      annotated_extractions = []  # Fresh list prevents bleed into future docs.
 
     logging.info("Document annotation completed.")
 

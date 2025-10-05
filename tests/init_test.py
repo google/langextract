@@ -202,6 +202,51 @@ class InitTest(parameterized.TestCase):
     self.assertEqual(kwargs.get("fuzzy_alignment_threshold"), 0.8)
     self.assertFalse(kwargs.get("accept_match_lesser"))
 
+  @mock.patch("langextract.annotation.Annotator.annotate_text")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_resolver_params_suppress_parse_errors(
+      self, mock_create_model, mock_annotate
+  ):
+    """Test that suppress_parse_errors can be passed through resolver_params."""
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = False
+    mock_model.schema = None
+    mock_create_model.return_value = mock_model
+
+    mock_annotate.return_value = lx.data.AnnotatedDocument(
+        text="test", extractions=[]
+    )
+
+    mock_examples = [
+        lx.data.ExampleData(
+            text="Example text",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="example",
+                ),
+            ],
+        )
+    ]
+
+    # This should not raise a TypeError about unknown key
+    lx.extract(
+        text_or_documents="test text",
+        prompt_description="desc",
+        examples=mock_examples,
+        api_key="test_key",
+        resolver_params={
+            "suppress_parse_errors": True,
+            "enable_fuzzy_alignment": False,
+        },
+    )
+
+    mock_annotate.assert_called()
+    _, kwargs = mock_annotate.call_args
+    self.assertIn("suppress_parse_errors", kwargs)
+    self.assertTrue(kwargs.get("suppress_parse_errors"))
+    self.assertFalse(kwargs.get("enable_fuzzy_alignment"))
+
   @mock.patch("langextract.extraction.resolver.Resolver")
   @mock.patch("langextract.extraction.factory.create_model")
   def test_extract_resolver_params_none_handling(

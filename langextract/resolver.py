@@ -46,6 +46,7 @@ ALIGNMENT_PARAM_KEYS: Final[frozenset[str]] = frozenset({
     "enable_fuzzy_alignment",
     "fuzzy_alignment_threshold",
     "accept_match_lesser",
+    "suppress_parse_errors",
 })
 
 

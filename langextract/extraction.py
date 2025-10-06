@@ -121,7 +121,8 @@ def extract(
         reduce recall. Default is True. 'fuzzy_alignment_threshold' (float):
         Minimum token overlap ratio for fuzzy match (0.0-1.0). Default is 0.75.
         'accept_match_lesser' (bool): Whether to accept partial exact matches.
-        Default is True.
+        Default is True. 'suppress_parse_errors' (bool): Whether to suppress
+        parsing errors and continue pipeline. Default is False.
       language_model_params: Additional parameters for the language model.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract

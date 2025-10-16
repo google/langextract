@@ -200,7 +200,7 @@ def _create_model_with_schema(
     examples: Optional sequence of ExampleData for schema generation.
     use_schema_constraints: Whether to generate and apply schema constraints.
     fence_output: Whether to wrap output in markdown fences. If None,
-      will be computed based on schema's supports_strict_mode.
+      will be computed based on schema's requires_raw_output.
 
   Returns:
     A model instance with fence_output configured appropriately.

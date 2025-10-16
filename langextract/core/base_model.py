@@ -22,6 +22,7 @@ from typing import Any, Mapping
 
 import yaml
 
+from langextract.core import schema
 from langextract.core import types
 
 __all__ = ['BaseLanguageModel']
@@ -43,7 +44,7 @@ class BaseLanguageModel(abc.ABC):
       **kwargs: Additional keyword arguments passed to the model.
     """
     self._constraint = constraint or types.Constraint()
-    self._schema: Any = None  # BaseSchema instance
+    self._schema: schema.BaseSchema | None = None
     self._fence_output_override: bool | None = None
     self._extra_kwargs: dict[str, Any] = kwargs.copy()
 
@@ -52,7 +53,7 @@ class BaseLanguageModel(abc.ABC):
     """Return the schema class this provider supports."""
     return None
 
-  def apply_schema(self, schema_instance: Any) -> None:
+  def apply_schema(self, schema_instance: schema.BaseSchema | None) -> None:
     """Apply a schema instance to this provider.
 
     Optional method that providers can override to store the schema instance
@@ -62,6 +63,15 @@ class BaseLanguageModel(abc.ABC):
       schema_instance: The schema instance to apply, or None to clear.
     """
     self._schema = schema_instance
+
+  @property
+  def schema(self) -> schema.BaseSchema | None:
+    """The current schema instance if one is configured.
+
+    Returns:
+      The schema instance or None if no schema is applied.
+    """
+    return self._schema
 
   def set_fence_output(self, fence_output: bool | None) -> None:
     """Set explicit fence output preference.
@@ -78,16 +88,18 @@ class BaseLanguageModel(abc.ABC):
     """Whether this model requires fence output for parsing.
 
     Uses explicit override if set, otherwise computes from schema.
-    Returns True if no schema or schema doesn't support strict mode.
+    Returns True if no schema or schema doesn't require raw output.
     """
     if (
         hasattr(self, '_fence_output_override')
         and self._fence_output_override is not None
     ):
       return self._fence_output_override
-    if not hasattr(self, '_schema') or self._schema is None:
+
+    schema_obj = self.schema
+    if schema_obj is None:
       return True
-    return not self._schema.supports_strict_mode
+    return not schema_obj.requires_raw_output
 
   def merge_kwargs(
       self, runtime_kwargs: Mapping[str, Any] | None = None

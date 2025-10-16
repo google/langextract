@@ -32,7 +32,8 @@ def __getattr__(name: str):
       "BaseSchema": ("langextract.core.schema", "BaseSchema"),
       "Constraint": ("langextract.core.schema", "Constraint"),
       "ConstraintType": ("langextract.core.schema", "ConstraintType"),
-      "EXTRACTIONS_KEY": ("langextract.core.schema", "EXTRACTIONS_KEY"),
+      "EXTRACTIONS_KEY": ("langextract.core.data", "EXTRACTIONS_KEY"),
+      "ATTRIBUTE_SUFFIX": ("langextract.core.data", "ATTRIBUTE_SUFFIX"),
       "FormatModeSchema": ("langextract.core.schema", "FormatModeSchema"),
   }
 

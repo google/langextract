@@ -23,6 +23,8 @@ Usage example:
     annotated_documents = annotator.annotate_documents(documents, resolver)
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterable, Iterator
 import itertools
 import time
@@ -36,8 +38,7 @@ from langextract import resolver as resolver_lib
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
-
-ATTRIBUTE_SUFFIX = "_attributes"
+from langextract.core import format_handler as fh
 
 
 class DocumentRepeatError(exceptions.LangExtractError):
@@ -163,8 +164,9 @@ class Annotator:
       language_model: base_model.BaseLanguageModel,
       prompt_template: prompting.PromptTemplateStructured,
       format_type: data.FormatType = data.FormatType.YAML,
-      attribute_suffix: str = ATTRIBUTE_SUFFIX,
+      attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
       fence_output: bool = False,
+      format_handler: fh.FormatHandler | None = None,
   ):
     """Initializes Annotator.
 
@@ -176,27 +178,34 @@ class Annotator:
       attribute_suffix: Suffix to append to attribute keys in the output.
       fence_output: Whether to expect/generate fenced output (```json or
         ```yaml). When True, the model is prompted to generate fenced output and
-        the resolver expects it. When False, raw JSON/YAML is expected. Defaults
-        to True.
+        the resolver expects it. When False, raw JSON/YAML is expected.
+        Defaults to False. If format_handler is provided, it takes precedence.
+      format_handler: Optional FormatHandler for managing format-specific logic.
     """
     self._language_model = language_model
+
+    if format_handler is None:
+      format_handler = fh.FormatHandler(
+          format_type=format_type,
+          use_wrapper=True,
+          wrapper_key=data.EXTRACTIONS_KEY,
+          use_fences=fence_output,
+          attribute_suffix=attribute_suffix,
+      )
+
     self._prompt_generator = prompting.QAPromptGenerator(
-        prompt_template,
-        format_type=format_type,
-        attribute_suffix=attribute_suffix,
-        fence_output=fence_output,
+        template=prompt_template,
+        format_handler=format_handler,
     )
 
     logging.debug(
-        "Initialized Annotator with prompt:\n%s", self._prompt_generator
+        "Annotator initialized with format_handler: %s", format_handler
     )
 
   def annotate_documents(
       self,
       documents: Iterable[data.Document],
-      resolver: resolver_lib.AbstractResolver = resolver_lib.Resolver(
-          format_type=data.FormatType.YAML,
-      ),
+      resolver: resolver_lib.AbstractResolver | None = None,
       max_char_buffer: int = 200,
       batch_length: int = 1,
       debug: bool = True,
@@ -233,6 +242,8 @@ class Annotator:
     Raises:
       ValueError: If there are no scored outputs during inference.
     """
+    if resolver is None:
+      resolver = resolver_lib.Resolver(format_type=data.FormatType.YAML)
 
     if extraction_passes == 1:
       yield from self._annotate_documents_single_pass(
@@ -476,9 +487,7 @@ class Annotator:
   def annotate_text(
       self,
       text: str,
-      resolver: resolver_lib.AbstractResolver = resolver_lib.Resolver(
-          format_type=data.FormatType.YAML,
-      ),
+      resolver: resolver_lib.AbstractResolver | None = None,
       max_char_buffer: int = 200,
       batch_length: int = 1,
       additional_context: str | None = None,
@@ -507,6 +516,11 @@ class Annotator:
     Returns:
       Resolved annotations from text for document.
     """
+    if resolver is None:
+      resolver = resolver_lib.Resolver(
+          format_type=data.FormatType.YAML,
+      )
+
     start_time = time.time() if debug else None
 
     documents = [

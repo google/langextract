@@ -296,7 +296,7 @@ class PluginSmokeTest(absltest.TestCase):
         return {"custom_schema": self._config}
 
       @property
-      def supports_strict_mode(self):
+      def requires_raw_output(self):
         return True
 
     def _ep_load():
@@ -371,7 +371,7 @@ class PluginSmokeTest(absltest.TestCase):
     )
     self.assertFalse(
         model.requires_fence_output,
-        "Schema supports strict mode, no fences needed",
+        "Schema outputs raw JSON, no fences needed",
     )
 
 
@@ -399,7 +399,7 @@ class PluginE2ETest(absltest.TestCase):
         return {"custom_schema": self._config}
 
       @property
-      def supports_strict_mode(self):
+      def requires_raw_output(self):
         return True
 
     def _ep_load():
@@ -537,7 +537,7 @@ class PluginE2ETest(absltest.TestCase):
                 return {"schema_config": self._config}
 
             @property
-            def supports_strict_mode(self):
+            def requires_raw_output(self):
                 return True
 
         @lx.providers.registry.register(r'^test-pip-model', priority=50)
@@ -637,7 +637,7 @@ class PluginE2ETest(absltest.TestCase):
           )
           result2 = model2.infer(["test prompt"])
           assert "with_schema" in result2[0][0].output, f"Got: {{result2[0][0].output}}"
-          assert model2.requires_fence_output == False, "Schema supports strict mode, should not need fences"
+          assert model2.requires_fence_output == False, "Schema outputs raw JSON, should not need fences"
 
           # Test 3: Verify schema class is available
           provider_cls = lx.providers.registry.resolve("test-pip-model-xyz")

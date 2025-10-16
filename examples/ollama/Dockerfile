@@ -18,6 +18,6 @@ WORKDIR /app
 
 RUN pip install langextract
 
-COPY quickstart.py .
+COPY demo_ollama.py .
 
-CMD ["python", "quickstart.py"]
+CMD ["python", "demo_ollama.py"]

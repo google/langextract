@@ -19,13 +19,15 @@ few public methods. The too-few-public-methods warnings are expected.
 """
 
 from unittest import mock
+import warnings
 
 from absl.testing import absltest
 from absl.testing import parameterized
 
-from langextract import schema
 from langextract.core import base_model
 from langextract.core import data
+from langextract.core import format_handler as fh
+from langextract.core import schema
 from langextract.providers import schemas
 
 
@@ -45,8 +47,6 @@ class BaseSchemaTest(absltest.TestCase):
       @classmethod
       def from_examples(cls, examples_data, attribute_suffix="_attributes"):
         return cls()
-
-      # Missing to_provider_config and supports_strict_mode
 
     with self.assertRaises(TypeError):
       IncompleteSchema()  # pylint: disable=abstract-class-instantiated
@@ -94,7 +94,7 @@ class GeminiSchemaTest(parameterized.TestCase):
           expected_schema={
               "type": "object",
               "properties": {
-                  schema.EXTRACTIONS_KEY: {
+                  data.EXTRACTIONS_KEY: {
                       "type": "array",
                       "items": {
                           "type": "object",
@@ -102,7 +102,7 @@ class GeminiSchemaTest(parameterized.TestCase):
                       },
                   },
               },
-              "required": [schema.EXTRACTIONS_KEY],
+              "required": [data.EXTRACTIONS_KEY],
           },
       ),
       dict(
@@ -121,7 +121,7 @@ class GeminiSchemaTest(parameterized.TestCase):
           expected_schema={
               "type": "object",
               "properties": {
-                  schema.EXTRACTIONS_KEY: {
+                  data.EXTRACTIONS_KEY: {
                       "type": "array",
                       "items": {
                           "type": "object",
@@ -138,7 +138,7 @@ class GeminiSchemaTest(parameterized.TestCase):
                       },
                   },
               },
-              "required": [schema.EXTRACTIONS_KEY],
+              "required": [data.EXTRACTIONS_KEY],
           },
       ),
       dict(
@@ -158,7 +158,7 @@ class GeminiSchemaTest(parameterized.TestCase):
           expected_schema={
               "type": "object",
               "properties": {
-                  schema.EXTRACTIONS_KEY: {
+                  data.EXTRACTIONS_KEY: {
                       "type": "array",
                       "items": {
                           "type": "object",
@@ -175,7 +175,7 @@ class GeminiSchemaTest(parameterized.TestCase):
                       },
                   },
               },
-              "required": [schema.EXTRACTIONS_KEY],
+              "required": [data.EXTRACTIONS_KEY],
           },
       ),
       dict(
@@ -205,7 +205,7 @@ class GeminiSchemaTest(parameterized.TestCase):
           expected_schema={
               "type": "object",
               "properties": {
-                  schema.EXTRACTIONS_KEY: {
+                  data.EXTRACTIONS_KEY: {
                       "type": "array",
                       "items": {
                           "type": "object",
@@ -230,7 +230,7 @@ class GeminiSchemaTest(parameterized.TestCase):
                       },
                   },
               },
-              "required": [schema.EXTRACTIONS_KEY],
+              "required": [data.EXTRACTIONS_KEY],
           },
       ),
   )
@@ -258,14 +258,13 @@ class GeminiSchemaTest(parameterized.TestCase):
     gemini_schema = schemas.gemini.GeminiSchema.from_examples(examples_data)
     provider_config = gemini_schema.to_provider_config()
 
-    # Should contain response_schema key
     self.assertIn("response_schema", provider_config)
     self.assertEqual(
         provider_config["response_schema"], gemini_schema.schema_dict
     )
 
-  def test_supports_strict_mode_returns_true(self):
-    """Test that GeminiSchema supports strict mode."""
+  def test_requires_raw_output_returns_true(self):
+    """Test that GeminiSchema requires raw output."""
     examples_data = [
         data.ExampleData(
             text="Test text",
@@ -279,7 +278,95 @@ class GeminiSchemaTest(parameterized.TestCase):
     ]
 
     gemini_schema = schemas.gemini.GeminiSchema.from_examples(examples_data)
-    self.assertTrue(gemini_schema.supports_strict_mode)
+    self.assertTrue(gemini_schema.requires_raw_output)
+
+
+class SchemaValidationTest(parameterized.TestCase):
+  """Tests for schema format validation."""
+
+  def _create_test_schema(self):
+    """Helper to create a test schema."""
+    examples = [
+        data.ExampleData(
+            text="Test",
+            extractions=[
+                data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="test",
+                )
+            ],
+        )
+    ]
+    return schemas.gemini.GeminiSchema.from_examples(examples)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="warns_about_fences",
+          use_fences=True,
+          use_wrapper=True,
+          wrapper_key=data.EXTRACTIONS_KEY,
+          expected_warning="fence_output=True may cause parsing issues",
+      ),
+      dict(
+          testcase_name="warns_about_wrong_wrapper_key",
+          use_fences=False,
+          use_wrapper=True,
+          wrapper_key="wrong_key",
+          expected_warning="response_schema expects wrapper_key='extractions'",
+      ),
+      dict(
+          testcase_name="no_warning_with_correct_settings",
+          use_fences=False,
+          use_wrapper=True,
+          wrapper_key=data.EXTRACTIONS_KEY,
+          expected_warning=None,
+      ),
+  )
+  def test_gemini_validation(
+      self, use_fences, use_wrapper, wrapper_key, expected_warning
+  ):
+    """Test GeminiSchema validation with various settings."""
+    schema_obj = self._create_test_schema()
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_fences=use_fences,
+        use_wrapper=use_wrapper,
+        wrapper_key=wrapper_key,
+    )
+
+    with warnings.catch_warnings(record=True) as w:
+      warnings.simplefilter("always")
+      schema_obj.validate_format(format_handler)
+
+      if expected_warning:
+        self.assertLen(
+            w,
+            1,
+            f"Expected exactly one warning containing '{expected_warning}'",
+        )
+        self.assertIn(
+            expected_warning,
+            str(w[0].message),
+            f"Warning message should contain '{expected_warning}'",
+        )
+      else:
+        self.assertEmpty(w, "No warnings should be issued for correct settings")
+
+  def test_base_schema_no_validation(self):
+    """Test that base schema has no validation by default."""
+    schema_obj = schema.FormatModeSchema()
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_fences=True,
+    )
+
+    with warnings.catch_warnings(record=True) as w:
+      warnings.simplefilter("always")
+      schema_obj.validate_format(format_handler)
+
+      self.assertEmpty(
+          w, "FormatModeSchema should not issue validation warnings"
+      )
 
 
 if __name__ == "__main__":

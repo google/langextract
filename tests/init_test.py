@@ -16,13 +16,17 @@
 
 import textwrap
 from unittest import mock
+import warnings
 
 from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import prompting
 import langextract as lx
+from langextract.core import base_model
 from langextract.core import data
+from langextract.core import format_handler as fh
+from langextract.core import schema
 from langextract.core import types
 from langextract.providers import schemas
 
@@ -122,8 +126,15 @@ class InitTest(parameterized.TestCase):
         description=mock_description, examples=mock_examples
     )
 
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=True,
+    )
+
     prompt_generator = prompting.QAPromptGenerator(
-        template=mock_prompt_template, format_type=lx.data.FormatType.JSON
+        template=mock_prompt_template, format_handler=format_handler
     )
 
     actual_result = lx.extract(
@@ -139,7 +150,7 @@ class InitTest(parameterized.TestCase):
     mock_create_model.assert_called_once()
     mock_model.infer.assert_called_once_with(
         batch_prompts=[prompt_generator.render(input_text)],
-        max_workers=10,  # Default value from extract()
+        max_workers=10,
     )
 
     self.assertDataclassEqual(expected_result, actual_result)
@@ -182,7 +193,6 @@ class InitTest(parameterized.TestCase):
             "enable_fuzzy_alignment": False,
             "fuzzy_alignment_threshold": 0.8,
             "accept_match_lesser": False,
-            "extraction_attributes_suffix": "_attrs",
         },
     )
 
@@ -191,7 +201,51 @@ class InitTest(parameterized.TestCase):
     self.assertFalse(kwargs.get("enable_fuzzy_alignment"))
     self.assertEqual(kwargs.get("fuzzy_alignment_threshold"), 0.8)
     self.assertFalse(kwargs.get("accept_match_lesser"))
-    self.assertNotIn("extraction_attributes_suffix", kwargs)
+
+  @mock.patch("langextract.annotation.Annotator.annotate_text")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_resolver_params_suppress_parse_errors(
+      self, mock_create_model, mock_annotate
+  ):
+    """Test that suppress_parse_errors can be passed through resolver_params."""
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = False
+    mock_model.schema = None
+    mock_create_model.return_value = mock_model
+
+    mock_annotate.return_value = lx.data.AnnotatedDocument(
+        text="test", extractions=[]
+    )
+
+    mock_examples = [
+        lx.data.ExampleData(
+            text="Example text",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="example",
+                ),
+            ],
+        )
+    ]
+
+    # This should not raise a TypeError about unknown key
+    lx.extract(
+        text_or_documents="test text",
+        prompt_description="desc",
+        examples=mock_examples,
+        api_key="test_key",
+        resolver_params={
+            "suppress_parse_errors": True,
+            "enable_fuzzy_alignment": False,
+        },
+    )
+
+    mock_annotate.assert_called()
+    _, kwargs = mock_annotate.call_args
+    self.assertIn("suppress_parse_errors", kwargs)
+    self.assertTrue(kwargs.get("suppress_parse_errors"))
+    self.assertFalse(kwargs.get("enable_fuzzy_alignment"))
 
   @mock.patch("langextract.extraction.resolver.Resolver")
   @mock.patch("langextract.extraction.factory.create_model")
@@ -235,16 +289,13 @@ class InitTest(parameterized.TestCase):
           resolver_params={
               "enable_fuzzy_alignment": None,
               "fuzzy_alignment_threshold": 0.8,
-              "extraction_attributes_suffix": "_attrs",
           },
       )
 
       _, resolver_kwargs = mock_resolver_class.call_args
       self.assertNotIn("enable_fuzzy_alignment", resolver_kwargs)
       self.assertNotIn("fuzzy_alignment_threshold", resolver_kwargs)
-      self.assertEqual(
-          resolver_kwargs["extraction_attributes_suffix"], "_attrs"
-      )
+      self.assertIn("format_handler", resolver_kwargs)
 
       _, annotate_kwargs = mock_annotate.call_args
       self.assertNotIn("enable_fuzzy_alignment", annotate_kwargs)
@@ -275,9 +326,9 @@ class InitTest(parameterized.TestCase):
           examples=mock_examples,
           api_key="test_key",
           resolver_params={
-              "fuzzy_alignment_treshold": (
+              "fuzzy_alignment_treshold": (  # Typo: treshold instead of threshold
                   0.5
-              ),  # Typo: treshold instead of threshold
+              ),
           },
       )
 
@@ -536,6 +587,113 @@ class InitTest(parameterized.TestCase):
     self.assertEqual(
         call_args.kwargs.get("disable", False), expected_progress_disabled
     )
+
+  @mock.patch("langextract.factory.create_model")
+  def test_schema_validation_warning_issued(self, mock_create_model):
+    """Test that schema validation warnings are properly issued."""
+    mock_model = mock.Mock(spec=base_model.BaseLanguageModel)
+    mock_model.requires_fence_output = True
+    mock_model.infer.return_value = [
+        [types.ScoredOutput(output='{"extractions": []}', score=1.0)]
+    ]
+
+    mock_schema = mock.Mock(spec=schema.BaseSchema)
+
+    def validate_format_side_effect(format_handler):
+      warnings.warn("Test validation warning", UserWarning, stacklevel=3)
+
+    mock_schema.validate_format = mock.Mock(
+        side_effect=validate_format_side_effect
+    )
+    mock_model.schema = mock_schema
+
+    mock_create_model.return_value = mock_model
+    test_examples = [
+        lx.data.ExampleData(
+            text="test",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="test",
+                ),
+            ],
+        )
+    ]
+
+    with warnings.catch_warnings(record=True) as w:
+      warnings.simplefilter("always")
+
+      result = lx.extract(
+          text_or_documents="Sample text",
+          prompt_description="Extract",
+          examples=test_examples,
+          model_id="test-model",
+          api_key="key",
+          use_schema_constraints=True,
+      )
+      warning_messages = [str(warning.message) for warning in w]
+      self.assertIn(
+          "Test validation warning",
+          " ".join(warning_messages),
+          "Schema validation warning should be issued",
+      )
+
+    self.assertIsNotNone(result)
+
+  def test_gemini_schema_deprecation_warning(self):
+    """Test that passing gemini_schema triggers deprecation warning."""
+    mock_model = mock.MagicMock(spec=base_model.BaseLanguageModel)
+    mock_model.infer.return_value = iter(
+        [[mock.Mock(output='{"extractions": []}')]]
+    )
+    mock_model.requires_fence_output = True
+    mock_model.schema = None
+
+    self.enter_context(
+        mock.patch(
+            "langextract.factory.create_model",
+            return_value=mock_model,
+        )
+    )
+
+    self.enter_context(
+        mock.patch(
+            "langextract.annotation.Annotator.annotate_text",
+            return_value=data.AnnotatedDocument(text="test", extractions=[]),
+        )
+    )
+
+    with warnings.catch_warnings(record=True) as w:
+      warnings.simplefilter("always")
+
+      _ = lx.extract(
+          text_or_documents="test",
+          prompt_description="Extract conditions",
+          examples=[
+              lx.data.ExampleData(
+                  text="test",
+                  extractions=[
+                      lx.data.Extraction(
+                          extraction_class="entity",
+                          extraction_text="test",
+                      ),
+                  ],
+              )
+          ],
+          model_id="gemini-2.5-flash",
+          api_key="test_key",
+          language_model_params={"gemini_schema": "deprecated"},
+      )
+
+      # Verify deprecation warning
+      self.assertTrue(
+          any(
+              issubclass(warning.category, FutureWarning)
+              and "gemini_schema" in str(warning.message)
+              for warning in w
+          ),
+          "Expected deprecation warning for gemini_schema",
+      )
 
 
 if __name__ == "__main__":

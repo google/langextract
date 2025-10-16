@@ -18,8 +18,8 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import prompting
-from langextract import schema
 from langextract.core import data
+from langextract.core import format_handler as fh
 
 
 class QAPromptGeneratorTest(parameterized.TestCase):
@@ -62,9 +62,16 @@ class QAPromptGeneratorTest(parameterized.TestCase):
         ],
     )
 
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.YAML,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=True,
+    )
+
     prompt_generator = prompting.QAPromptGenerator(
         template=prompt_template_structured,
-        format_type=data.FormatType.YAML,
+        format_handler=format_handler,
         examples_heading="",
         question_prefix="",
         answer_prefix="",
@@ -85,7 +92,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
 
         The patient was diagnosed with hypertension and diabetes.
         ```yaml
-        {schema.EXTRACTIONS_KEY}:
+        {data.EXTRACTIONS_KEY}:
         - medical_condition: hypertension
           medical_condition_attributes:
             chronicity: chronic
@@ -101,11 +108,11 @@ class QAPromptGeneratorTest(parameterized.TestCase):
     self.assertEqual(expected_prompt_text, actual_prompt_text)
 
   @parameterized.named_parameters(
-      {
-          "testcase_name": "json_basic_format",
-          "format_type": data.FormatType.JSON,
-          "example_text": "Patient has diabetes and is prescribed insulin.",
-          "example_extractions": [
+      dict(
+          testcase_name="json_basic_format",
+          format_type=data.FormatType.JSON,
+          example_text="Patient has diabetes and is prescribed insulin.",
+          example_extractions=[
               data.Extraction(
                   extraction_text="diabetes",
                   extraction_class="medical_condition",
@@ -117,11 +124,11 @@ class QAPromptGeneratorTest(parameterized.TestCase):
                   attributes={"prescribed": "prescribed"},
               ),
           ],
-          "expected_formatted_example": textwrap.dedent(f"""\
+          expected_formatted_example=textwrap.dedent(f"""\
               Patient has diabetes and is prescribed insulin.
               ```json
               {{
-                "{schema.EXTRACTIONS_KEY}": [
+                "{data.EXTRACTIONS_KEY}": [
                   {{
                     "medical_condition": "diabetes",
                     "medical_condition_attributes": {{
@@ -138,12 +145,12 @@ class QAPromptGeneratorTest(parameterized.TestCase):
               }}
               ```
               """),
-      },
-      {
-          "testcase_name": "yaml_basic_format",
-          "format_type": data.FormatType.YAML,
-          "example_text": "Patient has diabetes and is prescribed insulin.",
-          "example_extractions": [
+      ),
+      dict(
+          testcase_name="yaml_basic_format",
+          format_type=data.FormatType.YAML,
+          example_text="Patient has diabetes and is prescribed insulin.",
+          example_extractions=[
               data.Extraction(
                   extraction_text="diabetes",
                   extraction_class="medical_condition",
@@ -155,10 +162,10 @@ class QAPromptGeneratorTest(parameterized.TestCase):
                   attributes={"prescribed": "prescribed"},
               ),
           ],
-          "expected_formatted_example": textwrap.dedent(f"""\
+          expected_formatted_example=textwrap.dedent(f"""\
               Patient has diabetes and is prescribed insulin.
               ```yaml
-              {schema.EXTRACTIONS_KEY}:
+              {data.EXTRACTIONS_KEY}:
               - medical_condition: diabetes
                 medical_condition_attributes:
                   chronicity: chronic
@@ -167,91 +174,91 @@ class QAPromptGeneratorTest(parameterized.TestCase):
                   prescribed: prescribed
               ```
               """),
-      },
-      {
-          "testcase_name": "custom_attribute_suffix",
-          "format_type": data.FormatType.YAML,
-          "example_text": "Patient has a fever.",
-          "example_extractions": [
+      ),
+      dict(
+          testcase_name="custom_attribute_suffix",
+          format_type=data.FormatType.YAML,
+          example_text="Patient has a fever.",
+          example_extractions=[
               data.Extraction(
                   extraction_text="fever",
                   extraction_class="symptom",
                   attributes={"severity": "mild"},
               ),
           ],
-          "attribute_suffix": "_props",
-          "expected_formatted_example": textwrap.dedent(f"""\
+          attribute_suffix="_props",
+          expected_formatted_example=textwrap.dedent(f"""\
               Patient has a fever.
               ```yaml
-              {schema.EXTRACTIONS_KEY}:
+              {data.EXTRACTIONS_KEY}:
               - symptom: fever
                 symptom_props:
                   severity: mild
               ```
               """),
-      },
-      {
-          "testcase_name": "yaml_empty_extractions",
-          "format_type": data.FormatType.YAML,
-          "example_text": "Text with no extractions.",
-          "example_extractions": [],
-          "expected_formatted_example": textwrap.dedent(f"""\
+      ),
+      dict(
+          testcase_name="yaml_empty_extractions",
+          format_type=data.FormatType.YAML,
+          example_text="Text with no extractions.",
+          example_extractions=[],
+          expected_formatted_example=textwrap.dedent(f"""\
               Text with no extractions.
               ```yaml
-              {schema.EXTRACTIONS_KEY}: []
+              {data.EXTRACTIONS_KEY}: []
               ```
               """),
-      },
-      {
-          "testcase_name": "json_empty_extractions",
-          "format_type": data.FormatType.JSON,
-          "example_text": "Text with no extractions.",
-          "example_extractions": [],
-          "expected_formatted_example": textwrap.dedent(f"""\
+      ),
+      dict(
+          testcase_name="json_empty_extractions",
+          format_type=data.FormatType.JSON,
+          example_text="Text with no extractions.",
+          example_extractions=[],
+          expected_formatted_example=textwrap.dedent(f"""\
               Text with no extractions.
               ```json
               {{
-                "{schema.EXTRACTIONS_KEY}": []
+                "{data.EXTRACTIONS_KEY}": []
               }}
               ```
               """),
-      },
-      {
-          "testcase_name": "yaml_empty_attributes",
-          "format_type": data.FormatType.YAML,
-          "example_text": "Patient is resting comfortably.",
-          "example_extractions": [
+      ),
+      dict(
+          testcase_name="yaml_empty_attributes",
+          format_type=data.FormatType.YAML,
+          example_text="Patient is resting comfortably.",
+          example_extractions=[
               data.Extraction(
                   extraction_text="Patient",
                   extraction_class="person",
                   attributes={},
               ),
           ],
-          "expected_formatted_example": textwrap.dedent(f"""\
+          expected_formatted_example=textwrap.dedent(f"""\
               Patient is resting comfortably.
               ```yaml
-              {schema.EXTRACTIONS_KEY}:
+              {data.EXTRACTIONS_KEY}:
               - person: Patient
                 person_attributes: {{}}
               ```
               """),
-      },
-      {
-          "testcase_name": "json_empty_attributes",
-          "format_type": data.FormatType.JSON,
-          "example_text": "Patient is resting comfortably.",
-          "example_extractions": [
+      ),
+      dict(
+          testcase_name="json_empty_attributes",
+          format_type=data.FormatType.JSON,
+          example_text="Patient is resting comfortably.",
+          example_extractions=[
               data.Extraction(
                   extraction_text="Patient",
                   extraction_class="person",
                   attributes={},
               ),
           ],
-          "expected_formatted_example": textwrap.dedent(f"""\
+          expected_formatted_example=textwrap.dedent(f"""\
               Patient is resting comfortably.
               ```json
               {{
-                "{schema.EXTRACTIONS_KEY}": [
+                "{data.EXTRACTIONS_KEY}": [
                   {{
                     "person": "Patient",
                     "person_attributes": {{}}
@@ -260,14 +267,14 @@ class QAPromptGeneratorTest(parameterized.TestCase):
               }}
               ```
               """),
-      },
-      {
-          "testcase_name": "yaml_same_extraction_class_multiple_times",
-          "format_type": data.FormatType.YAML,
-          "example_text": (
+      ),
+      dict(
+          testcase_name="yaml_same_extraction_class_multiple_times",
+          format_type=data.FormatType.YAML,
+          example_text=(
               "Patient has multiple medications: aspirin and lisinopril."
           ),
-          "example_extractions": [
+          example_extractions=[
               data.Extraction(
                   extraction_text="aspirin",
                   extraction_class="medication",
@@ -279,10 +286,10 @@ class QAPromptGeneratorTest(parameterized.TestCase):
                   attributes={"dosage": "10mg"},
               ),
           ],
-          "expected_formatted_example": textwrap.dedent(f"""\
+          expected_formatted_example=textwrap.dedent(f"""\
               Patient has multiple medications: aspirin and lisinopril.
               ```yaml
-              {schema.EXTRACTIONS_KEY}:
+              {data.EXTRACTIONS_KEY}:
               - medication: aspirin
                 medication_attributes:
                   dosage: 81mg
@@ -291,7 +298,65 @@ class QAPromptGeneratorTest(parameterized.TestCase):
                   dosage: 10mg
               ```
               """),
-      },
+      ),
+      dict(
+          testcase_name="json_simplified_no_extractions_key",
+          format_type=data.FormatType.JSON,
+          example_text="Patient has diabetes and is prescribed insulin.",
+          example_extractions=[
+              data.Extraction(
+                  extraction_text="diabetes",
+                  extraction_class="medical_condition",
+                  attributes={"chronicity": "chronic"},
+              ),
+              data.Extraction(
+                  extraction_text="insulin",
+                  extraction_class="medication",
+                  attributes={"prescribed": "prescribed"},
+              ),
+          ],
+          require_extractions_key=False,
+          expected_formatted_example=textwrap.dedent("""\
+              Patient has diabetes and is prescribed insulin.
+              ```json
+              [
+                {
+                  "medical_condition": "diabetes",
+                  "medical_condition_attributes": {
+                    "chronicity": "chronic"
+                  }
+                },
+                {
+                  "medication": "insulin",
+                  "medication_attributes": {
+                    "prescribed": "prescribed"
+                  }
+                }
+              ]
+              ```
+              """),
+      ),
+      dict(
+          testcase_name="yaml_simplified_no_extractions_key",
+          format_type=data.FormatType.YAML,
+          example_text="Patient has a fever.",
+          example_extractions=[
+              data.Extraction(
+                  extraction_text="fever",
+                  extraction_class="symptom",
+                  attributes={"severity": "mild"},
+              ),
+          ],
+          require_extractions_key=False,
+          expected_formatted_example=textwrap.dedent("""\
+              Patient has a fever.
+              ```yaml
+              - symptom: fever
+                symptom_attributes:
+                  severity: mild
+              ```
+              """),
+      ),
   )
   def test_format_example(
       self,
@@ -300,6 +365,7 @@ class QAPromptGeneratorTest(parameterized.TestCase):
       example_extractions,
       expected_formatted_example,
       attribute_suffix="_attributes",
+      require_extractions_key=True,
   ):
     """Tests formatting of examples in different formats and scenarios."""
     example_data = data.ExampleData(
@@ -312,10 +378,17 @@ class QAPromptGeneratorTest(parameterized.TestCase):
         examples=[example_data],
     )
 
+    format_handler = fh.FormatHandler(
+        format_type=format_type,
+        use_wrapper=require_extractions_key,
+        wrapper_key="extractions" if require_extractions_key else None,
+        use_fences=True,
+        attribute_suffix=attribute_suffix,
+    )
+
     prompt_generator = prompting.QAPromptGenerator(
         template=structured_template,
-        format_type=format_type,
-        attribute_suffix=attribute_suffix,
+        format_handler=format_handler,
         question_prefix="",
         answer_prefix="",
     )

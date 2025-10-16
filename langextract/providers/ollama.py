@@ -58,6 +58,18 @@ Direct provider instantiation (when model ID conflicts with other providers):
         examples=[example],
     )
 
+Using pre-configured FormatHandler for manual control:
+    from langextract.providers.ollama import OLLAMA_FORMAT_HANDLER
+
+    # Use the pre-configured Ollama FormatHandler
+    result = lx.extract(
+        text_or_documents="Your text here",
+        model_id="gemma2:2b",
+        prompt_description="Extract information",
+        examples=[example],
+        resolver_params={'format_handler': OLLAMA_FORMAT_HANDLER}
+    )
+
 Supported model ID formats:
     - Standard Ollama: llama3.2:1b, gemma2:2b, mistral:7b, qwen2.5:7b, etc.
     - Hugging Face style: meta-llama/Llama-3.2-1B-Instruct, google/gemma-2b, etc.
@@ -81,7 +93,9 @@ import requests
 
 # Import from core modules directly
 from langextract.core import base_model
+from langextract.core import data
 from langextract.core import exceptions
+from langextract.core import format_handler as fh
 from langextract.core import schema
 from langextract.core import types as core_types
 from langextract.providers import patterns
@@ -89,10 +103,21 @@ from langextract.providers import router
 
 # Ollama defaults
 _OLLAMA_DEFAULT_MODEL_URL = 'http://localhost:11434'
-_DEFAULT_TEMPERATURE = 0.8
+_DEFAULT_TEMPERATURE = 0.1
 _DEFAULT_TIMEOUT = 120
 _DEFAULT_KEEP_ALIVE = 5 * 60  # 5 minutes
 _DEFAULT_NUM_CTX = 2048
+
+# Pre-configured FormatHandler for consistent Ollama configuration
+# use_wrapper=True creates {"extractions": [...]} vs just [...]
+# Ollama's JSON mode expects a dictionary root, not a bare list
+OLLAMA_FORMAT_HANDLER = fh.FormatHandler(
+    format_type=data.FormatType.JSON,
+    use_wrapper=True,
+    wrapper_key=None,
+    use_fences=False,
+    strict_fences=False,
+)
 
 
 @router.register(
@@ -177,7 +202,6 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
           FutureWarning,
           stacklevel=2,
       )
-      # Only use structured_output_format if format_type wasn't explicitly provided
       if format_type is None:
         format_type = (
             core_types.FormatType.JSON
@@ -193,17 +217,14 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
           else core_types.FormatType.YAML
       )
 
-    # Default to JSON if neither parameter was provided
     if format_type is None:
       format_type = core_types.FormatType.JSON
 
     self._model = model_id
-    # Support both model_url and base_url
     self._model_url = base_url or model_url or _OLLAMA_DEFAULT_MODEL_URL
     self.format_type = format_type
     self._constraint = constraint
 
-    # Extract authentication
     self._api_key = kwargs.pop('api_key', None)
     self._auth_scheme = kwargs.pop('auth_scheme', 'Bearer')
     self._auth_header = kwargs.pop('auth_header', 'Authorization')

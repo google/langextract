@@ -6,20 +6,25 @@ For setup instructions and documentation, see the [main README's Ollama section]
 
 ## Quick Reference
 
-**Local setup:**
+**Option 1: Run locally**
 ```bash
+# Install and start Ollama
 ollama pull gemma2:2b
-python quickstart.py
+ollama serve  # Keep this running in a separate terminal
+
+# Run the demo
+python demo_ollama.py
 ```
 
-**Docker setup:**
+**Option 2: Run with Docker**
 ```bash
+# Runs both Ollama and the demo in containers
 docker-compose up
 ```
 
 ## Files
 
-- `quickstart.py` - Basic extraction example with configurable model
+- `demo_ollama.py` - Comprehensive extraction examples demonstrating Ollama on README examples
 - `docker-compose.yml` - Production-ready Docker setup with health checks
 - `Dockerfile` - Container definition for LangExtract
 

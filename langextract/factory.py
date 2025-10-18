@@ -68,6 +68,7 @@ def _kwargs_with_environment_defaults(
     env_vars_by_provider = {
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
         "gpt": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
+        "o1": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
     }
 
     for provider_prefix, env_vars in env_vars_by_provider.items():

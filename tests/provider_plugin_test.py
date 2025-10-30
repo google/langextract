@@ -218,7 +218,7 @@ class PluginSmokeTest(absltest.TestCase):
     """Plugin with higher priority should override core provider on conflicts."""
 
     lx.providers.registry.clear()
-    lx.providers._PLUGINS_LOADED = False
+    lx.providers._plugins_loaded = False
 
     def _ep_load():
       @lx.providers.registry.register(r"^gemini", priority=50)
@@ -250,7 +250,7 @@ class PluginSmokeTest(absltest.TestCase):
     """resolve_provider should find plugin by class name and name-insensitive."""
 
     lx.providers.registry.clear()
-    lx.providers._PLUGINS_LOADED = False
+    lx.providers._plugins_loaded = False
 
     def _ep_load():
       @lx.providers.registry.register(r"^plugin-resolve")
@@ -437,9 +437,9 @@ class PluginE2ETest(absltest.TestCase):
 
     # Clear and set up registry
     lx.providers.registry.clear()
-    lx.providers._PLUGINS_LOADED = False
+    lx.providers._plugins_loaded = False
     self.addCleanup(lx.providers.registry.clear)
-    self.addCleanup(setattr, lx.providers, "_PLUGINS_LOADED", False)
+    self.addCleanup(setattr, lx.providers, "_plugins_loaded", False)
 
     with mock.patch.object(
         metadata, "entry_points", return_value=_create_mock_entry_points([ep])
@@ -673,7 +673,7 @@ class PluginE2ETest(absltest.TestCase):
         )
 
         lx.providers.registry.clear()
-        lx.providers._PLUGINS_LOADED = False
+        lx.providers._plugins_loaded = False
         lx.providers.load_plugins_once()
 
         with self.assertRaisesRegex(

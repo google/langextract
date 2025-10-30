@@ -23,6 +23,7 @@ from typing import Any, Final, Iterator, Sequence
 
 from absl import logging
 
+from langextract import retry_utils
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
@@ -179,6 +180,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         k: v for k, v in (kwargs or {}).items() if k in _API_CONFIG_KEYS
     }
 
+  @retry_utils.retry_chunk_processing()
   def _process_single_prompt(
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:

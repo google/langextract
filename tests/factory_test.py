@@ -72,7 +72,7 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
     router.clear()
     import langextract.providers as providers_module  # pylint: disable=import-outside-toplevel
 
-    providers_module._PLUGINS_LOADED = True
+    providers_module._plugins_loaded = True
     # Use direct registration for test providers to avoid module path issues
     router.register(r"^gemini", priority=100)(FakeGeminiProvider)
     router.register(r"^gpt", r"^o1", priority=100)(FakeOpenAIProvider)
@@ -82,7 +82,7 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
     router.clear()
     import langextract.providers as providers_module  # pylint: disable=import-outside-toplevel
 
-    providers_module._PLUGINS_LOADED = False
+    providers_module._plugins_loaded = False
 
   def test_create_model_basic(self):
     """Test basic model creation."""
@@ -341,8 +341,8 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
   def test_gemini_vertexai_parameters_accepted(self):
     """Test that Vertex AI parameters are properly passed to Gemini provider."""
-    original_entries = router._ENTRIES.copy()  # pylint: disable=protected-access
-    original_keys = router._ENTRY_KEYS.copy()  # pylint: disable=protected-access
+    original_entries = router._entries.copy()  # pylint: disable=protected-access
+    original_keys = router._entry_keys.copy()  # pylint: disable=protected-access
 
     try:
 
@@ -385,13 +385,13 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
       self.assertEqual(model.location, "us-central1")
       self.assertIsNone(model.api_key)
     finally:
-      router._ENTRIES = original_entries  # pylint: disable=protected-access
-      router._ENTRY_KEYS = original_keys  # pylint: disable=protected-access
+      router._entries = original_entries  # pylint: disable=protected-access
+      router._entry_keys = original_keys  # pylint: disable=protected-access
 
   def test_gemini_vertexai_with_credentials(self):
     """Test that Vertex AI credentials can be passed through."""
-    original_entries = router._ENTRIES.copy()  # pylint: disable=protected-access
-    original_keys = router._ENTRY_KEYS.copy()  # pylint: disable=protected-access
+    original_entries = router._entries.copy()  # pylint: disable=protected-access
+    original_keys = router._entry_keys.copy()  # pylint: disable=protected-access
 
     try:
 
@@ -417,8 +417,8 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
       self.assertEqual(model.credentials, mock_credentials)
     finally:
-      router._ENTRIES = original_entries  # pylint: disable=protected-access
-      router._ENTRY_KEYS = original_keys  # pylint: disable=protected-access
+      router._entries = original_entries  # pylint: disable=protected-access
+      router._entry_keys = original_keys  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":

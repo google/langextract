@@ -348,10 +348,12 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       )
 
     options: dict[str, Any] = {}
-    if keep_alive is not None:
-      options['keep_alive'] = keep_alive
-    else:
-      options['keep_alive'] = _DEFAULT_KEEP_ALIVE
+    # Compute keep_alive once; retain in options for back-compat and
+    # also send at the top level to match Ollama API.
+    keep_alive_value = (
+        keep_alive if keep_alive is not None else _DEFAULT_KEEP_ALIVE
+    )
+    options['keep_alive'] = keep_alive_value
 
     if seed is not None:
       options['seed'] = seed
@@ -402,6 +404,8 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
         'raw': raw,
         'options': options,
     }
+    # Canonical: keep_alive should be at the top level per Ollama API
+    payload['keep_alive'] = keep_alive_value
 
     if structured_output_format is not None:
       payload['format'] = structured_output_format

@@ -147,7 +147,7 @@ class TokenizedText:
 
 # Regex patterns for tokenization.
 _LETTERS_PATTERN = r"[A-Za-z]+"
-_DIGITS_PATTERN = r"[0-9]+"
+_DIGITS_PATTERN = r'[0-9]+(?:\.[0-9]+)?'
 _SYMBOLS_PATTERN = r"[^A-Za-z0-9\s]+"
 _END_OF_SENTENCE_PATTERN = re.compile(r"[.?!]$")
 _SLASH_ABBREV_PATTERN = r"[A-Za-z0-9]+(?:/[A-Za-z0-9]+)+"

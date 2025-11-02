@@ -26,6 +26,7 @@ from langextract import annotation
 from langextract import prompting
 from langextract import resolver as resolver_lib
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import tokenizer
 from langextract.core import types
 from langextract.providers import gemini
@@ -750,7 +751,7 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
               {"text": _FIXED_DOCUMENT_CONTENT, "document_id": "doc1"},
               {"text": _FIXED_DOCUMENT_CONTENT, "document_id": "doc1"},
           ],
-          expected_exception=annotation.DocumentRepeatError,
+          expected_exception=exceptions.InvalidDocumentError,
       ),
       dict(
           testcase_name="same_document_id_separated",
@@ -759,13 +760,13 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
               {"text": _FIXED_DOCUMENT_CONTENT, "document_id": "doc2"},
               {"text": _FIXED_DOCUMENT_CONTENT, "document_id": "doc1"},
           ],
-          expected_exception=annotation.DocumentRepeatError,
+          expected_exception=exceptions.InvalidDocumentError,
       ),
   )
   def test_annotate_documents_exceptions(
       self,
       documents: Sequence[dict[str, str]],
-      expected_exception: Type[annotation.DocumentRepeatError],
+      expected_exception: Type[exceptions.InvalidDocumentError],
       batch_length: int = 1,
   ):
     mock_language_model = self.enter_context(

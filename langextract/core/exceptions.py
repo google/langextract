@@ -26,6 +26,8 @@ __all__ = [
     "InferenceConfigError",
     "InferenceRuntimeError",
     "InferenceOutputError",
+    "InternalError",
+    "InvalidDocumentError",
     "ProviderError",
     "SchemaError",
     "FormatError",
@@ -86,6 +88,20 @@ class InferenceOutputError(LangExtractError):
   def __init__(self, message: str):
     self.message = message
     super().__init__(self.message)
+
+
+class InvalidDocumentError(LangExtractError):
+  """Exception raised when document input is invalid.
+
+  This includes cases like duplicate document IDs or malformed documents.
+  """
+
+
+class InternalError(LangExtractError):
+  """Exception raised for internal invariant violations.
+
+  This indicates a bug in LangExtract itself rather than user error.
+  """
 
 
 class ProviderError(LangExtractError):

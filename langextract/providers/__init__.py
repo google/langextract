@@ -44,8 +44,8 @@ __all__ = [
 ]
 
 # Track provider loading for lazy initialization
-_PLUGINS_LOADED = False
-_BUILTINS_LOADED = False
+_plugins_loaded = False  # pylint: disable=invalid-name
+_builtins_loaded = False  # pylint: disable=invalid-name
 
 
 def load_builtins_once() -> None:
@@ -56,9 +56,9 @@ def load_builtins_once() -> None:
   can be re-registered after registry.clear() even if their modules
   are already in sys.modules.
   """
-  global _BUILTINS_LOADED  # pylint: disable=global-statement
+  global _builtins_loaded  # pylint: disable=global-statement
 
-  if _BUILTINS_LOADED:
+  if _builtins_loaded:
     return
 
   # Register built-ins lazily so they can be re-registered after a registry.clear()
@@ -70,7 +70,7 @@ def load_builtins_once() -> None:
         priority=config['priority'],
     )
 
-  _BUILTINS_LOADED = True
+  _builtins_loaded = True
 
 
 def load_plugins_once() -> None:
@@ -79,8 +79,8 @@ def load_plugins_once() -> None:
   Discovers and loads langextract provider plugins using entry points.
   This function is idempotent - multiple calls have no effect.
   """
-  global _PLUGINS_LOADED  # pylint: disable=global-statement
-  if _PLUGINS_LOADED:
+  global _plugins_loaded  # pylint: disable=global-statement
+  if _plugins_loaded:
     return
 
   # Check if plugin loading is disabled
@@ -90,7 +90,7 @@ def load_plugins_once() -> None:
       'yes',
   ):
     logging.info('Plugin loading disabled via LANGEXTRACT_DISABLE_PLUGINS')
-    _PLUGINS_LOADED = True
+    _plugins_loaded = True
     return
 
   # Load built-in providers first
@@ -144,14 +144,14 @@ def load_plugins_once() -> None:
   except Exception as e:
     logging.warning('Error discovering provider plugins: %s', e)
 
-  _PLUGINS_LOADED = True
+  _plugins_loaded = True
 
 
 def _reset_for_testing() -> None:
   """Reset plugin loading state for testing. Should only be used in tests."""
-  global _PLUGINS_LOADED, _BUILTINS_LOADED  # pylint: disable=global-statement
-  _PLUGINS_LOADED = False
-  _BUILTINS_LOADED = False
+  global _plugins_loaded, _builtins_loaded  # pylint: disable=global-statement
+  _plugins_loaded = False
+  _builtins_loaded = False
 
 
 def __getattr__(name: str):
@@ -160,8 +160,8 @@ def __getattr__(name: str):
     return importlib.import_module('langextract.providers.router')
   elif name == 'schemas':
     return importlib.import_module('langextract.providers.schemas')
-  elif name == '_PLUGINS_LOADED':
-    return _PLUGINS_LOADED
-  elif name == '_BUILTINS_LOADED':
-    return _BUILTINS_LOADED
+  elif name == '_plugins_loaded':
+    return _plugins_loaded
+  elif name == '_builtins_loaded':
+    return _builtins_loaded
   raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

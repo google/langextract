@@ -164,3 +164,7 @@ cache/
 *.mp3
 *.wav
 *.ogg
+
+# Benchmark results and local environment
+langextract_env/
+benchmarks/benchmark_results

@@ -555,11 +555,7 @@ class InitTest(parameterized.TestCase):
     mock_model.requires_fence_output = False
     mock_create_model.return_value = mock_model
 
-    mock_progress_bar = mock.MagicMock()
-    mock_progress_bar.__iter__ = mock.MagicMock(
-        return_value=iter([mock.MagicMock()])
-    )
-    mock_progress.return_value = mock_progress_bar
+    mock_progress.side_effect = lambda iterable, **kwargs: iter(iterable)
 
     mock_examples = [
         lx.data.ExampleData(

@@ -59,7 +59,7 @@ def extract(
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
-) -> typing.Any:
+) -> list[data.AnnotatedDocument] | data.AnnotatedDocument:
   """Extracts structured information from text.
 
   Retrieves structured information from the provided text or documents using a
@@ -322,7 +322,7 @@ def extract(
   )
 
   if isinstance(text_or_documents, str):
-    return annotator.annotate_text(
+    result = annotator.annotate_text(
         text=text_or_documents,
         resolver=res,
         max_char_buffer=max_char_buffer,
@@ -334,9 +334,10 @@ def extract(
         max_workers=max_workers,
         **alignment_kwargs,
     )
+    return result
   else:
     documents = cast(Iterable[data.Document], text_or_documents)
-    return annotator.annotate_documents(
+    result = annotator.annotate_documents(
         documents=documents,
         resolver=res,
         max_char_buffer=max_char_buffer,
@@ -347,3 +348,4 @@ def extract(
         max_workers=max_workers,
         **alignment_kwargs,
     )
+    return list(result)

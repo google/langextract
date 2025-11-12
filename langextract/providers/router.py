@@ -46,8 +46,8 @@ class _Entry:
   priority: int
 
 
-_entries: list[_Entry] = []  # pylint: disable=invalid-name
-_entry_keys: set[tuple[str, tuple[str, ...], int]] = (  # pylint: disable=invalid-name
+_entries: list[_Entry] = []
+_entry_keys: set[tuple[str, tuple[str, ...], int]] = (
     set()
 )  # (provider_id, patterns, priority)
 

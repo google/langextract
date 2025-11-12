@@ -28,9 +28,14 @@ from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import schema
 from langextract.core import types as core_types
+from langextract.providers import gemini_batch
 from langextract.providers import patterns
 from langextract.providers import router
 from langextract.providers import schemas
+
+_DEFAULT_MODEL_ID = 'gemini-2.5-flash'
+_DEFAULT_LOCATION = 'us-central1'
+_MIME_TYPE_JSON = 'application/json'
 
 _API_CONFIG_KEYS: Final[set[str]] = {
     'response_mime_type',
@@ -51,7 +56,7 @@ _API_CONFIG_KEYS: Final[set[str]] = {
 class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-many-instance-attributes
   """Language model inference using Google's Gemini API with structured output."""
 
-  model_id: str = 'gemini-2.5-flash'
+  model_id: str = _DEFAULT_MODEL_ID
   api_key: str | None = None
   vertexai: bool = False
   credentials: Any | None = None
@@ -83,13 +88,12 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       schema_instance: The schema instance to apply, or None to clear.
     """
     super().apply_schema(schema_instance)
-    # Keep provider behavior consistent with legacy path
     if isinstance(schema_instance, schemas.gemini.GeminiSchema):
       self.gemini_schema = schema_instance
 
   def __init__(
       self,
-      model_id: str = 'gemini-2.5-flash',
+      model_id: str = _DEFAULT_MODEL_ID,
       api_key: str | None = None,
       vertexai: bool = False,
       credentials: Any | None = None,
@@ -146,6 +150,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.max_workers = max_workers
     self.fence_output = fence_output
 
+    # Extract batch config before we filter kwargs into _extra_kwargs
+    batch_cfg_dict = kwargs.pop('batch', None)
+    self._batch_cfg = gemini_batch.BatchConfig.from_dict(batch_cfg_dict)
+
     if not self.api_key and not self.vertexai:
       raise exceptions.InferenceConfigError(
           'Gemini models require either:\n  - An API key via api_key parameter'
@@ -179,6 +187,18 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         k: v for k, v in (kwargs or {}).items() if k in _API_CONFIG_KEYS
     }
 
+  def _validate_schema_config(self) -> None:
+    """Validate that schema configuration is compatible with format type.
+
+    Raises:
+      InferenceConfigError: If gemini_schema is set but format_type is not JSON.
+    """
+    if self.gemini_schema and self.format_type != data.FormatType.JSON:
+      raise exceptions.InferenceConfigError(
+          'Gemini structured output only supports JSON format. '
+          'Set format_type=JSON or use_schema_constraints=False.'
+      )
+
   def _process_single_prompt(
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
@@ -190,12 +210,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           config[key] = value
 
       if self.gemini_schema:
-        # Structured output requires JSON format
-        if self.format_type != data.FormatType.JSON:
-          raise exceptions.InferenceConfigError(
-              'Gemini structured output only supports JSON format. '
-              'Set format_type=JSON or use_schema_constraints=False.'
-          )
+        self._validate_schema_config()
         config.setdefault('response_mime_type', 'application/json')
         config.setdefault('response_schema', self.gemini_schema.schema_dict)
 
@@ -227,12 +242,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     config = {
         'temperature': merged_kwargs.get('temperature', self.temperature),
     }
-    if 'max_output_tokens' in merged_kwargs:
-      config['max_output_tokens'] = merged_kwargs['max_output_tokens']
-    if 'top_p' in merged_kwargs:
-      config['top_p'] = merged_kwargs['top_p']
-    if 'top_k' in merged_kwargs:
-      config['top_k'] = merged_kwargs['top_k']
+    for key in ('max_output_tokens', 'top_p', 'top_k'):
+      if key in merged_kwargs:
+        config[key] = merged_kwargs[key]
 
     handled_keys = {'temperature', 'max_output_tokens', 'top_p', 'top_k'}
     for key, value in merged_kwargs.items():
@@ -242,6 +254,52 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           and value is not None
       ):
         config[key] = value
+
+    # Use batch API if threshold met
+    if self._batch_cfg and self._batch_cfg.enabled:
+      if len(batch_prompts) >= self._batch_cfg.threshold:
+        try:
+          if self.gemini_schema:
+            self._validate_schema_config()
+          schema_dict = (
+              self.gemini_schema.schema_dict if self.gemini_schema else None
+          )
+          # Remove schema fields from config for batch API - they're handled via schema_dict
+          batch_config = dict(config)
+          batch_config.pop('response_mime_type', None)
+          batch_config.pop('response_schema', None)
+          # Extract top-level fields that don't belong in generationConfig
+          system_instruction = batch_config.pop('system_instruction', None)
+          safety_settings = batch_config.pop('safety_settings', None)
+          outputs = gemini_batch.infer_batch(
+              client=self._client,
+              model_id=self.model_id,
+              prompts=batch_prompts,
+              schema_dict=schema_dict,
+              gen_config=batch_config,
+              cfg=self._batch_cfg,
+              system_instruction=system_instruction,
+              safety_settings=safety_settings,
+          )
+        except exceptions.InferenceRuntimeError:
+          raise
+        except Exception as e:
+          raise exceptions.InferenceRuntimeError(
+              f'Gemini Batch API error: {e}', original=e
+          ) from e
+
+        for text in outputs:
+          yield [core_types.ScoredOutput(score=1.0, output=text)]
+        return
+      else:
+        logging.info(
+            'Gemini batch mode enabled but prompt count (%d) is below the'
+            ' threshold (%d); using real-time API. Submit at least %d prompts'
+            ' to trigger batch mode.',
+            len(batch_prompts),
+            self._batch_cfg.threshold,
+            self._batch_cfg.threshold,
+        )
 
     # Use parallel processing for batches larger than 1
     if len(batch_prompts) > 1 and self.max_workers > 1:

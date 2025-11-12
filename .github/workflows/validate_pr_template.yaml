@@ -38,10 +38,10 @@ jobs:
               owner, repo,
               pull_number: pr.number
             });
-            
-            const isCommunityProviderPR = files.length === 1 && 
+
+            const isCommunityProviderPR = files.length === 1 &&
                                           files[0].filename === 'COMMUNITY_PROVIDERS.md';
-            
+
             if (isCommunityProviderPR) {
               core.setOutput('is_community_provider', 'true');
               console.log('Community provider PR detected - relaxed validation will apply');

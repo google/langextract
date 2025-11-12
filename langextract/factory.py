@@ -63,7 +63,7 @@ def _kwargs_with_environment_defaults(
   """
   resolved = dict(kwargs)
 
-  if "api_key" not in resolved:
+  if "api_key" not in resolved and not resolved.get("vertexai", False):
     model_lower = model_id.lower()
     env_vars_by_provider = {
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),

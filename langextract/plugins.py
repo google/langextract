@@ -19,10 +19,9 @@ It supports both built-in providers and third-party providers via entry points.
 """
 from __future__ import annotations
 
-from functools import lru_cache
-from importlib import import_module
-from importlib.metadata import entry_points
-from typing import Dict, List, Type
+import functools
+import importlib
+from importlib import metadata
 
 from absl import logging
 
@@ -31,18 +30,18 @@ from langextract.core import base_model
 __all__ = ["available_providers", "get_provider_class"]
 
 # Static mapping for built-in providers (always available)
-_BUILTINS: Dict[str, str] = {
+_BUILTINS: dict[str, str] = {
     "gemini": "langextract.providers.gemini:GeminiLanguageModel",
     "ollama": "langextract.providers.ollama:OllamaLanguageModel",
 }
 
 # Optional built-in providers (require extra dependencies)
-_OPTIONAL_BUILTINS: Dict[str, str] = {
+_OPTIONAL_BUILTINS: dict[str, str] = {
     "openai": "langextract.providers.openai:OpenAILanguageModel",
 }
 
 
-def _safe_entry_points(group: str) -> List:
+def _safe_entry_points(group: str) -> list:
   """Get entry points with Python 3.8-3.12 compatibility.
 
   Args:
@@ -51,7 +50,7 @@ def _safe_entry_points(group: str) -> List:
   Returns:
     List of entry points in the specified group.
   """
-  eps = entry_points()
+  eps = metadata.entry_points()
   try:
     # Python 3.10+
     return list(eps.select(group=group))
@@ -60,18 +59,18 @@ def _safe_entry_points(group: str) -> List:
     return list(eps.get(group, []))  # pylint: disable=no-member
 
 
-@lru_cache(maxsize=1)
-def _discovered() -> Dict[str, str]:
+@functools.lru_cache(maxsize=1)
+def _discovered() -> dict[str, str]:
   """Cache discovered third-party providers.
 
   Returns:
     Dictionary mapping provider names to import specs.
   """
-  discovered: Dict[str, str] = {}
+  discovered: dict[str, str] = {}
   for ep in _safe_entry_points("langextract.providers"):
     # Handle both old and new entry_points API
     if hasattr(ep, "value"):
-      # Modern API
+
       discovered.setdefault(ep.name, ep.value)
     else:
       # Legacy API - construct from module and attr
@@ -88,7 +87,7 @@ def _discovered() -> Dict[str, str]:
 
 def available_providers(
     allow_override: bool = False, include_optional: bool = True
-) -> Dict[str, str]:
+) -> dict[str, str]:
   """Get all available providers (built-in + optional + third-party).
 
   Args:
@@ -100,10 +99,9 @@ def available_providers(
   Returns:
     Dictionary mapping provider names to import specifications.
   """
-  # Start with third-party providers
+
   providers = dict(_discovered())
 
-  # Add optional built-ins if requested
   if include_optional:
     if allow_override:
       # Third-party can override optional built-ins
@@ -123,7 +121,7 @@ def available_providers(
   return providers
 
 
-def _load_class(spec: str) -> Type[base_model.BaseLanguageModel]:
+def _load_class(spec: str) -> type[base_model.BaseLanguageModel]:
   """Load a provider class from module:Class specification.
 
   Args:
@@ -143,7 +141,7 @@ def _load_class(spec: str) -> Type[base_model.BaseLanguageModel]:
     )
 
   try:
-    module = import_module(module_path)
+    module = importlib.import_module(module_path)
   except ImportError as e:
     raise ImportError(
         f"Failed to import provider module '{module_path}': {e}"
@@ -172,7 +170,6 @@ def _load_class(spec: str) -> Type[base_model.BaseLanguageModel]:
           f" {missing}"
       )
 
-    # Log warning but allow if structurally compatible
     logging.warning(
         "Provider %s does not inherit from BaseLanguageModel but appears"
         " compatible",
@@ -182,10 +179,10 @@ def _load_class(spec: str) -> Type[base_model.BaseLanguageModel]:
   return cls
 
 
-@lru_cache(maxsize=None)  # Cache all loaded classes
+@functools.lru_cache(maxsize=None)  # Cache all loaded classes
 def get_provider_class(
     name: str, allow_override: bool = False, include_optional: bool = True
-) -> Type[base_model.BaseLanguageModel]:
+) -> type[base_model.BaseLanguageModel]:
   """Get a provider class by name.
 
   Args:

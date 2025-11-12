@@ -18,19 +18,27 @@ These tests are skipped if API keys are not available in the environment.
 They should run in CI after all other tests pass.
 """
 
-from functools import wraps
+import functools
+import json
 import os
 import re
 import textwrap
 import time
+from typing import Any
 import unittest
+from unittest import mock
+import uuid
 
-from dotenv import load_dotenv
+import dotenv
+import google.auth
+import google.auth.exceptions
 import pytest
 
+from langextract import data
 import langextract as lx
+from langextract.providers import gemini_batch as gb
 
-load_dotenv()
+dotenv.load_dotenv()
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
@@ -39,6 +47,23 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get(
     "LANGEXTRACT_API_KEY"
 )
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+VERTEX_PROJECT = os.environ.get("VERTEX_PROJECT") or os.environ.get(
+    "GOOGLE_CLOUD_PROJECT"
+)
+VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")
+
+
+def has_vertex_ai_credentials():
+  """Check if Vertex AI credentials are available."""
+  if not VERTEX_PROJECT:
+    return False
+  try:
+    credentials, _ = google.auth.default()
+    return credentials is not None
+  except (ImportError, google.auth.exceptions.DefaultCredentialsError):
+    return False
+
 
 skip_if_no_gemini = pytest.mark.skipif(
     not GEMINI_API_KEY,
@@ -50,6 +75,13 @@ skip_if_no_gemini = pytest.mark.skipif(
 skip_if_no_openai = pytest.mark.skipif(
     not OPENAI_API_KEY,
     reason="OpenAI API key not available (set OPENAI_API_KEY)",
+)
+skip_if_no_vertex = pytest.mark.skipif(
+    not has_vertex_ai_credentials(),
+    reason=(
+        "Vertex AI credentials not available (set GOOGLE_CLOUD_PROJECT and"
+        " configure gcloud auth)"
+    ),
 )
 
 live_api = pytest.mark.live_api
@@ -64,6 +96,13 @@ OPENAI_MODEL_PARAMS = {
     "temperature": 0.0,
 }
 
+# Extraction Classes
+_CLASS_MEDICATION = "medication"
+_CLASS_DOSAGE = "dosage"
+_CLASS_ROUTE = "route"
+_CLASS_FREQUENCY = "frequency"
+_CLASS_DURATION = "duration"
+_CLASS_CONDITION = "condition"
 
 INITIAL_RETRY_DELAY = 1.0
 MAX_RETRY_DELAY = 8.0
@@ -73,12 +112,12 @@ def retry_on_transient_errors(max_retries=3, backoff_factor=2.0):
   """Decorator to retry tests on transient API errors with exponential backoff.
 
   Args:
-    max_retries: Maximum number of retry attempts
-    backoff_factor: Multiplier for exponential backoff (e.g., 2.0 = 1s, 2s, 4s)
+    max_retries (int): Maximum number of retry attempts
+    backoff_factor (float): Multiplier for exponential backoff (e.g., 2.0 = 1s, 2s, 4s)
   """
 
   def decorator(func):
-    @wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
       last_exception = None
       delay = INITIAL_RETRY_DELAY
@@ -94,35 +133,16 @@ def retry_on_transient_errors(max_retries=3, backoff_factor=2.0):
             RuntimeError,
         ) as e:
           last_exception = e
-          error_str = str(e).lower()
-          error_type = type(e).__name__
-
-          transient_errors = [
-              "503",
-              "service unavailable",
-              "temporarily unavailable",
-              "rate limit",
-              "429",
-              "too many requests",
-              "connection reset",
-              "timeout",
-              "deadline exceeded",
-          ]
-
-          is_transient = any(
-              err in error_str for err in transient_errors
-          ) or error_type in ["ServiceUnavailable", "RateLimitError", "Timeout"]
-
-          if is_transient and attempt < max_retries:
+          if attempt < max_retries:
             print(
-                f"\nTransient error ({error_type}) on attempt"
+                f"\nRetryable error ({type(e).__name__}) on attempt"
                 f" {attempt + 1}/{max_retries + 1}: {e}"
             )
-            print(f"Retrying in {delay} seconds...")
             time.sleep(delay)
             delay = min(delay * backoff_factor, MAX_RETRY_DELAY)
-          else:
-            raise
+            continue
+
+          raise
 
       raise last_exception
 
@@ -145,20 +165,22 @@ def get_basic_medication_examples():
           text="Patient was given 250 mg IV Cefazolin TID for one week.",
           extractions=[
               lx.data.Extraction(
-                  extraction_class="dosage", extraction_text="250 mg"
+                  extraction_class=_CLASS_DOSAGE, extraction_text="250 mg"
               ),
               lx.data.Extraction(
-                  extraction_class="route", extraction_text="IV"
+                  extraction_class=_CLASS_ROUTE, extraction_text="IV"
               ),
               lx.data.Extraction(
-                  extraction_class="medication", extraction_text="Cefazolin"
+                  extraction_class=_CLASS_MEDICATION,
+                  extraction_text="Cefazolin",
               ),
               lx.data.Extraction(
-                  extraction_class="frequency",
+                  extraction_class=_CLASS_FREQUENCY,
                   extraction_text="TID",  # TID = three times a day
               ),
               lx.data.Extraction(
-                  extraction_class="duration", extraction_text="for one week"
+                  extraction_class=_CLASS_DURATION,
+                  extraction_text="for one week",
               ),
           ],
       )
@@ -176,38 +198,38 @@ def get_relationship_examples():
           extractions=[
               # First medication group
               lx.data.Extraction(
-                  extraction_class="medication",
+                  extraction_class=_CLASS_MEDICATION,
                   extraction_text="Aspirin",
                   attributes={"medication_group": "Aspirin"},
               ),
               lx.data.Extraction(
-                  extraction_class="dosage",
+                  extraction_class=_CLASS_DOSAGE,
                   extraction_text="100mg",
                   attributes={"medication_group": "Aspirin"},
               ),
               lx.data.Extraction(
-                  extraction_class="frequency",
+                  extraction_class=_CLASS_FREQUENCY,
                   extraction_text="daily",
                   attributes={"medication_group": "Aspirin"},
               ),
               lx.data.Extraction(
-                  extraction_class="condition",
+                  extraction_class=_CLASS_CONDITION,
                   extraction_text="heart health",
                   attributes={"medication_group": "Aspirin"},
               ),
               # Second medication group
               lx.data.Extraction(
-                  extraction_class="medication",
+                  extraction_class=_CLASS_MEDICATION,
                   extraction_text="Simvastatin",
                   attributes={"medication_group": "Simvastatin"},
               ),
               lx.data.Extraction(
-                  extraction_class="dosage",
+                  extraction_class=_CLASS_DOSAGE,
                   extraction_text="20mg",
                   attributes={"medication_group": "Simvastatin"},
               ),
               lx.data.Extraction(
-                  extraction_class="frequency",
+                  extraction_class=_CLASS_FREQUENCY,
                   extraction_text="at bedtime",
                   attributes={"medication_group": "Simvastatin"},
               ),
@@ -254,7 +276,7 @@ def assert_valid_char_intervals(test_case, result):
         "Missing alignment_status for extraction:"
         f" {extraction.extraction_text}",
     )
-    if hasattr(result, "text") and result.text:
+    if isinstance(result, lx.data.AnnotatedDocument) and result.text:
       text_length = len(result.text)
       test_case.assertGreaterEqual(
           extraction.char_interval.start_pos,
@@ -270,6 +292,77 @@ def assert_valid_char_intervals(test_case, result):
 
 class TestLiveAPIGemini(unittest.TestCase):
   """Tests using real Gemini API."""
+
+  def _check_cached_result(self, result_json: dict[str, Any]) -> bool:
+    """Check if cached result contains expected medication data.
+
+    Args:
+      result_json: The raw JSON dict from the cache file.
+                   Expected format: {"text": "JSON_STRING_OF_RESULT"}
+
+    Returns:
+      True if the result contains valid medication extractions, False otherwise.
+    """
+    try:
+      text_content = result_json.get("text")
+      if not isinstance(text_content, str):
+        return False
+
+      inner_json = json.loads(text_content)
+      if not isinstance(inner_json, dict):
+        return False
+
+      extractions_data = inner_json.get(data.EXTRACTIONS_KEY)
+      if not isinstance(extractions_data, list):
+        return False
+
+      extractions = []
+      for item in extractions_data:
+        if isinstance(item, dict):
+          clean_item = {k: v for k, v in item.items() if not k.startswith("_")}
+          extractions.append(data.Extraction(**clean_item))
+
+      doc = data.AnnotatedDocument(
+          text=inner_json.get("text"), extractions=extractions
+      )
+
+      if not doc.extractions:
+        return False
+
+      # Check for specific content
+      medication_texts = extract_by_class(doc, _CLASS_MEDICATION)
+      dosage_texts = extract_by_class(doc, _CLASS_DOSAGE)
+
+      has_lisinopril = any("Lisinopril" in t for t in medication_texts)
+      has_10mg = any("10mg" in t for t in dosage_texts)
+
+      return has_lisinopril and has_10mg
+
+    except (json.JSONDecodeError, TypeError, ValueError):
+      return False
+
+  def _verify_gcs_cache_content(self, bucket_name):
+    """Verify that GCS cache contains expected structured results."""
+    cache = gb.GCSBatchCache(bucket_name, project=VERTEX_PROJECT)
+    found_content = False
+
+    # Use iter_items() to check cache content
+    items = list(cache.iter_items())
+    self.assertTrue(len(items) > 0, "No cache files found in GCS bucket")
+
+    for _, text in items:
+      try:
+        result_json = json.loads(text)
+        if self._check_cached_result(result_json):
+          found_content = True
+          break
+      except (json.JSONDecodeError, TypeError, ValueError):
+        continue
+
+    self.assertTrue(
+        found_content,
+        "Could not find expected structured result in GCS cache files",
+    )
 
   @skip_if_no_gemini
   @live_api
@@ -293,21 +386,21 @@ class TestLiveAPIGemini(unittest.TestCase):
     )
 
     assert result is not None
-    assert hasattr(result, "extractions")
+    self.assertIsInstance(result, lx.data.AnnotatedDocument)
     assert len(result.extractions) > 0
 
     expected_classes = {
-        "dosage",
-        "route",
-        "medication",
-        "frequency",
-        "duration",
+        _CLASS_DOSAGE,
+        _CLASS_ROUTE,
+        _CLASS_MEDICATION,
+        _CLASS_FREQUENCY,
+        _CLASS_DURATION,
     }
     assert_extractions_contain(self, result, expected_classes)
     assert_valid_char_intervals(self, result)
 
     # Using regex for precise matching to avoid false positives
-    medication_texts = extract_by_class(result, "medication")
+    medication_texts = extract_by_class(result, _CLASS_MEDICATION)
     self.assertTrue(
         any(
             re.search(r"\bIbuprofen\b", text, re.IGNORECASE)
@@ -316,7 +409,7 @@ class TestLiveAPIGemini(unittest.TestCase):
         f"No Ibuprofen found in: {medication_texts}",
     )
 
-    dosage_texts = extract_by_class(result, "dosage")
+    dosage_texts = extract_by_class(result, _CLASS_DOSAGE)
     self.assertTrue(
         any(
             re.search(r"\b400\s*mg\b", text, re.IGNORECASE)
@@ -325,7 +418,7 @@ class TestLiveAPIGemini(unittest.TestCase):
         f"No 400mg dosage found in: {dosage_texts}",
     )
 
-    route_texts = extract_by_class(result, "route")
+    route_texts = extract_by_class(result, _CLASS_ROUTE)
     self.assertTrue(
         any(
             re.search(r"\b(PO|oral)\b", text, re.IGNORECASE)
@@ -357,9 +450,12 @@ class TestLiveAPIGemini(unittest.TestCase):
             text="The patient takes 20mg of aspirin twice daily.",
             extractions=[
                 lx.data.Extraction(
-                    extraction_class="medication",
+                    extraction_class=_CLASS_MEDICATION,
                     extraction_text="aspirin",
-                    attributes={"dosage": "20mg", "frequency": "twice daily"},
+                    attributes={
+                        _CLASS_DOSAGE: "20mg",
+                        _CLASS_FREQUENCY: "twice daily",
+                    },
                 ),
             ],
         )
@@ -375,11 +471,11 @@ class TestLiveAPIGemini(unittest.TestCase):
     )
 
     assert result is not None
-    assert hasattr(result, "extractions")
+    self.assertIsInstance(result, lx.data.AnnotatedDocument)
     assert len(result.extractions) > 0
 
     medication_extractions = [
-        e for e in result.extractions if e.extraction_class == "medication"
+        e for e in result.extractions if e.extraction_class == _CLASS_MEDICATION
     ]
     assert (
         len(medication_extractions) > 0
@@ -393,7 +489,7 @@ class TestLiveAPIGemini(unittest.TestCase):
     """Test using explicit provider with Gemini."""
     # Test using provider class name
     config = lx.factory.ModelConfig(
-        model_id="gemini-2.5-flash",
+        model_id=DEFAULT_GEMINI_MODEL,
         provider="GeminiLanguageModel",
         provider_kwargs={
             "api_key": GEMINI_API_KEY,
@@ -403,11 +499,11 @@ class TestLiveAPIGemini(unittest.TestCase):
 
     model = lx.factory.create_model(config)
     self.assertEqual(model.__class__.__name__, "GeminiLanguageModel")
-    self.assertEqual(model.model_id, "gemini-2.5-flash")
+    self.assertEqual(model.model_id, DEFAULT_GEMINI_MODEL)
 
     # Test using partial name match
     config2 = lx.factory.ModelConfig(
-        model_id="gemini-2.5-flash",
+        model_id=DEFAULT_GEMINI_MODEL,
         provider="gemini",  # Should match GeminiLanguageModel
         provider_kwargs={
             "api_key": GEMINI_API_KEY,
@@ -472,12 +568,213 @@ class TestLiveAPIGemini(unittest.TestCase):
       extraction_classes = {e.extraction_class for e in extractions}
       # At minimum, each group should have the medication itself
       assert (
-          "medication" in extraction_classes
+          _CLASS_MEDICATION in extraction_classes
       ), f"{med_name} group missing medication entity"
       # Dosage is expected but might be formatted differently
       assert any(
-          c in extraction_classes for c in ["dosage", "dose"]
+          c in extraction_classes for c in [_CLASS_DOSAGE, "dose"]
       ), f"{med_name} group missing dosage"
+
+  @skip_if_no_vertex
+  @live_api
+  @pytest.mark.vertex_ai
+  @mock.patch.object(gb, "infer_batch", wraps=gb.infer_batch, autospec=True)
+  def test_batch_extraction_vertex_gcs(self, mock_infer_batch):
+    """Test extraction using Vertex AI Batch API with GCS.
+
+    This test runs a real Vertex AI Batch job and will take time to complete.
+    It is skipped unless VERTEX_PROJECT is set.
+
+    We wrap `infer_batch` to verify that:
+    - Batch API is actually called (not falling back to real-time API)
+    - Schema dict is passed (non-None) to the batch function
+    """
+
+    prompt = textwrap.dedent("""\
+        Extract medication information including medication name, dosage, route, frequency,
+        and duration in the order they appear in the text.""")
+
+    examples = get_basic_medication_examples()
+
+    documents = [
+        lx.data.Document(
+            document_id="vx_doc1",
+            text="Patient took 400 mg PO Ibuprofen q4h for two days.",
+        ),
+        lx.data.Document(
+            document_id="vx_doc2",
+            text="Patient was given 250 mg IV Cefazolin TID for one week.",
+        ),
+        lx.data.Document(
+            document_id="vx_doc3",
+            text="Administered 2 mg IV Morphine once for acute pain.",
+        ),
+        lx.data.Document(
+            document_id="vx_doc4",
+            text="Prescribed 500 mg PO Amoxicillin BID for infection.",
+        ),
+        lx.data.Document(
+            document_id="vx_doc5",
+            text="Given 10 mg IM Haloperidol PRN for agitation.",
+        ),
+    ]
+    expected_meds = [
+        "Ibuprofen",
+        "Cefazolin",
+        "Morphine",
+        "Amoxicillin",
+        "Haloperidol",
+    ]
+
+    language_model_params = dict(GEMINI_MODEL_PARAMS)
+    language_model_params["vertexai"] = True
+    language_model_params["project"] = VERTEX_PROJECT
+    language_model_params["location"] = VERTEX_LOCATION
+    language_model_params["batch"] = {
+        "enabled": True,
+        "threshold": 2,
+        "poll_interval": 1,  # Fast polling for test
+        "timeout": 900,  # 15 minutes for actual batch job completion
+    }
+
+    batch_result = lx.extract(
+        text_or_documents=documents,
+        prompt_description=prompt,
+        examples=examples,
+        model_id=DEFAULT_GEMINI_MODEL,
+        language_model_params=language_model_params,
+    )
+
+    mock_infer_batch.assert_called_once()
+    call_args = mock_infer_batch.call_args
+    schema_dict_arg = call_args.kwargs.get("schema_dict")
+    self.assertIsNotNone(
+        schema_dict_arg,
+        "schema_dict should be passed to batch API (not None)",
+    )
+
+    # Verify batch results
+    self.assertIsInstance(batch_result, list)
+    self.assertEqual(
+        len(batch_result),
+        len(documents),
+        f"Expected {len(documents)} results from Vertex batch API",
+    )
+
+    for i, (res, med_name) in enumerate(zip(batch_result, expected_meds)):
+      self.assertIsInstance(
+          res,
+          lx.data.AnnotatedDocument,
+          f"Result {i} should be an AnnotatedDocument, got {type(res)}",
+      )
+      self.assertTrue(
+          res.extractions,
+          f"No extractions for document {i}",
+      )
+      for extraction in res.extractions:
+        self.assertIsInstance(
+            extraction,
+            lx.data.Extraction,
+            "Extraction item should be Extraction object, got"
+            f" {type(extraction)}",
+        )
+
+      meds = extract_by_class(res, _CLASS_MEDICATION)
+      self.assertTrue(
+          any(
+              re.search(rf"\b{re.escape(med_name)}\b", m, re.IGNORECASE)
+              for m in meds
+          ),
+          f"Expected medication '{med_name}' not found in results: {meds}",
+      )
+
+      dosages = extract_by_class(res, _CLASS_DOSAGE)
+      self.assertTrue(
+          dosages,
+          f"No dosage extracted for medication '{med_name}'",
+      )
+
+      assert_valid_char_intervals(self, res)
+
+  @skip_if_no_vertex
+  @live_api
+  @pytest.mark.vertex_ai
+  def test_batch_caching_live(self):
+    """Test batch caching with real Vertex AI Batch API.
+
+    Verifies that:
+    1. First run populates GCS cache
+    2. Second run uses cache (returns same results faster)
+    """
+    prompt = "Extract the medication: Patient takes 10mg Lisinopril."
+    examples = get_basic_medication_examples()
+
+    # Use unique IDs to ensure cache isolation between test runs.
+    run_id = uuid.uuid4().hex[:8]
+    documents = [
+        lx.data.Document(
+            document_id=f"doc_{i}_{run_id}",
+            text=f"Patient takes 10mg Lisinopril {i} {run_id}.",
+        )
+        for i in range(2)
+    ]
+
+    language_model_params = dict(GEMINI_MODEL_PARAMS)
+    language_model_params["vertexai"] = True
+    language_model_params["project"] = VERTEX_PROJECT
+    language_model_params["location"] = VERTEX_LOCATION
+    language_model_params["batch"] = {
+        "enabled": True,
+        "threshold": 2,
+        "poll_interval": 1,
+        "timeout": 900,
+        "enable_caching": True,
+    }
+
+    # First run - should hit API and populate cache
+    print("\nStarting first batch run (API)...")
+    start_time = time.time()
+    results1 = list(
+        lx.extract(
+            text_or_documents=documents,
+            prompt_description=prompt,
+            examples=examples,
+            model_id=DEFAULT_GEMINI_MODEL,
+            language_model_params=language_model_params,
+        )
+    )
+    duration1 = time.time() - start_time
+    print(f"First run took {duration1:.2f}s")
+
+    # Second run - should use cache
+    print("Starting second batch run (Cache)...")
+    start_time = time.time()
+    results2 = list(
+        lx.extract(
+            text_or_documents=documents,
+            prompt_description=prompt,
+            examples=examples,
+            model_id=DEFAULT_GEMINI_MODEL,
+            language_model_params=language_model_params,
+        )
+    )
+    duration2 = time.time() - start_time
+    print(f"Second run took {duration2:.2f}s")
+
+    self.assertEqual(len(results1), len(results2))
+    for r1, r2 in zip(results1, results2):
+      self.assertEqual(r1.text, r2.text)
+      self.assertEqual(len(r1.extractions), len(r2.extractions))
+
+    self.assertLess(duration2, 10.0, "Second run took too long for cache hit")
+
+    self.assertLess(duration2, 10.0, "Second run took too long for cache hit")
+
+    # 3. Verify GCS Cache Content
+    print("\nVerifying GCS cache content...")
+    bucket_name = gb._get_bucket_name(VERTEX_PROJECT, VERTEX_LOCATION)
+    print(f"Checking bucket: {bucket_name}")
+    self._verify_gcs_cache_content(bucket_name)
 
 
 class TestLiveAPIOpenAI(unittest.TestCase):
@@ -506,21 +803,21 @@ class TestLiveAPIOpenAI(unittest.TestCase):
     )
 
     assert result is not None
-    assert hasattr(result, "extractions")
+    self.assertIsInstance(result, lx.data.AnnotatedDocument)
     assert len(result.extractions) > 0
 
     expected_classes = {
-        "dosage",
-        "route",
-        "medication",
-        "frequency",
-        "duration",
+        _CLASS_DOSAGE,
+        _CLASS_ROUTE,
+        _CLASS_MEDICATION,
+        _CLASS_FREQUENCY,
+        _CLASS_DURATION,
     }
     assert_extractions_contain(self, result, expected_classes)
     assert_valid_char_intervals(self, result)
 
     # Using regex for precise matching to avoid false positives
-    medication_texts = extract_by_class(result, "medication")
+    medication_texts = extract_by_class(result, _CLASS_MEDICATION)
     self.assertTrue(
         any(
             re.search(r"\bIbuprofen\b", text, re.IGNORECASE)
@@ -529,7 +826,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         f"No Ibuprofen found in: {medication_texts}",
     )
 
-    dosage_texts = extract_by_class(result, "dosage")
+    dosage_texts = extract_by_class(result, _CLASS_DOSAGE)
     self.assertTrue(
         any(
             re.search(r"\b400\s*mg\b", text, re.IGNORECASE)
@@ -538,7 +835,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         f"No 400mg dosage found in: {dosage_texts}",
     )
 
-    route_texts = extract_by_class(result, "route")
+    route_texts = extract_by_class(result, _CLASS_ROUTE)
     self.assertTrue(
         any(
             re.search(r"\b(PO|oral)\b", text, re.IGNORECASE)
@@ -637,9 +934,9 @@ class TestLiveAPIOpenAI(unittest.TestCase):
       extraction_classes = {e.extraction_class for e in extractions}
       # At minimum, each group should have the medication itself
       assert (
-          "medication" in extraction_classes
+          _CLASS_MEDICATION in extraction_classes
       ), f"{med_name} group missing medication entity"
       # Dosage is expected but might be formatted differently
       assert any(
-          c in extraction_classes for c in ["dosage", "dose"]
+          c in extraction_classes for c in [_CLASS_DOSAGE, "dose"]
       ), f"{med_name} group missing dosage"

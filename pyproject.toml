@@ -63,7 +63,8 @@ dev = [
     "pylint>=3.0.0",
     "pytype>=2024.10.11",
     "tox>=4.0.0",
-    "import-linter>=2.0"
+    "import-linter>=2.0",
+    "pre-commit>=3.5.0"
 ]
 test = [
     "pytest>=7.4.0",

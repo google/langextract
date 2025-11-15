@@ -2,7 +2,7 @@
 
 The Vertex AI Batch API offers significant cost savings (~50%) for large, non-time-critical workloads. `langextract` seamlessly integrates this with automatic routing, caching, and fault tolerance.
 
-**[Vertex AI Batch Prediction Documentation →](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/batch-prediction-gemini)**  
+**[Vertex AI Batch Prediction Documentation →](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/batch-prediction-gemini)**
 **[Quotas & Limits →](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/quotas#batch-prediction-quotas)**
 
 ## Real-World Example: Processing Shakespeare
@@ -31,7 +31,7 @@ print(f"Downloading {url}...")
 text = requests.get(url).text
 
 # Process first ~20 pages (approx. 60k characters).
-text_subset = text[:60000] 
+text_subset = text[:60000]
 print(f"Processing first {len(text_subset)} characters...")
 
 # 2. Define Prompt & Examples

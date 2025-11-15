@@ -119,6 +119,14 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
     model = factory.create_model(config)
     self.assertEqual(model.api_key, "env-openai-key")
 
+  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "env-openai-key"})
+  def test_uses_openai_api_key_for_o1_models(self):
+    """Factory should use OPENAI_API_KEY from env for 'o1-*' OpenAI models."""
+    config = factory.ModelConfig(model_id="o1-mini")
+
+    model = factory.create_model(config)
+    self.assertEqual(model.api_key, "env-openai-key")
+
   @mock.patch.dict(
       os.environ, {"LANGEXTRACT_API_KEY": "env-langextract-key"}, clear=True
   )

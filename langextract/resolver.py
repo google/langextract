@@ -251,7 +251,7 @@ class Resolver(AbstractResolver):
         ResolverParsingError: If the content within the string cannot be parsed
         due to formatting errors, or if the parsed content is not as expected.
     """
-    logging.info("Starting resolver process for input text.")
+    logging.debug("Starting resolver process for input text.")
     logging.debug("Input Text: %s", input_text)
 
     try:
@@ -310,7 +310,7 @@ class Resolver(AbstractResolver):
     Yields:
         Iterator on aligned extractions.
     """
-    logging.info("Starting alignment process for provided chunk text.")
+    logging.debug("Starting alignment process for provided chunk text.")
 
     if not extractions:
       logging.debug(
@@ -340,7 +340,7 @@ class Resolver(AbstractResolver):
       logging.debug("Yielding aligned extraction: %s", extraction)
       yield extraction
 
-    logging.info("Completed alignment process for the provided source_text.")
+    logging.debug("Completed alignment process for the provided source_text.")
 
   def string_to_extraction_data(
       self,
@@ -404,7 +404,7 @@ class Resolver(AbstractResolver):
         ValueError: If the extraction text is not a string or integer, or if the
         index is not an integer.
     """
-    logging.info("Starting to extract and order extractions from data.")
+    logging.debug("Starting to extract and order extractions from data.")
 
     if not extraction_data:
       logging.debug("Received empty extraction data.")
@@ -475,7 +475,7 @@ class Resolver(AbstractResolver):
         )
 
     processed_extractions.sort(key=operator.attrgetter("extraction_index"))
-    logging.info("Completed extraction and ordering of extractions.")
+    logging.debug("Completed extraction and ordering of extractions.")
     return processed_extractions
 
 

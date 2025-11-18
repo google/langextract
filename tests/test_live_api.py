@@ -38,7 +38,7 @@ from langextract import data
 import langextract as lx
 from langextract.providers import gemini_batch as gb
 
-dotenv.load_dotenv()
+dotenv.load_dotenv(override=True)
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o"

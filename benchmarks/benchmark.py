@@ -45,6 +45,8 @@ import time
 from typing import Any
 import urllib.error
 
+import dotenv
+
 from benchmarks import config
 from benchmarks import plotting
 from benchmarks import utils
@@ -55,6 +57,7 @@ from langextract import visualize
 import langextract.io as lio
 
 # Load API key from environment
+dotenv.load_dotenv(override=True)
 GEMINI_API_KEY = os.environ.get(
     "GEMINI_API_KEY", os.environ.get("LANGEXTRACT_API_KEY")
 )

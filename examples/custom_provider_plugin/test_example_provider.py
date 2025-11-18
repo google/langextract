@@ -17,6 +17,7 @@
 
 import os
 
+import dotenv
 # Import the provider to trigger registration with LangExtract
 # Note: This manual import is only needed when running without installation.
 # After `pip install -e .`, the entry point system handles this automatically.
@@ -27,6 +28,7 @@ import langextract as lx
 
 def main():
   """Test the custom provider."""
+  dotenv.load_dotenv(override=True)
   api_key = os.getenv("GEMINI_API_KEY") or os.getenv("LANGEXTRACT_API_KEY")
 
   if not api_key:

@@ -25,6 +25,7 @@ from absl import logging
 
 from langextract import resolver
 from langextract.core import data
+from langextract.core import tokenizer as tokenizer_lib
 
 __all__ = [
     "PromptValidationLevel",
@@ -122,6 +123,7 @@ def validate_prompt_alignment(
     examples: Sequence[data.ExampleData],
     aligner: resolver.WordAligner | None = None,
     policy: AlignmentPolicy | None = None,
+    tokenizer: tokenizer_lib.Tokenizer | None = None,
 ) -> ValidationReport:
   """Align extractions to their own example text and collect issues.
 
@@ -152,6 +154,7 @@ def validate_prompt_alignment(
         enable_fuzzy_alignment=policy.enable_fuzzy_alignment,
         fuzzy_alignment_threshold=policy.fuzzy_alignment_threshold,
         accept_match_lesser=policy.accept_match_lesser,
+        tokenizer_impl=tokenizer,
     )
 
     for aligned in aligned_groups[0]:

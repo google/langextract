@@ -29,7 +29,7 @@ import more_itertools
 
 from langextract.core import data
 from langextract.core import exceptions
-from langextract.core import tokenizer
+from langextract.core import tokenizer as tokenizer_lib
 
 
 class TokenUtilError(exceptions.LangExtractError):
@@ -45,7 +45,7 @@ class TextChunk:
     document: The source document.
   """
 
-  token_interval: tokenizer.TokenInterval
+  token_interval: tokenizer_lib.TokenInterval
   document: data.Document | None = None
   _chunk_text: str | None = dataclasses.field(
       default=None, init=False, repr=False
@@ -90,7 +90,7 @@ class TextChunk:
     return None
 
   @property
-  def document_text(self) -> tokenizer.TokenizedText | None:
+  def document_text(self) -> tokenizer_lib.TokenizedText | None:
     """Gets the tokenized text from the source document."""
     if self.document is not None:
       return self.document.tokenized_text
@@ -142,7 +142,7 @@ class TextChunk:
 
 def create_token_interval(
     start_index: int, end_index: int
-) -> tokenizer.TokenInterval:
+) -> tokenizer_lib.TokenInterval:
   """Creates a token interval.
 
   Args:
@@ -161,12 +161,14 @@ def create_token_interval(
     raise ValueError(
         f"Start index {start_index} must be < end index {end_index}."
     )
-  return tokenizer.TokenInterval(start_index=start_index, end_index=end_index)
+  return tokenizer_lib.TokenInterval(
+      start_index=start_index, end_index=end_index
+  )
 
 
 def get_token_interval_text(
-    tokenized_text: tokenizer.TokenizedText,
-    token_interval: tokenizer.TokenInterval,
+    tokenized_text: tokenizer_lib.TokenizedText,
+    token_interval: tokenizer_lib.TokenInterval,
 ) -> str:
   """Get the text within an interval of tokens.
 
@@ -178,14 +180,14 @@ def get_token_interval_text(
       value of the field `index` of `token_pb2.Token`. If the tokens are
       [(index:0, text:A), (index:5, text:B), (index:10, text:C)], we should use
       token_interval=[0, 2] to represent taking A and B, not [0, 6]. Please see
-      details from the implementation of tokenizer.tokens_text
+      details from the implementation of tokenizer_lib.tokens_text
 
   Returns:
     Text within the token interval.
 
   Raises:
     ValueError: If the token indices are invalid.
-    TokenUtilError: If tokenizer.tokens_text returns an empty
+    TokenUtilError: If tokenizer_lib.tokens_text returns an empty
     string.
   """
   if token_interval.start_index >= token_interval.end_index:
@@ -193,7 +195,7 @@ def get_token_interval_text(
         f"Start index {token_interval.start_index} must be < end index "
         f"{token_interval.end_index}."
     )
-  return_string = tokenizer.tokens_text(tokenized_text, token_interval)
+  return_string = tokenizer_lib.tokens_text(tokenized_text, token_interval)
   logging.debug(
       "Token util returns string: %s for tokenized_text: %s, token_interval:"
       " %s",
@@ -212,8 +214,8 @@ def get_token_interval_text(
 
 
 def get_char_interval(
-    tokenized_text: tokenizer.TokenizedText,
-    token_interval: tokenizer.TokenInterval,
+    tokenized_text: tokenizer_lib.TokenizedText,
+    token_interval: tokenizer_lib.TokenInterval,
 ) -> data.CharInterval:
   """Returns the char interval corresponding to the token interval.
 
@@ -282,7 +284,7 @@ class SentenceIterator:
 
   def __init__(
       self,
-      tokenized_text: tokenizer.TokenizedText,
+      tokenized_text: tokenizer_lib.TokenizedText,
       curr_token_pos: int = 0,
   ):
     """Constructor.
@@ -307,10 +309,10 @@ class SentenceIterator:
       )
     self.curr_token_pos = curr_token_pos
 
-  def __iter__(self) -> Iterator[tokenizer.TokenInterval]:
+  def __iter__(self) -> Iterator[tokenizer_lib.TokenInterval]:
     return self
 
-  def __next__(self) -> tokenizer.TokenInterval:
+  def __next__(self) -> tokenizer_lib.TokenInterval:
     """Returns next sentence's interval starting from current token position.
 
     Returns:
@@ -323,7 +325,7 @@ class SentenceIterator:
     if self.curr_token_pos == self.token_len:
       raise StopIteration
     # This locates the sentence which contains the current token position.
-    sentence_range = tokenizer.find_sentence_range(
+    sentence_range = tokenizer_lib.find_sentence_range(
         self.tokenized_text.text,
         self.tokenized_text.tokens,
         self.curr_token_pos,
@@ -382,8 +384,9 @@ class ChunkIterator:
 
   def __init__(
       self,
-      text: str | tokenizer.TokenizedText,
+      text: str | tokenizer_lib.TokenizedText | None,
       max_char_buffer: int,
+      tokenizer_impl: tokenizer_lib.Tokenizer,
       document: data.Document | None = None,
   ):
     """Constructor.
@@ -391,10 +394,19 @@ class ChunkIterator:
     Args:
       text: Document to chunk. Can be either a string or a tokenized text.
       max_char_buffer: Size of buffer that we can run inference on.
+      tokenizer_impl: Tokenizer instance to use.
       document: Optional source document.
     """
+    if text is None:
+      if document is None:
+        raise ValueError("Either text or document must be provided.")
+      text = document.text or ""
+
     if isinstance(text, str):
-      text = tokenizer.TokenizedText(text=text)
+      text = tokenizer_impl.tokenize(text)
+    elif isinstance(text, tokenizer_lib.TokenizedText) and not text.tokens:
+      text_to_tokenize = text.text or (document.text if document else "")
+      text = tokenizer_impl.tokenize(text_to_tokenize)
     self.tokenized_text = text
     self.max_char_buffer = max_char_buffer
     self.sentence_iter = SentenceIterator(self.tokenized_text)
@@ -405,12 +417,13 @@ class ChunkIterator:
       self.document = data.Document(text=text.text)
     else:
       self.document = document
+    self.document.tokenized_text = self.tokenized_text
 
   def __iter__(self) -> Iterator[TextChunk]:
     return self
 
   def _tokens_exceed_buffer(
-      self, token_interval: tokenizer.TokenInterval
+      self, token_interval: tokenizer_lib.TokenInterval
   ) -> bool:
     """Check if the token interval exceeds the maximum buffer size.
 

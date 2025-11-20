@@ -50,6 +50,24 @@ def extract_text_content(full_text: str) -> str:
   Returns:
     Extracted main content.
   """
+  start_marker = "*** START OF"
+  end_marker = "*** END OF"
+
+  start_idx = full_text.upper().find(start_marker)
+  end_idx = full_text.upper().find(end_marker)
+
+  if start_idx != -1 and end_idx != -1:
+    content_start = full_text.find("\n", start_idx) + 1
+
+    # Handle markers with trailing asterisks (e.g., "*** START ... ***").
+    line_end = full_text.find("***", start_idx + 3)
+    if (
+        line_end != -1 and line_end < content_start + 100
+    ):  # Ensure marker is on same line.
+      content_start = full_text.find("\n", line_end) + 1
+
+    return full_text[content_start:end_idx].strip()
+
   text_length = len(full_text)
   start = int(text_length * 0.2)
   end = int(text_length * 0.8)
@@ -58,8 +76,6 @@ def extract_text_content(full_text: str) -> str:
 
 def get_text_from_gutenberg(text_type: config.TextTypes) -> str:
   """Get text from Project Gutenberg for given language.
-
-  Simply takes a 5000-character chunk from the text.
 
   Args:
     text_type: Type of text (language).
@@ -72,7 +88,8 @@ def get_text_from_gutenberg(text_type: config.TextTypes) -> str:
   content = extract_text_content(full_text)
 
   mid_point = len(content) // 2
-  return content[mid_point : mid_point + 5000].strip()
+  start_chunk = max(0, mid_point - 2500)
+  return content[start_chunk : start_chunk + 5000].strip()
 
 
 def get_optimal_text_size(text: str, model_id: str) -> str:
@@ -90,7 +107,7 @@ def get_optimal_text_size(text: str, model_id: str) -> str:
       or "gemma" in model_id.lower()
       or "llama" in model_id.lower()
   ):
-    max_chars = 500  # Local models perform better with smaller contexts
+    max_chars = 500  # Smaller context for local models.
   else:
     max_chars = 5000
 
@@ -125,7 +142,6 @@ def get_git_info() -> dict[str, str]:
         check=True,
     ).stdout.strip()
 
-    # Get short commit hash and check if dirty
     commit = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True,
@@ -133,7 +149,6 @@ def get_git_info() -> dict[str, str]:
         check=True,
     ).stdout.strip()
 
-    # Check if working directory is dirty
     status = subprocess.run(
         ["git", "status", "--porcelain"],
         capture_output=True,
@@ -149,16 +164,22 @@ def get_git_info() -> dict[str, str]:
     return {"branch": "unknown", "commit": "unknown"}
 
 
-def analyze_tokenization(text: str) -> dict[str, Any]:
+def analyze_tokenization(
+    text: str, tokenizer_inst: tokenizer.Tokenizer | None = None
+) -> dict[str, Any]:
   """Analyze tokenization of given text.
 
   Args:
     text: Text to analyze.
+    tokenizer_inst: Tokenizer instance to use (default: RegexTokenizer).
 
   Returns:
     Dictionary with tokenization metrics.
   """
-  tokenized = tokenizer.tokenize(text)
+  if tokenizer_inst:
+    tokenized = tokenizer_inst.tokenize(text)
+  else:
+    tokenized = tokenizer.tokenize(text)
   num_tokens = len(tokenized.tokens)
   num_chars = len(text)
   tokens_per_char = num_tokens / num_chars if num_chars > 0 else 0

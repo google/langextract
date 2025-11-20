@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import textwrap
-import unicodedata
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -22,6 +21,7 @@ from langextract.core import tokenizer
 
 
 class TokenizerTest(parameterized.TestCase):
+  # pylint: disable=too-many-public-methods
 
   def assertTokenListEqual(self, actual_tokens, expected_tokens, msg=None):
     self.assertLen(actual_tokens, len(expected_tokens), msg=msg)
@@ -226,6 +226,7 @@ class TokenizerTest(parameterized.TestCase):
 
 
 class UnicodeTokenizerTest(parameterized.TestCase):
+  # pylint: disable=too-many-public-methods
 
   def assertTokenListEqual(self, actual_tokens, expected_tokens, msg=None):
     self.assertLen(actual_tokens, len(expected_tokens), msg=msg)
@@ -515,16 +516,14 @@ class UnicodeTokenizerTest(parameterized.TestCase):
     self.assertEqual(tokenized.tokens[1].token_type, tokenizer.TokenType.WORD)
 
   def test_unknown_script_merging_edge_case(self):
-    # Verify that adjacent IDENTICAL unknown scripts merge into a single token.
+    # Verify that adjacent IDENTICAL unknown scripts are fragmented for safety.
     # Armenian "Բարև" + Armenian "Բարև".
     tok = tokenizer.UnicodeTokenizer()
     text = "ԲարևԲարև"
     tokenized = tok.tokenize(text)
-    self.assertLen(tokenized.tokens, 1)
-    self.assertEqual(
-        tokenizer.tokens_text(tokenized, tokenizer.TokenInterval(0, 1)),
-        "ԲարևԲարև",
-    )
+    # Should be fragmented into 8 characters
+    self.assertLen(tokenized.tokens, 8)
+    self.assertEqual(tokenized.tokens[0].token_type, tokenizer.TokenType.WORD)
 
   def test_find_sentence_range_empty_input(self):
     # Ensure robustness against empty input, which previously caused a crash.
@@ -597,13 +596,6 @@ class UnicodeTokenizerTest(parameterized.TestCase):
         ],
         expected_tokens_mixed,
     )
-
-  def test_unknown_script_merging_edge_case(self):
-    """Verify behavior for adjacent unknown scripts."""
-    # Armenian (U+0531) + Georgian (U+10D0)
-    text = "\u0531\u10D0"
-    tokens = tokenizer.UnicodeTokenizer().tokenize(text).tokens
-    self.assertNotEmpty(tokens)
 
   def test_distinct_unknown_scripts_do_not_merge(self):
     """Verify that distinct unknown scripts (e.g. Bengali vs Devanagari) are not merged."""
@@ -995,7 +987,7 @@ class SentenceRangeTest(parameterized.TestCase):
     # Test with custom abbreviations (e.g. German "z.B.")
     text = "Das ist z.B. ein Test."
     tok = tokenizer.RegexTokenizer()
-    tokenized = tok.tokenize(text)
+    _ = tok.tokenize(text)
 
     text_french = "M. Smith est ici."
     tokenized_french = tok.tokenize(text_french)

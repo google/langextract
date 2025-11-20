@@ -131,6 +131,8 @@ def validate_prompt_alignment(
     examples: The few-shot examples to validate.
     aligner: WordAligner instance to use (creates new if None).
     policy: Alignment configuration (uses defaults if None).
+    tokenizer: Optional tokenizer to use for alignment. If None, defaults to
+      RegexTokenizer.
 
   Returns:
     ValidationReport containing any alignment issues found.

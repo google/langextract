@@ -351,7 +351,7 @@ class UnicodeTokenizer(Tokenizer):
 
     for match in regex.finditer(r"\X", text):
       grapheme = match.group()
-      start, end = match.span()
+      start, _ = match.span()
 
       # 1. Handle Whitespace
       if grapheme.isspace():
@@ -598,7 +598,10 @@ def find_sentence_range(
     text: The text to analyze.
     tokens: The tokens that make up `text`.
       Note: For UnicodeTokenizer, use normalized text.
-    start_token_index: The token index from which to begin the sentence.
+    start_token_index: The index of the token to start the sentence from.
+    known_abbreviations: A set of strings that are known abbreviations and
+      should not be treated as sentence boundaries.
+
 
   Returns:
     A TokenInterval representing the sentence range [start_token_index, end). If

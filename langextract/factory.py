@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import typing
+import warnings
 
 from langextract import providers
 from langextract.core import base_model
@@ -72,11 +73,23 @@ def _kwargs_with_environment_defaults(
 
     for provider_prefix, env_vars in env_vars_by_provider.items():
       if provider_prefix in model_lower:
+        found_keys = []
         for env_var in env_vars:
-          api_key = os.getenv(env_var)
-          if api_key:
-            resolved["api_key"] = api_key
-            break
+          key_val = os.getenv(env_var)
+          if key_val:
+            found_keys.append((env_var, key_val))
+
+        if found_keys:
+          resolved["api_key"] = found_keys[0][1]
+
+          if len(found_keys) > 1:
+            keys_list = ", ".join(k[0] for k in found_keys)
+            warnings.warn(
+                f"Multiple API keys detected in environment: {keys_list}. "
+                f"Using {found_keys[0][0]} and ignoring others.",
+                UserWarning,
+                stacklevel=3,
+            )
         break
 
   if "ollama" in model_id.lower() and "base_url" not in resolved:
@@ -126,7 +139,6 @@ def create_model(
   if not config.model_id and not config.provider:
     raise ValueError("Either model_id or provider must be specified")
 
-  # Load providers before any resolution
   providers.load_builtins_once()
   providers.load_plugins_once()
 
@@ -141,6 +153,8 @@ def create_model(
         "This may be due to missing dependencies. "
         f"Check that all required packages are installed. Error: {e}"
     ) from e
+
+  model_id = config.model_id
 
   model_id = config.model_id
 

@@ -36,9 +36,10 @@ import pytest
 
 from langextract import data
 import langextract as lx
+from langextract.core import tokenizer as tokenizer_lib
 from langextract.providers import gemini_batch as gb
 
-dotenv.load_dotenv()
+dotenv.load_dotenv(override=True)
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
@@ -430,13 +431,6 @@ class TestLiveAPIGemini(unittest.TestCase):
   @skip_if_no_gemini
   @live_api
   @retry_on_transient_errors(max_retries=2)
-  @pytest.mark.xfail(
-      reason=(
-          "Known tokenizer issue with non-Latin characters - see GitHub"
-          " issue #13"
-      ),
-      strict=True,
-  )
   def test_multilingual_medication_extraction(self):
     """Test medication extraction with Japanese text."""
     text = (  # "The patient takes 10 mg of medication daily."
@@ -461,6 +455,8 @@ class TestLiveAPIGemini(unittest.TestCase):
         )
     ]
 
+    unicode_tokenizer = tokenizer_lib.UnicodeTokenizer()
+
     result = lx.extract(
         text_or_documents=text,
         prompt_description=prompt,
@@ -468,6 +464,7 @@ class TestLiveAPIGemini(unittest.TestCase):
         model_id=DEFAULT_GEMINI_MODEL,
         api_key=GEMINI_API_KEY,
         language_model_params=GEMINI_MODEL_PARAMS,
+        tokenizer=unicode_tokenizer,
     )
 
     assert result is not None
@@ -487,7 +484,6 @@ class TestLiveAPIGemini(unittest.TestCase):
   @retry_on_transient_errors(max_retries=2)
   def test_explicit_provider_gemini(self):
     """Test using explicit provider with Gemini."""
-    # Test using provider class name
     config = lx.factory.ModelConfig(
         model_id=DEFAULT_GEMINI_MODEL,
         provider="GeminiLanguageModel",
@@ -501,10 +497,9 @@ class TestLiveAPIGemini(unittest.TestCase):
     self.assertEqual(model.__class__.__name__, "GeminiLanguageModel")
     self.assertEqual(model.model_id, DEFAULT_GEMINI_MODEL)
 
-    # Test using partial name match
     config2 = lx.factory.ModelConfig(
         model_id=DEFAULT_GEMINI_MODEL,
-        provider="gemini",  # Should match GeminiLanguageModel
+        provider="gemini",
         provider_kwargs={
             "api_key": GEMINI_API_KEY,
         },
@@ -653,7 +648,6 @@ class TestLiveAPIGemini(unittest.TestCase):
         "schema_dict should be passed to batch API (not None)",
     )
 
-    # Verify batch results
     self.assertIsInstance(batch_result, list)
     self.assertEqual(
         len(batch_result),
@@ -731,7 +725,6 @@ class TestLiveAPIGemini(unittest.TestCase):
         "enable_caching": True,
     }
 
-    # First run - should hit API and populate cache
     print("\nStarting first batch run (API)...")
     start_time = time.time()
     results1 = list(
@@ -746,7 +739,6 @@ class TestLiveAPIGemini(unittest.TestCase):
     duration1 = time.time() - start_time
     print(f"First run took {duration1:.2f}s")
 
-    # Second run - should use cache
     print("Starting second batch run (Cache)...")
     start_time = time.time()
     results2 = list(
@@ -770,7 +762,6 @@ class TestLiveAPIGemini(unittest.TestCase):
 
     self.assertLess(duration2, 10.0, "Second run took too long for cache hit")
 
-    # 3. Verify GCS Cache Content
     print("\nVerifying GCS cache content...")
     bucket_name = gb._get_bucket_name(VERTEX_PROJECT, VERTEX_LOCATION)
     print(f"Checking bucket: {bucket_name}")
@@ -861,8 +852,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
 
     model = lx.factory.create_model(config)
 
-    # Verify we got the right provider
-    self.assertEqual(model.__class__.__name__, "OpenAILanguageModel")
+    self.assertIsInstance(model, lx.providers.openai.OpenAILanguageModel)
     self.assertEqual(model.model_id, DEFAULT_OPENAI_MODEL)
 
     # Also test using provider without model_id (uses default)

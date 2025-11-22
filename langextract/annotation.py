@@ -40,6 +40,7 @@ from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
+from langextract.core import tokenizer as tokenizer_lib
 
 
 def _merge_non_overlapping_extractions(
@@ -118,6 +119,7 @@ def _document_chunk_iterator(
     documents: Iterable[data.Document],
     max_char_buffer: int,
     restrict_repeats: bool = True,
+    tokenizer: tokenizer_lib.Tokenizer | None = None,
 ) -> Iterator[chunking.TextChunk]:
   """Iterates over documents to yield text chunks along with the document ID.
 
@@ -126,6 +128,7 @@ def _document_chunk_iterator(
     max_char_buffer: The maximum character buffer size for the ChunkIterator.
     restrict_repeats: Whether to restrict the same document id from being
       visited more than once.
+    tokenizer: Optional tokenizer instance.
 
   Yields:
     TextChunk containing document ID for a corresponding document.
@@ -137,7 +140,10 @@ def _document_chunk_iterator(
   """
   visited_ids = set()
   for document in documents:
-    tokenized_text = document.tokenized_text
+    if tokenizer:
+      tokenized_text = tokenizer.tokenize(document.text or "")
+    else:
+      tokenized_text = document.tokenized_text
     document_id = document.document_id
     if restrict_repeats and document_id in visited_ids:
       raise exceptions.InvalidDocumentError(
@@ -147,6 +153,7 @@ def _document_chunk_iterator(
         text=tokenized_text,
         max_char_buffer=max_char_buffer,
         document=document,
+        tokenizer_impl=tokenizer or tokenizer_lib.RegexTokenizer(),
     )
     visited_ids.add(document_id)
 
@@ -208,6 +215,7 @@ class Annotator:
       debug: bool = True,
       extraction_passes: int = 1,
       show_progress: bool = True,
+      tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Annotates a sequence of documents with NLP extractions.
@@ -231,6 +239,7 @@ class Annotator:
         Values > 1 reprocess tokens multiple times, potentially increasing
         costs with the potential for a more thorough extraction.
       show_progress: Whether to show progress bar. Defaults to True.
+      tokenizer: Optional tokenizer to use. If None, uses default tokenizer.
       **kwargs: Additional arguments passed to LanguageModel.infer and Resolver.
 
     Yields:
@@ -250,6 +259,7 @@ class Annotator:
           batch_length,
           debug,
           show_progress,
+          tokenizer=tokenizer,
           **kwargs,
       )
     else:
@@ -261,6 +271,7 @@ class Annotator:
           debug,
           extraction_passes,
           show_progress,
+          tokenizer=tokenizer,
           **kwargs,
       )
 
@@ -272,6 +283,7 @@ class Annotator:
       batch_length: int,
       debug: bool,
       show_progress: bool = True,
+      tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Single-pass annotation with stable ordering and streaming emission.
@@ -322,7 +334,7 @@ class Annotator:
         next_emit_idx += 1
 
     chunk_iter = _document_chunk_iterator(
-        _capture_docs(documents), max_char_buffer
+        _capture_docs(documents), max_char_buffer, tokenizer=tokenizer
     )
     batches = chunking.make_batches_of_textchunk(chunk_iter, batch_length)
 
@@ -393,6 +405,7 @@ class Annotator:
               text_chunk.chunk_text,
               token_offset,
               char_offset,
+              tokenizer_inst=tokenizer,
               **kwargs,
           )
 
@@ -421,6 +434,7 @@ class Annotator:
       debug: bool,
       extraction_passes: int,
       show_progress: bool = True,
+      tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Sequential extraction passes logic for improved recall."""
@@ -452,6 +466,7 @@ class Annotator:
           batch_length,
           debug=(debug and pass_num == 0),
           show_progress=show_progress if pass_num == 0 else False,
+          tokenizer=tokenizer,
           **kwargs,
       ):
         doc_id = annotated_doc.document_id
@@ -503,6 +518,7 @@ class Annotator:
       debug: bool = True,
       extraction_passes: int = 1,
       show_progress: bool = True,
+      tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> data.AnnotatedDocument:
     """Annotates text with NLP extractions for text input.
@@ -520,6 +536,7 @@ class Annotator:
         standard single extraction. Values > 1 reprocess tokens multiple times,
         potentially increasing costs.
       show_progress: Whether to show progress bar. Defaults to True.
+      tokenizer: Optional tokenizer instance.
       **kwargs: Additional arguments for inference and resolver_lib.
 
     Returns:
@@ -549,6 +566,7 @@ class Annotator:
             debug,
             extraction_passes,
             show_progress,
+            tokenizer=tokenizer,
             **kwargs,
         )
     )

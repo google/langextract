@@ -45,6 +45,8 @@ import time
 from typing import Any
 import urllib.error
 
+import dotenv
+
 from benchmarks import config
 from benchmarks import plotting
 from benchmarks import utils
@@ -55,6 +57,7 @@ from langextract import visualize
 import langextract.io as lio
 
 # Load API key from environment
+dotenv.load_dotenv(override=True)
 GEMINI_API_KEY = os.environ.get(
     "GEMINI_API_KEY", os.environ.get("LANGEXTRACT_API_KEY")
 )
@@ -67,6 +70,16 @@ class BenchmarkRunner:
     """Initialize runner with timestamp and git metadata."""
     self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     self.git_info = utils.get_git_info()
+    self.tokenizer = core.tokenizer.RegexTokenizer()
+
+  def set_tokenizer(self, tokenizer_type: str):
+    """Set the tokenizer to use."""
+    if tokenizer_type.lower() == "unicode":
+      self.tokenizer = core.tokenizer.UnicodeTokenizer()
+      print("Using UnicodeTokenizer")
+    else:
+      self.tokenizer = core.tokenizer.RegexTokenizer()
+      print("Using RegexTokenizer (default)")
 
   def print_header(self):
     """Print benchmark header."""
@@ -92,12 +105,12 @@ class BenchmarkRunner:
     for word_count in config.TOKENIZATION.default_text_sizes:
       text = " ".join(["word"] * word_count)
 
-      _ = core.tokenizer.tokenize(text)
+      _ = self.tokenizer.tokenize(text)
 
       times = []
       for _ in range(config.TOKENIZATION.benchmark_iterations):
         start = time.perf_counter()
-        tokenized = core.tokenizer.tokenize(text)
+        tokenized = self.tokenizer.tokenize(text)
         elapsed = time.perf_counter() - start
         times.append(elapsed)
 
@@ -129,7 +142,7 @@ class BenchmarkRunner:
       model_id: str = config.MODELS.default_model,
       text_type: config.TextTypes = config.TextTypes.ENGLISH,
   ) -> dict[str, Any]:
-    """Execute extraction test on a single text sample.
+    """Execute extraction test.
 
     Args:
       model_id: Model identifier (e.g., 'gemini-2.5-flash', 'gemma2:2b').
@@ -150,7 +163,9 @@ class BenchmarkRunner:
       print(f"   Model: {model_id}")
 
       # Analyze tokenization
-      tokenization_analysis = utils.analyze_tokenization(test_text)
+      tokenization_analysis = utils.analyze_tokenization(
+          test_text, self.tokenizer
+      )
       print(
           "   Tokenization:"
           f" {utils.format_tokenization_summary(tokenization_analysis)}"
@@ -190,6 +205,7 @@ class BenchmarkRunner:
               max_workers=config.MODELS.default_max_workers,
               temperature=config.MODELS.default_temperature,
               extraction_passes=config.MODELS.default_extraction_passes,
+              tokenizer=self.tokenizer,
           )
           elapsed = time.time() - start_time
           break
@@ -248,7 +264,7 @@ class BenchmarkRunner:
       }
 
     except (urllib.error.URLError, RuntimeError) as e:
-      # Text download failures - expected and should be handled gracefully
+      # Handle expected text download failures.
       print(f"Failed: {e}")
       return {
           "success": False,
@@ -293,7 +309,7 @@ class BenchmarkRunner:
     return results
 
   def save_results(self, results: dict[str, Any]):
-    """Save benchmark results to JSON and create plots."""
+    """Save results and create plots."""
     results["timestamp"] = self.timestamp
     results["git"] = self.git_info
 
@@ -340,7 +356,7 @@ class BenchmarkRunner:
       print(f"Warning: Failed to create plot for {json_path.name}")
 
   def run_diverse_benchmark(self, models: list[str] | None = None):
-    """Run diverse text type benchmark."""
+    """Run benchmark."""
     self.print_header()
 
     tokenization_results = self.benchmark_tokenization()
@@ -363,6 +379,14 @@ def main():
       type=str,
       default=None,
       help=f"Model to use (default: {config.MODELS.default_model})",
+  )
+
+  parser.add_argument(
+      "--tokenizer",
+      type=str,
+      choices=["regex", "unicode"],
+      default="regex",
+      help="Tokenizer to use (default: regex)",
   )
 
   parser.add_argument(
@@ -406,6 +430,7 @@ def main():
     return
 
   runner = BenchmarkRunner()
+  runner.set_tokenizer(args.tokenizer)
   runner.run_diverse_benchmark([args.model] if args.model else None)
 
 

@@ -30,6 +30,7 @@ from langextract import resolver
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import format_handler as fh
+from langextract.core import tokenizer as tokenizer_lib
 
 
 def extract(
@@ -59,6 +60,7 @@ def extract(
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
+    tokenizer: tokenizer_lib.Tokenizer | None = None,
 ) -> list[data.AnnotatedDocument] | data.AnnotatedDocument:
   """Extracts structured information from text.
 
@@ -73,6 +75,8 @@ def extract(
         is True), or an iterable of Document objects.
       prompt_description: Instructions for what to extract from the text.
       examples: List of ExampleData objects to guide the extraction.
+      tokenizer: Optional Tokenizer instance to use for chunking and alignment.
+        If None, defaults to RegexTokenizer.
       api_key: API key for Gemini or other LLM services (can also use
         environment variable LANGEXTRACT_API_KEY). Cost considerations: Most
         APIs charge by token volume. Smaller max_char_buffer values increase the
@@ -174,6 +178,7 @@ def extract(
         examples=examples,
         aligner=resolver.WordAligner(),
         policy=pv.AlignmentPolicy(),
+        tokenizer=tokenizer,
     )
     pv.handle_alignment_report(
         report,
@@ -332,6 +337,7 @@ def extract(
         extraction_passes=extraction_passes,
         show_progress=show_progress,
         max_workers=max_workers,
+        tokenizer=tokenizer,
         **alignment_kwargs,
     )
     return result
@@ -346,6 +352,7 @@ def extract(
         extraction_passes=extraction_passes,
         show_progress=show_progress,
         max_workers=max_workers,
+        tokenizer=tokenizer,
         **alignment_kwargs,
     )
     return list(result)

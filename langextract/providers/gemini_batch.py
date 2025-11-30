@@ -300,6 +300,8 @@ def _submit_file(
     requests: Sequence[dict],
     display: str,
     retention_days: int | None,
+    project: str | None = None,
+    location: str | None = None,
 ) -> genai.types.BatchJob:
   """Submit a file-based batch job to Vertex AI using GCS storage.
 
@@ -317,6 +319,10 @@ def _submit_file(
     display: Display name for the batch job, used for identification and
         as part of the GCS blob name.
     retention_days: Days to keep GCS data. If set, applies lifecycle rule.
+    project: Optional GCP project ID. If not provided, will attempt to
+        determine from client or environment.
+    location: Optional GCP region/location. If not provided, will attempt to
+        determine from client or use default.
 
   Returns:
     BatchJob object that can be polled for completion status.
@@ -336,7 +342,7 @@ def _submit_file(
         line = {"key": f"{_KEY_IDX}{idx}", "request": req}
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
-    project, location = _get_project_location(client)
+    project, location = _get_project_location(client, project, location)
     bucket_name = _get_bucket_name(project, location)
     blob_name = f"batch-input/{display}-{uuid.uuid4().hex}.jsonl"
 
@@ -807,7 +813,15 @@ def infer_batch(
         )
         for p in batch_prompts
     ]
-    job = _submit_file(client, model_id, requests, display, cfg.retention_days)
+    job = _submit_file(
+        client,
+        model_id,
+        requests,
+        display,
+        cfg.retention_days,
+        project,
+        location,
+    )
     if cfg.on_job_create:
       try:
         cfg.on_job_create(job)

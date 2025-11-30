@@ -102,7 +102,13 @@ class TestGeminiBatchAPI(absltest.TestCase):
         vertexai=True,
         project="test-project",
         location=gb._DEFAULT_LOCATION,
-        batch={"enabled": True, "threshold": 2, "poll_interval": 1},
+        batch={
+            "enabled": True,
+            "threshold": 2,
+            "poll_interval": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
     )
     prompts = ["p1", "p2"]
     outs = list(model.infer(prompts))
@@ -156,7 +162,12 @@ class TestGeminiBatchAPI(absltest.TestCase):
         vertexai=True,
         project="p",
         location="l",
-        batch={"enabled": True, "threshold": 10},
+        batch={
+            "enabled": True,
+            "threshold": 10,
+            "enable_caching": False,
+            "retention_days": None,
+        },
     )
     outs = list(model.infer(["hello"]))
 
@@ -195,7 +206,12 @@ class TestGeminiBatchAPI(absltest.TestCase):
         project="p",
         location="l",
         gemini_schema=mock_schema,
-        batch={"enabled": True, "threshold": 1},
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
     )
 
     # Mock _submit_file to verify the request payload contains the schema.
@@ -207,7 +223,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
       self.assertLen(outs, 1)
       self.assertEqual(outs[0][0].output, '{"name":"test"}')
 
-      # Verify _submit_file was called with correct arguments.
+      # Verify _submit_file was called with project and location parameters.
       mock_submit.assert_called_with(
           mock_client,
           "gemini-2.5-flash",
@@ -222,6 +238,9 @@ class TestGeminiBatchAPI(absltest.TestCase):
               },
           }],
           mock.ANY,  # Display name contains timestamp/random.
+          None,  # retention_days
+          "p",  # project
+          "l",  # location
       )
 
     self.assertEqual(model.gemini_schema.schema_dict, mock_schema.schema_dict)
@@ -238,7 +257,12 @@ class TestGeminiBatchAPI(absltest.TestCase):
         vertexai=True,
         project="p",
         location="l",
-        batch={"enabled": True, "threshold": 1},
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
     )
 
     with self.assertRaisesRegex(Exception, "Gemini Batch API error"):
@@ -273,7 +297,12 @@ class TestGeminiBatchAPI(absltest.TestCase):
         vertexai=True,
         project="p",
         location="l",
-        batch={"enabled": True, "threshold": 1},
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
     )
 
     results = list(model.infer(prompts))
@@ -354,6 +383,8 @@ class TestGeminiBatchAPI(absltest.TestCase):
             "enabled": True,
             "threshold": 1,
             "max_prompts_per_job": max_prompts_per_job,
+            "enable_caching": False,
+            "retention_days": None,
         },
     )
 
@@ -386,7 +417,12 @@ class TestGeminiBatchAPI(absltest.TestCase):
         vertexai=True,
         project="p",
         location="l",
-        batch={"enabled": True, "threshold": 1},
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
     )
 
     with self.assertRaisesRegex(Exception, "Batch item error"):
@@ -420,7 +456,12 @@ class EmptyAndPaddingTest(absltest.TestCase):
         prompts=[],
         schema_dict=None,
         gen_config={},
-        cfg=gb.BatchConfig(enabled=True, poll_interval=1),
+        cfg=gb.BatchConfig(
+            enabled=True,
+            poll_interval=1,
+            enable_caching=False,
+            retention_days=None,
+        ),
     )
     self.assertEqual(outs, [])
 
@@ -443,7 +484,13 @@ class EmptyAndPaddingTest(absltest.TestCase):
       mock_client.batches.create.return_value = job
       mock_client.batches.get.return_value = job
 
-      cfg = gb.BatchConfig(enabled=True, threshold=1, poll_interval=1)
+      cfg = gb.BatchConfig(
+          enabled=True,
+          threshold=1,
+          poll_interval=1,
+          enable_caching=False,
+          retention_days=None,
+      )
       outs = gb.infer_batch(
           client=mock_client,
           model_id="m",
@@ -481,6 +528,7 @@ class GCSBatchCachingTest(absltest.TestCase):
         enabled=True,
         threshold=1,
         enable_caching=True,
+        retention_days=None,
     )
 
     outs = gb.infer_batch(
@@ -541,6 +589,7 @@ class GCSBatchCachingTest(absltest.TestCase):
           enabled=True,
           threshold=1,
           enable_caching=True,
+          retention_days=None,
       )
 
       outs = gb.infer_batch(
@@ -565,6 +614,63 @@ class GCSBatchCachingTest(absltest.TestCase):
       self.assertTrue(
           upload_calls, "Should have uploaded new_response to cache"
       )
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  @mock.patch.dict("os.environ", {}, clear=True)
+  def test_project_passed_to_storage_client(self, mock_client_cls):
+    """Test that project parameter is passed to storage.Client constructor."""
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+    if hasattr(mock_client, "project"):
+      del mock_client.project
+
+    self.mock_storage_client.create_bucket.return_value = self.mock_bucket
+
+    output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+    output_blob.name = f"output{gb._EXT_JSONL}"
+    output_blob.open.return_value.__enter__.return_value = io.StringIO(
+        _create_batch_response(0, {"result": "ok"})
+    )
+    self.mock_bucket.list_blobs.return_value = [output_blob]
+
+    mock_client.batches.create.return_value = create_mock_batch_job()
+    mock_client.batches.get.return_value = create_mock_batch_job()
+
+    # Create model with specific project and location
+    test_project = "test-project-123"
+    test_location = "us-central1"
+
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-2.5-flash",
+        vertexai=True,
+        project=test_project,
+        location=test_location,
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "poll_interval": 0.1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
+    )
+
+    list(model.infer(["test prompt"]))
+
+    # Verify storage.Client was called with the correct project parameter.
+    storage_calls = self.mock_storage_cls.call_args_list
+
+    project_calls = [
+        call
+        for call in storage_calls
+        if call.kwargs.get("project") == test_project
+    ]
+
+    self.assertGreaterEqual(
+        len(project_calls),
+        1,
+        f"storage.Client should be called with project={test_project}, "
+        f"but was called with: {[call.kwargs for call in storage_calls]}",
+    )
 
   def test_cache_hashing_stability(self):
     """Test that hash is stable for same inputs."""

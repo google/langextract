@@ -19,7 +19,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "langextract"
-version = "1.0.9"
+version = "1.1.1"
 description = "LangExtract: A library for extracting structured data from language models"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,7 +32,8 @@ dependencies = [
     "aiohttp>=3.8.0",
     "async_timeout>=4.0.0",
     "exceptiongroup>=1.1.0",
-    "google-genai>=0.1.0",
+    "google-genai>=1.39.0",
+    "google-cloud-storage>=2.14.0",
     "ml-collections>=0.1.0",
     "more-itertools>=8.0.0",
     "numpy>=1.20.0",
@@ -40,6 +41,7 @@ dependencies = [
     "pydantic>=1.8.0",
     "python-dotenv>=0.19.0",
     "PyYAML>=6.0",
+    "regex>=2023.0.0",
     "requests>=2.25.0",
     "tqdm>=4.64.0",
     "typing-extensions>=4.0.0"
@@ -62,7 +64,9 @@ dev = [
     "pylint>=3.0.0",
     "pytype>=2024.10.11",
     "tox>=4.0.0",
-    "import-linter>=2.0"
+    "import-linter>=2.0",
+    "pre-commit>=3.5.0",
+    "types-regex>=2023.0.0"
 ]
 test = [
     "pytest>=7.4.0",

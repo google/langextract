@@ -308,22 +308,22 @@ jobs:
           set -euo pipefail
           EXPECTED_SHA="${{ steps.sha-pin.outputs.SHA_TO_TEST }}"
           echo "Fetching exact commit: $EXPECTED_SHA"
-          
+
           # Fetch the specific commit SHA
           git fetch --no-tags --prune --no-recurse-submodules origin "$EXPECTED_SHA" || {
             echo "::error::Failed to fetch PR commit $EXPECTED_SHA. The commit may have been deleted."
             exit 1
           }
-          
+
           git checkout -b pr-to-test "$EXPECTED_SHA"
-          
+
           # Verify checkout
           ACTUAL_SHA="$(git rev-parse HEAD)"
           if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
             echo "::error::SHA verification failed! Expected $EXPECTED_SHA but got $ACTUAL_SHA"
             exit 1
           fi
-          
+
           echo "::notice title=Security::Successfully verified commit SHA: $ACTUAL_SHA"
 
       - name: Set up Python 3.11
@@ -365,13 +365,13 @@ jobs:
 
           SHA_TO_MERGE="${{ steps.sha-pin.outputs.SHA_TO_TEST }}"
           echo "Merging verified commit: $SHA_TO_MERGE"
-          
+
           git fetch --no-tags --prune --no-recurse-submodules origin "$SHA_TO_MERGE"
           git merge --no-ff --no-edit "$SHA_TO_MERGE" || {
             echo "::error::Failed to merge commit $SHA_TO_MERGE"
             exit 1
           }
-          
+
           echo "::notice title=Security::Successfully merged verified commit"
 
       - name: Add status comment

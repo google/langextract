@@ -464,6 +464,69 @@ class InitTest(parameterized.TestCase):
     _, kwargs = mock_model.infer.call_args
     self.assertEqual(kwargs.get("max_workers"), 5)
 
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_with_custom_tokenizer(self, mock_create_model):
+    """Test that a custom tokenizer can be passed to extract()."""
+    input_text = "Test text"
+    mock_model = mock.MagicMock()
+    mock_model.infer.return_value = [[
+        types.ScoredOutput(
+            output='```json\n{"extractions": []}\n```',
+            score=0.9,
+        )
+    ]]
+    mock_model.requires_fence_output = True
+    mock_create_model.return_value = mock_model
+
+    def mock_tokenize(text):
+      if text == "\u241F":  # Delimiter
+        return lx.tokenizer.TokenizedText(
+            text=text,
+            tokens=[
+                lx.tokenizer.Token(
+                    index=0,
+                    token_type=lx.tokenizer.TokenType.PUNCTUATION,
+                    char_interval=lx.tokenizer.CharInterval(0, 1),
+                )
+            ],
+        )
+      # Return dummy tokens for other text to avoid "empty tokens" error in aligner
+      return lx.tokenizer.TokenizedText(
+          text=text,
+          tokens=[
+              lx.tokenizer.Token(
+                  index=0,
+                  token_type=lx.tokenizer.TokenType.WORD,
+                  char_interval=lx.tokenizer.CharInterval(0, len(text)),
+              )
+          ],
+      )
+
+    mock_tokenizer = mock.MagicMock()
+    mock_tokenizer.tokenize.side_effect = mock_tokenize
+
+    mock_examples = [
+        lx.data.ExampleData(
+            text="Example",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="test",
+                    extraction_text="example",
+                ),
+            ],
+        )
+    ]
+
+    lx.extract(
+        text_or_documents=input_text,
+        prompt_description="Test extraction",
+        examples=mock_examples,
+        api_key="test_key",
+        tokenizer=mock_tokenizer,
+    )
+
+    mock_tokenizer.tokenize.assert_called_with(input_text)
+
   def test_data_module_exports_via_compatibility_shim(self):
     """Verify data module exports are accessible via lx.data."""
     expected_exports = [
@@ -555,11 +618,7 @@ class InitTest(parameterized.TestCase):
     mock_model.requires_fence_output = False
     mock_create_model.return_value = mock_model
 
-    mock_progress_bar = mock.MagicMock()
-    mock_progress_bar.__iter__ = mock.MagicMock(
-        return_value=iter([mock.MagicMock()])
-    )
-    mock_progress.return_value = mock_progress_bar
+    mock_progress.side_effect = lambda iterable, **kwargs: iter(iterable)
 
     mock_examples = [
         lx.data.ExampleData(
@@ -685,7 +744,6 @@ class InitTest(parameterized.TestCase):
           language_model_params={"gemini_schema": "deprecated"},
       )
 
-      # Verify deprecation warning
       self.assertTrue(
           any(
               issubclass(warning.category, FutureWarning)

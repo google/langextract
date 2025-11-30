@@ -52,8 +52,12 @@ import traceback
 import urllib.error
 import urllib.request
 
+import dotenv
+
 import langextract as lx
 from langextract.providers import ollama
+
+dotenv.load_dotenv(override=True)
 
 DEFAULT_MODEL = "gemma2:2b"
 DEFAULT_OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434")

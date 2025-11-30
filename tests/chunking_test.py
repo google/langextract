@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import textwrap
+from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -68,7 +69,11 @@ class ChunkIteratorTest(absltest.TestCase):
   def test_multi_sentence_chunk(self):
     text = "This is a sentence. This is a longer sentence. Mr. Bond\nasks\nwhy?"
     tokenized_text = tokenizer.tokenize(text)
-    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer=50)
+    chunk_iter = chunking.ChunkIterator(
+        tokenized_text,
+        max_char_buffer=50,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+    )
     chunk_interval = next(chunk_iter).token_interval
     self.assertEqual(
         tokenizer.TokenInterval(start_index=0, end_index=11), chunk_interval
@@ -106,7 +111,11 @@ class ChunkIteratorTest(absltest.TestCase):
   def test_break_sentence(self):
     text = "This is a sentence. This is a longer sentence. Mr. Bond\nasks\nwhy?"
     tokenized_text = tokenizer.tokenize(text)
-    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer=12)
+    chunk_iter = chunking.ChunkIterator(
+        tokenized_text,
+        max_char_buffer=12,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+    )
     chunk_interval = next(chunk_iter).token_interval
     self.assertEqual(
         tokenizer.TokenInterval(start_index=0, end_index=3), chunk_interval
@@ -155,7 +164,11 @@ class ChunkIteratorTest(absltest.TestCase):
   def test_long_token_gets_own_chunk(self):
     text = "This is a sentence. This is a longer sentence. Mr. Bond\nasks\nwhy?"
     tokenized_text = tokenizer.tokenize(text)
-    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer=7)
+    chunk_iter = chunking.ChunkIterator(
+        tokenized_text,
+        max_char_buffer=7,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+    )
     chunk_interval = next(chunk_iter).token_interval
     self.assertEqual(
         tokenizer.TokenInterval(start_index=0, end_index=2), chunk_interval
@@ -201,7 +214,11 @@ class ChunkIteratorTest(absltest.TestCase):
     text = "First sentence.\nSecond sentence that is longer.\nThird sentence."
     tokenized_text = tokenizer.tokenize(text)
 
-    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer=20)
+    chunk_iter = chunking.ChunkIterator(
+        tokenized_text,
+        max_char_buffer=20,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+    )
     chunks = list(chunk_iter)
 
     for chunk in chunks:
@@ -225,7 +242,11 @@ class ChunkIteratorTest(absltest.TestCase):
     History of Present Illness:
     77 y o woman in NAD with a h/o CAD, DM2, asthma and HTN on altace.""")
     tokenized_text = tokenizer.tokenize(text)
-    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer=200)
+    chunk_iter = chunking.ChunkIterator(
+        tokenized_text,
+        max_char_buffer=200,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+    )
     chunk_interval = next(chunk_iter).token_interval
     self.assertEqual(
         tokenizer.TokenInterval(
@@ -248,7 +269,11 @@ class ChunkIteratorTest(absltest.TestCase):
     Ramipril (Altace) 10 mg BID – ACEI for hypertension and diabetes for
     renal protective effect""")
     tokenized_text = tokenizer.tokenize(text)
-    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer=200)
+    chunk_iter = chunking.ChunkIterator(
+        tokenized_text,
+        max_char_buffer=200,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+    )
 
     first_chunk = next(chunk_iter)
     expected_first_chunk_text = textwrap.dedent("""\
@@ -283,6 +308,38 @@ class ChunkIteratorTest(absltest.TestCase):
 
     with self.assertRaises(StopIteration):
       next(chunk_iter)
+
+  def test_tokenizer_propagation(self):
+    """Test that tokenizer is correctly propagated to TextChunk's Document."""
+    text = "Some text."
+    mock_tokenizer = mock.Mock(spec=tokenizer.Tokenizer)
+    mock_tokens = [
+        tokenizer.Token(
+            index=0,
+            token_type=tokenizer.TokenType.WORD,
+            char_interval=data.CharInterval(start_pos=0, end_pos=4),
+        ),
+        tokenizer.Token(
+            index=1,
+            token_type=tokenizer.TokenType.WORD,
+            char_interval=data.CharInterval(start_pos=5, end_pos=9),
+        ),
+        tokenizer.Token(
+            index=2,
+            token_type=tokenizer.TokenType.PUNCTUATION,
+            char_interval=data.CharInterval(start_pos=9, end_pos=10),
+        ),
+    ]
+    mock_tokenized_text = tokenizer.TokenizedText(text=text, tokens=mock_tokens)
+    mock_tokenizer.tokenize.return_value = mock_tokenized_text
+
+    chunk_iter = chunking.ChunkIterator(
+        text=text, max_char_buffer=100, tokenizer_impl=mock_tokenizer
+    )
+    text_chunk = next(chunk_iter)
+
+    self.assertEqual(text_chunk.document_text, mock_tokenized_text)
+    self.assertEqual(text_chunk.chunk_text, text)
 
 
 class BatchingTest(parameterized.TestCase):
@@ -333,25 +390,25 @@ class BatchingTest(parameterized.TestCase):
               ),
               chunking.TextChunk(
                   token_interval=tokenizer.TokenInterval(
-                      start_index=7, end_index=8
+                      start_index=7, end_index=10
                   ),
                   document=_SAMPLE_DOCUMENT,
               ),
               chunking.TextChunk(
                   token_interval=tokenizer.TokenInterval(
-                      start_index=8, end_index=12
+                      start_index=10, end_index=14
                   ),
                   document=_SAMPLE_DOCUMENT,
               ),
               chunking.TextChunk(
                   token_interval=tokenizer.TokenInterval(
-                      start_index=12, end_index=17
+                      start_index=14, end_index=19
                   ),
                   document=_SAMPLE_DOCUMENT,
               ),
               chunking.TextChunk(
                   token_interval=tokenizer.TokenInterval(
-                      start_index=17, end_index=20
+                      start_index=19, end_index=22
                   ),
                   document=_SAMPLE_DOCUMENT,
               ),
@@ -372,7 +429,11 @@ class BatchingTest(parameterized.TestCase):
       max_char_buffer: int,
       expected_batches: list[list[chunking.TextChunk]],
   ):
-    chunk_iter = chunking.ChunkIterator(tokenized_text, max_char_buffer)
+    chunk_iter = chunking.ChunkIterator(
+        tokenized_text,
+        max_char_buffer,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+    )
     batches_iter = chunking.make_batches_of_textchunk(chunk_iter, batch_length)
     actual_batches = [list(batch) for batch in batches_iter]
 
@@ -396,7 +457,10 @@ class TextChunkTest(absltest.TestCase):
     document = data.Document(text=text, document_id="test_doc_123")
     tokenized_text = tokenizer.tokenize(text)
     chunk_iter = chunking.ChunkIterator(
-        tokenized_text, max_char_buffer=7, document=document
+        tokenized_text,
+        max_char_buffer=7,
+        document=document,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
     )
     text_chunk = next(chunk_iter)
     self.assertEqual(str(text_chunk), expected)
@@ -411,7 +475,10 @@ class TextAdditionalContextTest(absltest.TestCase):
         text="Sample text.", additional_context=self._ADDITIONAL_CONTEXT
     )
     chunk_iter = chunking.ChunkIterator(
-        text=document.tokenized_text, max_char_buffer=100, document=document
+        text=document.tokenized_text,
+        max_char_buffer=100,
+        document=document,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
     )
     text_chunk = next(chunk_iter)
     self.assertEqual(text_chunk.additional_context, self._ADDITIONAL_CONTEXT)
@@ -419,7 +486,10 @@ class TextAdditionalContextTest(absltest.TestCase):
   def test_chunk_iterator_without_additional_context(self):
     document = data.Document(text="Sample text.")
     chunk_iter = chunking.ChunkIterator(
-        text=document.tokenized_text, max_char_buffer=100, document=document
+        text=document.tokenized_text,
+        max_char_buffer=100,
+        document=document,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
     )
     text_chunk = next(chunk_iter)
     self.assertIsNone(text_chunk.additional_context)
@@ -433,6 +503,7 @@ class TextAdditionalContextTest(absltest.TestCase):
         text=document.tokenized_text,
         max_char_buffer=15,
         document=document,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
     )
     chunks = list(chunk_iter)
     self.assertGreater(

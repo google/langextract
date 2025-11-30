@@ -46,8 +46,8 @@ class _Entry:
   priority: int
 
 
-_ENTRIES: list[_Entry] = []
-_ENTRY_KEYS: set[tuple[str, tuple[str, ...], int]] = (
+_entries: list[_Entry] = []
+_entry_keys: set[tuple[str, tuple[str, ...], int]] = (
     set()
 )  # (provider_id, patterns, priority)
 
@@ -61,7 +61,7 @@ def _add_entry(
 ) -> None:
   """Add an entry to the registry with deduplication."""
   key = (provider_id, tuple(p.pattern for p in patterns), priority)
-  if key in _ENTRY_KEYS:
+  if key in _entry_keys:
     logging.debug(
         "Skipping duplicate registration for %s with patterns %s at"
         " priority %d",
@@ -70,8 +70,8 @@ def _add_entry(
         priority,
     )
     return
-  _ENTRY_KEYS.add(key)
-  _ENTRIES.append(_Entry(patterns=patterns, loader=loader, priority=priority))
+  _entry_keys.add(key)
+  _entries.append(_Entry(patterns=patterns, loader=loader, priority=priority))
   logging.debug(
       "Registered provider %s with patterns %s at priority %d",
       provider_id,
@@ -151,13 +151,13 @@ def resolve(model_id: str) -> type[base_model.BaseLanguageModel]:
   # Providers should be loaded by the caller (e.g., factory.create_model)
   # Router doesn't load providers to avoid circular dependencies
 
-  sorted_entries = sorted(_ENTRIES, key=lambda e: e.priority, reverse=True)
+  sorted_entries = sorted(_entries, key=lambda e: e.priority, reverse=True)
 
   for entry in sorted_entries:
     if any(pattern.search(model_id) for pattern in entry.patterns):
       return entry.loader()
 
-  available_patterns = [str(p.pattern) for e in _ENTRIES for p in e.patterns]
+  available_patterns = [str(p.pattern) for e in _entries for p in e.patterns]
   raise exceptions.InferenceConfigError(
       f"No provider registered for model_id={model_id!r}. "
       f"Available patterns: {available_patterns}\n"
@@ -185,12 +185,12 @@ def resolve_provider(provider_name: str) -> type[base_model.BaseLanguageModel]:
   # Providers should be loaded by the caller (e.g., factory.create_model)
   # Router doesn't load providers to avoid circular dependencies
 
-  for entry in _ENTRIES:
+  for entry in _entries:
     for pattern in entry.patterns:
       if pattern.pattern == f"^{re.escape(provider_name)}$":
         return entry.loader()
 
-  for entry in _ENTRIES:
+  for entry in _entries:
     try:
       provider_class = entry.loader()
       class_name = provider_class.__name__
@@ -201,7 +201,7 @@ def resolve_provider(provider_name: str) -> type[base_model.BaseLanguageModel]:
 
   try:
     pattern = re.compile(f"^{provider_name}$", re.IGNORECASE)
-    for entry in _ENTRIES:
+    for entry in _entries:
       for entry_pattern in entry.patterns:
         if pattern.pattern == entry_pattern.pattern:
           return entry.loader()
@@ -216,9 +216,9 @@ def resolve_provider(provider_name: str) -> type[base_model.BaseLanguageModel]:
 
 def clear() -> None:
   """Clear all registered providers. Mainly for testing."""
-  global _ENTRIES  # pylint: disable=global-statement
-  _ENTRIES = []
-  _ENTRY_KEYS.clear()  # Also clear dedup keys to allow re-registration
+  global _entries  # pylint: disable=global-statement
+  _entries = []
+  _entry_keys.clear()  # Also clear dedup keys to allow re-registration
   resolve.cache_clear()
   resolve_provider.cache_clear()
 
@@ -231,7 +231,7 @@ def list_providers() -> list[tuple[tuple[str, ...], int]]:
   """
   return [
       (tuple(p.pattern for p in entry.patterns), entry.priority)
-      for entry in _ENTRIES
+      for entry in _entries
   ]
 
 
@@ -241,4 +241,4 @@ def list_entries() -> list[tuple[list[str], int]]:
   Returns:
     List of (patterns, priority) tuples.
   """
-  return [([p.pattern for p in e.patterns], e.priority) for e in _ENTRIES]
+  return [([p.pattern for p in e.patterns], e.priority) for e in _entries]

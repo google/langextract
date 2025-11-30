@@ -25,27 +25,25 @@ import os
 
 from absl import logging
 
+from langextract.providers import builtin_registry
 from langextract.providers import router
-from langextract.providers.builtin_registry import BUILTIN_PROVIDERS
-from langextract.providers.router import register
-from langextract.providers.router import register_lazy
 
 registry = router  # Backward compat alias
 
 __all__ = [
-    'gemini',
-    'openai',
-    'ollama',
-    'router',
-    'registry',  # Backward compat
-    'schemas',
-    'load_plugins_once',
-    'load_builtins_once',
+    "gemini",
+    "openai",
+    "ollama",
+    "router",
+    "registry",  # Backward compat
+    "schemas",
+    "load_plugins_once",
+    "load_builtins_once",
 ]
 
 # Track provider loading for lazy initialization
-_PLUGINS_LOADED = False
-_BUILTINS_LOADED = False
+_plugins_loaded = False
+_builtins_loaded = False
 
 
 def load_builtins_once() -> None:
@@ -56,21 +54,21 @@ def load_builtins_once() -> None:
   can be re-registered after registry.clear() even if their modules
   are already in sys.modules.
   """
-  global _BUILTINS_LOADED  # pylint: disable=global-statement
+  global _builtins_loaded  # pylint: disable=global-statement
 
-  if _BUILTINS_LOADED:
+  if _builtins_loaded:
     return
 
   # Register built-ins lazily so they can be re-registered after a registry.clear()
   # even if their modules were already imported earlier in the test run.
-  for config in BUILTIN_PROVIDERS:
-    register_lazy(
-        *config['patterns'],
-        target=config['target'],
-        priority=config['priority'],
+  for config in builtin_registry.BUILTIN_PROVIDERS:
+    router.register_lazy(
+        *config["patterns"],
+        target=config["target"],
+        priority=config["priority"],
     )
 
-  _BUILTINS_LOADED = True
+  _builtins_loaded = True
 
 
 def load_plugins_once() -> None:
@@ -79,89 +77,86 @@ def load_plugins_once() -> None:
   Discovers and loads langextract provider plugins using entry points.
   This function is idempotent - multiple calls have no effect.
   """
-  global _PLUGINS_LOADED  # pylint: disable=global-statement
-  if _PLUGINS_LOADED:
+  global _plugins_loaded  # pylint: disable=global-statement
+  if _plugins_loaded:
     return
 
-  # Check if plugin loading is disabled
-  if os.environ.get('LANGEXTRACT_DISABLE_PLUGINS', '').lower() in (
-      '1',
-      'true',
-      'yes',
+  if os.environ.get("LANGEXTRACT_DISABLE_PLUGINS", "").lower() in (
+      "1",
+      "true",
+      "yes",
   ):
-    logging.info('Plugin loading disabled via LANGEXTRACT_DISABLE_PLUGINS')
-    _PLUGINS_LOADED = True
+    logging.info("Plugin loading disabled via LANGEXTRACT_DISABLE_PLUGINS")
+    _plugins_loaded = True
     return
 
-  # Load built-in providers first
   load_builtins_once()
 
   try:
-    # Get entry points using the metadata API
+
     eps = metadata.entry_points()
 
     # Try different APIs based on what's available
-    if hasattr(eps, 'select'):
+    if hasattr(eps, "select"):
       # Python 3.10+ API
-      provider_eps = eps.select(group='langextract.providers')
-    elif hasattr(eps, 'get'):
+      provider_eps = eps.select(group="langextract.providers")
+    elif hasattr(eps, "get"):
       # Python 3.9 API
-      provider_eps = eps.get('langextract.providers', [])
+      provider_eps = eps.get("langextract.providers", [])
     else:
       # Fallback for older versions
       provider_eps = [
           ep
           for ep in eps
-          if getattr(ep, 'group', None) == 'langextract.providers'
+          if getattr(ep, "group", None) == "langextract.providers"
       ]
 
     for entry_point in provider_eps:
       try:
-        # Load the entry point
-        provider_class = entry_point.load()
-        logging.info('Loaded provider plugin: %s', entry_point.name)
 
-        # Register if it has pattern information
-        if hasattr(provider_class, 'get_model_patterns'):
+        provider_class = entry_point.load()
+        logging.info("Loaded provider plugin: %s", entry_point.name)
+
+        if hasattr(provider_class, "get_model_patterns"):
           patterns = provider_class.get_model_patterns()
           for pattern in patterns:
-            register(
+            router.register(
                 pattern,
                 priority=getattr(
                     provider_class,
-                    'pattern_priority',
+                    "pattern_priority",
                     20,  # Default plugin priority
                 ),
             )(provider_class)
           logging.info(
-              'Registered %d patterns for %s', len(patterns), entry_point.name
+              "Registered %d patterns for %s", len(patterns), entry_point.name
           )
       except Exception as e:
         logging.warning(
-            'Failed to load provider plugin %s: %s', entry_point.name, e
+            "Failed to load provider plugin %s: %s", entry_point.name, e
         )
 
   except Exception as e:
-    logging.warning('Error discovering provider plugins: %s', e)
+    logging.warning("Error discovering provider plugins: %s", e)
 
-  _PLUGINS_LOADED = True
+  _plugins_loaded = True
 
 
 def _reset_for_testing() -> None:
   """Reset plugin loading state for testing. Should only be used in tests."""
-  global _PLUGINS_LOADED, _BUILTINS_LOADED  # pylint: disable=global-statement
-  _PLUGINS_LOADED = False
-  _BUILTINS_LOADED = False
+  global _plugins_loaded, _builtins_loaded  # pylint: disable=global-statement
+  _plugins_loaded = False
+  _builtins_loaded = False
 
 
 def __getattr__(name: str):
   """Lazy loading for submodules."""
-  if name == 'router':
-    return importlib.import_module('langextract.providers.router')
-  elif name == 'schemas':
-    return importlib.import_module('langextract.providers.schemas')
-  elif name == '_PLUGINS_LOADED':
-    return _PLUGINS_LOADED
-  elif name == '_BUILTINS_LOADED':
-    return _BUILTINS_LOADED
-  raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+  if name == "router":
+    return importlib.import_module("langextract.providers.router")
+  elif name == "schemas":
+    return importlib.import_module("langextract.providers.schemas")
+  elif name == "_plugins_loaded":
+    return _plugins_loaded
+  elif name == "_builtins_loaded":
+    return _builtins_loaded
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

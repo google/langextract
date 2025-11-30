@@ -14,6 +14,7 @@
 
 from collections.abc import Sequence
 import dataclasses
+import inspect
 import textwrap
 from typing import Type
 from unittest import mock
@@ -25,6 +26,7 @@ from langextract import annotation
 from langextract import prompting
 from langextract import resolver as resolver_lib
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import tokenizer
 from langextract.core import types
 from langextract.providers import gemini
@@ -749,7 +751,7 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
               {"text": _FIXED_DOCUMENT_CONTENT, "document_id": "doc1"},
               {"text": _FIXED_DOCUMENT_CONTENT, "document_id": "doc1"},
           ],
-          expected_exception=annotation.DocumentRepeatError,
+          expected_exception=exceptions.InvalidDocumentError,
       ),
       dict(
           testcase_name="same_document_id_separated",
@@ -758,13 +760,13 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
               {"text": _FIXED_DOCUMENT_CONTENT, "document_id": "doc2"},
               {"text": _FIXED_DOCUMENT_CONTENT, "document_id": "doc1"},
           ],
-          expected_exception=annotation.DocumentRepeatError,
+          expected_exception=exceptions.InvalidDocumentError,
       ),
   )
   def test_annotate_documents_exceptions(
       self,
       documents: Sequence[dict[str, str]],
-      expected_exception: Type[annotation.DocumentRepeatError],
+      expected_exception: Type[exceptions.InvalidDocumentError],
       batch_length: int = 1,
   ):
     mock_language_model = self.enter_context(
@@ -1116,6 +1118,90 @@ class MultiPassHelperFunctionsTest(parameterized.TestCase):
     """Test overlap detection between extractions."""
     result = annotation._extractions_overlap(ext1, ext2)
     self.assertEqual(result, expected)
+
+
+class AnnotateDocumentsGeneratorTest(absltest.TestCase):
+  """Tests that annotate_documents uses 'yield from' for proper delegation."""
+
+  def setUp(self):
+    super().setUp()
+    self.mock_language_model = self.enter_context(
+        mock.patch.object(gemini, "GeminiLanguageModel", autospec=True)
+    )
+
+    def mock_infer(batch_prompts, **_):
+      """Return medication extractions based on prompt content."""
+      for prompt in batch_prompts:
+        if "Ibuprofen" in prompt:
+          text = textwrap.dedent(f"""\
+            ```yaml
+            {data.EXTRACTIONS_KEY}:
+            - medication: "Ibuprofen"
+              medication_index: 4
+            ```""")
+        elif "Cefazolin" in prompt:
+          text = textwrap.dedent(f"""\
+            ```yaml
+            {data.EXTRACTIONS_KEY}:
+            - medication: "Cefazolin"
+              medication_index: 4
+            ```""")
+        else:
+          text = f"```yaml\n{data.EXTRACTIONS_KEY}: []\n```"
+        yield [types.ScoredOutput(score=1.0, output=text)]
+
+    self.mock_language_model.infer.side_effect = mock_infer
+
+    self.annotator = annotation.Annotator(
+        language_model=self.mock_language_model,
+        prompt_template=prompting.PromptTemplateStructured(description=""),
+    )
+
+  def test_yields_documents_not_generators(self):
+    """Verifies annotate_documents yields AnnotatedDocument, not generators."""
+    docs = [
+        data.Document(
+            text="Patient took 400 mg PO Ibuprofen q4h for two days.",
+            document_id="doc1",
+        ),
+        data.Document(
+            text="Patient was given 250 mg IV Cefazolin TID for one week.",
+            document_id="doc2",
+        ),
+    ]
+
+    results = list(
+        self.annotator.annotate_documents(
+            docs,
+            resolver=resolver_lib.Resolver(
+                fence_output=True,
+                format_type=data.FormatType.YAML,
+                extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
+            ),
+            show_progress=False,
+            debug=False,
+        )
+    )
+
+    self.assertLen(results, 2)
+    self.assertFalse(
+        any(inspect.isgenerator(item) for item in results),
+        msg="Must use 'yield from' to delegate, not 'yield'",
+    )
+    meds_doc1 = {
+        e.extraction_text
+        for e in results[0].extractions
+        if e.extraction_class == "medication"
+    }
+    meds_doc2 = {
+        e.extraction_text
+        for e in results[1].extractions
+        if e.extraction_class == "medication"
+    }
+    self.assertIn("Ibuprofen", meds_doc1)
+    self.assertNotIn("Cefazolin", meds_doc1)
+    self.assertIn("Cefazolin", meds_doc2)
+    self.assertNotIn("Ibuprofen", meds_doc2)
 
 
 if __name__ == "__main__":

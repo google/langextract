@@ -35,7 +35,7 @@ from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
 from langextract.core import schema
-from langextract.core import tokenizer
+from langextract.core import tokenizer as tokenizer_lib
 
 _FUZZY_ALIGNMENT_MIN_THRESHOLD = 0.75
 
@@ -251,7 +251,7 @@ class Resolver(AbstractResolver):
         ResolverParsingError: If the content within the string cannot be parsed
         due to formatting errors, or if the parsed content is not as expected.
     """
-    logging.info("Starting resolver process for input text.")
+    logging.debug("Starting resolver process for input text.")
     logging.debug("Input Text: %s", input_text)
 
     try:
@@ -285,6 +285,7 @@ class Resolver(AbstractResolver):
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       accept_match_lesser: bool = True,
+      tokenizer_inst: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.Extraction]:
     """Aligns annotated extractions with source text.
@@ -305,12 +306,13 @@ class Resolver(AbstractResolver):
         alignment.
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
         status).
+      tokenizer_inst: Optional tokenizer instance.
       **kwargs: Additional parameters.
 
     Yields:
         Iterator on aligned extractions.
     """
-    logging.info("Starting alignment process for provided chunk text.")
+    logging.debug("Starting alignment process for provided chunk text.")
 
     if not extractions:
       logging.debug(
@@ -330,6 +332,7 @@ class Resolver(AbstractResolver):
         enable_fuzzy_alignment=enable_fuzzy_alignment,
         fuzzy_alignment_threshold=fuzzy_alignment_threshold,
         accept_match_lesser=accept_match_lesser,
+        tokenizer_impl=tokenizer_inst,
     )
     logging.debug(
         "Aligned extractions count: %d",
@@ -340,7 +343,7 @@ class Resolver(AbstractResolver):
       logging.debug("Yielding aligned extraction: %s", extraction)
       yield extraction
 
-    logging.info("Completed alignment process for the provided source_text.")
+    logging.debug("Completed alignment process for the provided source_text.")
 
   def string_to_extraction_data(
       self,
@@ -404,7 +407,7 @@ class Resolver(AbstractResolver):
         ValueError: If the extraction text is not a string or integer, or if the
         index is not an integer.
     """
-    logging.info("Starting to extract and order extractions from data.")
+    logging.debug("Starting to extract and order extractions from data.")
 
     if not extraction_data:
       logging.debug("Received empty extraction data.")
@@ -475,7 +478,7 @@ class Resolver(AbstractResolver):
         )
 
     processed_extractions.sort(key=operator.attrgetter("extraction_index"))
-    logging.info("Completed extraction and ordering of extractions.")
+    logging.debug("Completed extraction and ordering of extractions.")
     return processed_extractions
 
 
@@ -535,10 +538,11 @@ class WordAligner:
       self,
       extraction: data.Extraction,
       source_tokens: list[str],
-      tokenized_text: tokenizer.TokenizedText,
+      tokenized_text: tokenizer_lib.TokenizedText,
       token_offset: int,
       char_offset: int,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
+      tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
   ) -> data.Extraction | None:
     """Fuzzy-align an extraction using difflib.SequenceMatcher on tokens.
 
@@ -556,13 +560,16 @@ class WordAligner:
       token_offset: The token offset of the current chunk.
       char_offset: The character offset of the current chunk.
       fuzzy_alignment_threshold: The minimum ratio for a fuzzy match.
+      tokenizer_impl: Optional tokenizer instance.
 
     Returns:
       The aligned data.Extraction if successful, None otherwise.
     """
 
     extraction_tokens = list(
-        _tokenize_with_lowercase(extraction.extraction_text)
+        _tokenize_with_lowercase(
+            extraction.extraction_text, tokenizer_inst=tokenizer_impl
+        )
     )
     # Work with lightly stemmed tokens so pluralisation doesn't block alignment
     extraction_tokens_norm = [_normalize_token(t) for t in extraction_tokens]
@@ -631,7 +638,7 @@ class WordAligner:
       start_idx, window_size = best_span
 
       try:
-        extraction.token_interval = tokenizer.TokenInterval(
+        extraction.token_interval = tokenizer_lib.TokenInterval(
             start_index=start_idx + token_offset,
             end_index=start_idx + window_size + token_offset,
         )
@@ -663,6 +670,7 @@ class WordAligner:
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       accept_match_lesser: bool = True,
+      tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
   ) -> Sequence[Sequence[data.Extraction]]:
     """Aligns extractions with their positions in the source text.
 
@@ -689,6 +697,7 @@ class WordAligner:
         (0-1).
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
         status).
+      tokenizer_impl: Optional tokenizer instance.
 
     Returns:
       A sequence of extractions aligned with the source text, including token
@@ -703,18 +712,25 @@ class WordAligner:
       logging.info("No extraction groups provided; returning empty list.")
       return []
 
-    source_tokens = list(_tokenize_with_lowercase(source_text))
+    source_tokens = list(
+        _tokenize_with_lowercase(source_text, tokenizer_inst=tokenizer_impl)
+    )
 
-    delim_len = len(list(_tokenize_with_lowercase(delim)))
+    delim_len = len(
+        list(_tokenize_with_lowercase(delim, tokenizer_inst=tokenizer_impl))
+    )
     if delim_len != 1:
       raise ValueError(f"Delimiter {delim!r} must be a single token.")
 
     logging.debug("Using delimiter %r for extraction alignment", delim)
 
-    extraction_tokens = _tokenize_with_lowercase(
-        f" {delim} ".join(
-            extraction.extraction_text
-            for extraction in itertools.chain(*extraction_groups)
+    extraction_tokens = list(
+        _tokenize_with_lowercase(
+            f" {delim} ".join(
+                extraction.extraction_text
+                for extraction in itertools.chain(*extraction_groups)
+            ),
+            tokenizer_inst=tokenizer_impl,
         )
     )
 
@@ -739,14 +755,20 @@ class WordAligner:
 
         index_to_extraction_group[extraction_index] = (extraction, group_index)
         extraction_text_tokens = list(
-            _tokenize_with_lowercase(extraction.extraction_text)
+            _tokenize_with_lowercase(
+                extraction.extraction_text, tokenizer_inst=tokenizer_impl
+            )
         )
         extraction_index += len(extraction_text_tokens) + delim_len
 
     aligned_extraction_groups: list[list[data.Extraction]] = [
         [] for _ in extraction_groups
     ]
-    tokenized_text = tokenizer.tokenize(source_text)
+    tokenized_text = (
+        tokenizer_impl.tokenize(source_text)
+        if tokenizer_impl
+        else tokenizer_lib.tokenize(source_text)
+    )
 
     # Track which extractions were aligned in the exact matching phase
     aligned_extractions = []
@@ -764,7 +786,7 @@ class WordAligner:
         )
         continue
 
-      extraction.token_interval = tokenizer.TokenInterval(
+      extraction.token_interval = tokenizer_lib.TokenInterval(
           start_index=i + token_offset,
           end_index=i + n + token_offset,
       )
@@ -784,7 +806,11 @@ class WordAligner:
         ) from e
 
       extraction_text_len = len(
-          list(_tokenize_with_lowercase(extraction.extraction_text))
+          list(
+              _tokenize_with_lowercase(
+                  extraction.extraction_text, tokenizer_inst=tokenizer_impl
+              )
+          )
       )
       if extraction_text_len < n:
         raise ValueError(
@@ -827,6 +853,7 @@ class WordAligner:
             token_offset,
             char_offset,
             fuzzy_alignment_threshold,
+            tokenizer_impl=tokenizer_impl,
         )
         if aligned_extraction:
           aligned_extractions.append(aligned_extraction)
@@ -844,7 +871,10 @@ class WordAligner:
     return aligned_extraction_groups
 
 
-def _tokenize_with_lowercase(text: str) -> Iterator[str]:
+def _tokenize_with_lowercase(
+    text: str,
+    tokenizer_inst: tokenizer_lib.Tokenizer | None = None,
+) -> Iterator[str]:
   """Extract and lowercase tokens from the input text into words.
 
   This function utilizes the tokenizer module to tokenize text and yields
@@ -852,11 +882,15 @@ def _tokenize_with_lowercase(text: str) -> Iterator[str]:
 
   Args:
     text (str): The text to be tokenized.
+    tokenizer_inst: Optional tokenizer instance.
 
   Yields:
     Iterator[str]: An iterator over tokenized words.
   """
-  tokenized_pb2 = tokenizer.tokenize(text)
+  if tokenizer_inst is not None:
+    tokenized_pb2 = tokenizer_inst.tokenize(text)
+  else:
+    tokenized_pb2 = tokenizer_lib.tokenize(text)
   original_text = tokenized_pb2.text
   for token in tokenized_pb2.tokens:
     start = token.char_interval.start_pos

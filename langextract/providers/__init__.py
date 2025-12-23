@@ -42,8 +42,8 @@ __all__ = [
 ]
 
 # Track provider loading for lazy initialization
-_plugins_loaded = False
-_builtins_loaded = False
+_plugins_loaded = False  # pylint: disable=invalid-name
+_builtins_loaded = False  # pylint: disable=invalid-name
 
 
 def load_builtins_once() -> None:

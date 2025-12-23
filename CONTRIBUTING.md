@@ -38,7 +38,7 @@ Please provide as much detail as possible to help us understand and address your
 
 ### 1. Development Setup
 
-To get started, clone the repository and install the necessary dependencies for development and testing. Detailed instructions can be found in the [Installation from Source](https://github.com/google/langextract#from-source) section of the `README.md`.
+To get started, clone the repository and install the necessary dependencies for development and testing. We recommend using `uv` for faster and more reliable dependency management, but `pip` is also supported. Detailed instructions can be found in the [Installation from Source](https://github.com/google/langextract#from-source) section of the `README.md`.
 
 **Windows Users**: The formatting scripts use bash. Please use one of:
 - Git Bash (comes with Git for Windows)
@@ -72,8 +72,8 @@ formatting virtual environments or other non-source directories.
 For automatic formatting checks before each commit:
 
 ```bash
-# Install pre-commit
-pip install pre-commit
+# Install pre-commit (using uv)
+uv pip install pre-commit
 
 # Install the git hooks
 pre-commit install
@@ -104,6 +104,8 @@ For full testing across Python versions:
 ```bash
 tox  # runs pylint + pytest on Python 3.10 and 3.11
 ```
+
+If you have `uv` installed, tox will automatically use it for faster virtual environment creation and dependency installation.
 
 ### 5. Adding Custom Model Providers
 

@@ -162,12 +162,26 @@ See an example of the Vertex AI Batch API usage in [this example](docs/examples/
 
 ### From PyPI
 
+**Using uv (Recommended)**:
+```bash
+uv pip install langextract
+```
+
+**Using pip**:
 ```bash
 pip install langextract
 ```
 
-*Recommended for most users. For isolated environments, consider using a virtual environment:*
+*For isolated environments, consider using a virtual environment:*
 
+**With uv**:
+```bash
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+uv pip install langextract
+```
+
+**With pip**:
 ```bash
 python -m venv langextract_env
 source langextract_env/bin/activate  # On Windows: langextract_env\Scripts\activate
@@ -176,11 +190,29 @@ pip install langextract
 
 ### From Source
 
-LangExtract uses modern Python packaging with `pyproject.toml` for dependency management:
+### From Source
 
-*Installing with `-e` puts the package in development mode, allowing you to modify the code without reinstalling.*
+LangExtract uses modern Python packaging with `pyproject.toml` for dependency management.
 
+**Using uv (Recommended)**:
+```bash
+git clone https://github.com/google/langextract.git
+cd langextract
 
+# For basic installation:
+uv pip install -e .
+
+# For development (includes linting tools):
+uv pip install -e ".[dev]"
+
+# For testing (includes pytest):
+uv pip install -e ".[test]"
+
+# To sync all dependencies with lock file:
+uv sync --all-extras
+```
+
+**Using pip**:
 ```bash
 git clone https://github.com/google/langextract.git
 cd langextract

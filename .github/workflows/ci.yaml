@@ -50,10 +50,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install format tools
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          uv pip install --system -e ".[dev]"
 
       - name: Check formatting
         id: format-check
@@ -102,11 +107,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install tox
-          pip install -e ".[dev,test]"
+          uv pip install --system tox
+          uv pip install --system -e ".[dev,test]"
 
       - name: Run unit tests and linting
         run: |
@@ -132,11 +141,15 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install tox
-          pip install -e ".[dev,test]"
+          uv pip install --system tox
+          uv pip install --system -e ".[dev,test]"
 
       - name: Run live API tests
         env:
@@ -189,10 +202,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install tox
+          uv pip install --system tox
 
       - name: Run plugin smoke test
         run: tox -e plugin-smoke
@@ -249,10 +266,14 @@ jobs:
       - name: Pull gemma2 model
         run: docker exec ollama ollama pull gemma2:2b || true
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
       - name: Install tox
         run: |
-          python -m pip install --upgrade pip
-          pip install tox
+          uv pip install --system tox
 
       - name: Run Ollama integration tests
         run: tox -e ollama-integration
@@ -331,11 +352,15 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
       - name: Install format tools
         run: |
-          python -m pip install --upgrade pip
           # Install formatter tools with pinned versions
-          pip install pyink==24.3.0 isort==5.13.2 lint-imports==0.3.1
+          uv pip install --system pyink==24.3.0 isort==5.13.2 lint-imports==0.3.1
 
       - name: Validate PR formatting
         run: |
@@ -394,9 +419,9 @@ jobs:
             echo "::notice::Live API tests skipped - API keys not configured"
             exit 0
           fi
-          python -m pip install --upgrade pip
-          pip install tox
-          pip install -e ".[dev,test]"
+          # uv is already installed and in PATH from previous step
+          uv pip install --system tox
+          uv pip install --system -e ".[dev,test]"
           GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
           LANGEXTRACT_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
           OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \

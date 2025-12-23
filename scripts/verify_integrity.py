@@ -5,6 +5,7 @@ import importlib
 import subprocess
 import glob
 from pathlib import Path
+from typing import List
 
 # Configure logging
 logging.basicConfig(
@@ -13,9 +14,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def check_package_integrity(package_name):
+def check_package_integrity(package_name: str) -> List[str]:
+    """
+    Recursively attempts to import all modules within a package.
+    
+    Args:
+        package_name: The name of the root package to check.
+        
+    Returns:
+        A list of error strings if imports fail, empty list otherwise.
+    """
     logger.info("Checking Package Integrity: %s", package_name)
-    errors = []
+    errors: List[str] = []
     
     # Find package path
     try:
@@ -28,7 +38,7 @@ def check_package_integrity(package_name):
         logger.info("Note: %s is a namespace package or single module.", package_name)
         return []
 
-    path = package.__path__[0]
+    path = list(package.__path__)[0]
     prefix = package_name + "."
 
     for root, _, files in os.walk(path):
@@ -51,9 +61,18 @@ def check_package_integrity(package_name):
     
     return errors
 
-def check_examples_syntax(examples_dir):
+def check_examples_syntax(examples_dir: str) -> List[str]:
+    """
+    Checks python syntax of all scripts in the directory.
+    
+    Args:
+        examples_dir: Path to directory containing example scripts.
+        
+    Returns:
+        List of error strings.
+    """
     logger.info("Checking Examples Syntax: %s", examples_dir)
-    errors = []
+    errors: List[str] = []
     
     py_files = glob.glob(os.path.join(examples_dir, "**", "*.py"), recursive=True)
     
@@ -72,7 +91,16 @@ def check_examples_syntax(examples_dir):
         logger.error("Found %d syntax errors in examples.", len(errors))
     return errors
 
-def check_plugin_install(plugin_dir):
+def check_plugin_install(plugin_dir: str) -> List[str]:
+    """
+    Verifies that a plugin package is installable using uv.
+    
+    Args:
+        plugin_dir: Path to the plugin source directory.
+        
+    Returns:
+        List of error strings.
+    """
     logger.info("Checking Plugin Installability: %s", plugin_dir)
     
     # Try to dry-run install with uv
@@ -92,9 +120,9 @@ def check_plugin_install(plugin_dir):
         logger.error("Plugin install check failed: %s", e.stderr.strip())
         return [f"Plugin install failed: {e.stderr}"]
 
-def main():
+def main() -> None:
     base_dir = Path.cwd()
-    errors = []
+    errors: List[str] = []
     
     # 1. Check Source Integrity
     errors.extend(check_package_integrity("langextract"))

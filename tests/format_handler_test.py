@@ -254,5 +254,57 @@ class FormatHandlerTest(parameterized.TestCase):
     self.assertEqual(parsed[0]["test_attributes"]["key"], "data")
 
 
+class NonGeminiModelParsingTest(parameterized.TestCase):
+  """Regression tests for non-Gemini model parsing edge cases."""
+
+  def test_think_tags_stripped_before_parsing(self):
+    # Reasoning models output <think> tags before JSON
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    input_with_think = (
+        "<think>Let me analyze this text...</think>"
+        '{"extractions": [{"person": "Alice"}]}'
+    )
+    parsed = handler.parse_output(input_with_think)
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["person"], "Alice")
+
+  def test_top_level_list_accepted_as_fallback(self):
+    # Some models return [...] instead of {"extractions": [...]}
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    input_list = '[{"person": "Bob"}, {"person": "Carol"}]'
+    parsed = handler.parse_output(input_list)
+    self.assertLen(parsed, 2)
+    self.assertEqual(parsed[0]["person"], "Bob")
+    self.assertEqual(parsed[1]["person"], "Carol")
+
+  def test_deepseek_r1_real_output(self):
+    # Real output captured from DeepSeek-R1:1.5b model
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    deepseek_output = textwrap.dedent("""\
+        <think>
+        Alright, so I need to extract people from the given text.
+        I see John Smith is mentioned as an engineer.
+        </think>
+        {"extractions": [{"person": "John Smith"}]}""")
+    parsed = handler.parse_output(deepseek_output)
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["person"], "John Smith")
+
+
 if __name__ == "__main__":
   absltest.main()

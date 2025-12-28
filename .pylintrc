@@ -19,10 +19,6 @@
 # number of processors available to use.
 jobs=0
 
-# When enabled, pylint would attempt to guess common misconfiguration and emit
-# user-friendly hints instead of false-positive error messages.
-suggestion-mode=yes
-
 # Pickle collected data for later comparisons.
 persistent=yes
 

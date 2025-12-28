@@ -43,6 +43,8 @@ _FENCE_RE = re.compile(
     re.MULTILINE,
 )
 
+_THINK_TAG_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
+
 
 class FormatHandler:
   """Handles all format-specific logic for prompts and parsing.
@@ -170,10 +172,7 @@ class FormatHandler:
     content = self._extract_content(text)
 
     try:
-      if self.format_type == data.FormatType.YAML:
-        parsed = yaml.safe_load(content)
-      else:
-        parsed = json.loads(content)
+      parsed = self._parse_with_fallback(content, strict)
     except (yaml.YAMLError, json.JSONDecodeError) as e:
       msg = (
           f"Failed to parse {self.format_type.value.upper()} content:"
@@ -210,7 +209,7 @@ class FormatHandler:
         else:
           items = [parsed]
     elif isinstance(parsed, list):
-      if require_wrapper:
+      if require_wrapper and (strict or not self.allow_top_level_list):
         raise exceptions.FormatParseError(
             f"Content must be a mapping with an '{self.wrapper_key}' key."
         )
@@ -220,6 +219,7 @@ class FormatHandler:
         )
       if not self.allow_top_level_list:
         raise exceptions.FormatParseError("Top-level list is not allowed.")
+      # Some models return [...] instead of {"extractions": [...]}.
       items = parsed
     else:
       raise exceptions.FormatParseError(
@@ -257,6 +257,23 @@ class FormatHandler:
       return True
     tag = lang.strip().lower()
     return tag in valid_tags.get(self.format_type, set())
+
+  def _parse_with_fallback(self, content: str, strict: bool):
+    """Parse content, retrying without <think> tags on failure."""
+    try:
+      if self.format_type == data.FormatType.YAML:
+        return yaml.safe_load(content)
+      return json.loads(content)
+    except (yaml.YAMLError, json.JSONDecodeError):
+      if strict:
+        raise
+      # Reasoning models (DeepSeek-R1, QwQ) emit <think> tags before JSON.
+      if _THINK_TAG_RE.search(content):
+        stripped = _THINK_TAG_RE.sub("", content).strip()
+        if self.format_type == data.FormatType.YAML:
+          return yaml.safe_load(stripped)
+        return json.loads(stripped)
+      raise
 
   def _extract_content(self, text: str) -> str:
     """Extract content from text, handling fences if configured.

@@ -44,6 +44,8 @@ dotenv.load_dotenv(override=True)
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
 
+# Security: API keys are obtained from environment variables only.
+# Never hardcode or commit API keys to version control.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get(
     "LANGEXTRACT_API_KEY"
 )

@@ -34,13 +34,14 @@ examples = [
 unicode_tokenizer = tokenizer.UnicodeTokenizer()
 
 # 2. Run Extraction with the Custom Tokenizer
+# Note: Authentication credentials should be provided via environment variables
+# rather than hardcoded in the script for security reasons
 result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt_description,
     examples=examples,
     model_id="gemini-2.5-flash",
     tokenizer=unicode_tokenizer,   # <--- Pass the tokenizer here
-    api_key="your-api-key-here"    # Optional if env var is set
 )
 
 # 3. Display Results

@@ -47,8 +47,8 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt_description,
     examples=examples,
-    model_id="gemini-2.5-pro",
-    api_key="your-api-key-here"  # Optional if LANGEXTRACT_API_KEY environment variable is set
+    model_id="gemini-2.5-pro"
+    # Authentication credentials should be provided via environment variables for security
 )
 
 # Display entities with positions
@@ -167,8 +167,8 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt_description,
     examples=examples,
-    model_id="gemini-2.5-pro",
-    api_key="your-api-key-here"  # Optional if LANGEXTRACT_API_KEY environment variable is set
+    model_id="gemini-2.5-pro"
+    # Authentication credentials should be provided via environment variables for security
 )
 
 # Display grouped medications

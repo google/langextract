@@ -198,12 +198,81 @@ def print_report(errors: List[str], warnings: List[str]) -> None:
     print('✅ Table format validation passed!')
 
 
+def validate_input_path(input_str: str) -> Path:
+  """Validate and sanitize user-provided path to prevent traversal attacks.
+  
+  Args:
+    input_str: The raw input string from command line arguments
+    
+  Returns:
+    A validated Path object safe to use for file operations
+    
+  Raises:
+    ValueError: If the path contains invalid characters or attempts traversal
+  """
+  import string
+  
+  # Strictly validate the input string
+  if not input_str:
+    raise ValueError('Path cannot be empty')
+  
+  # Check for null bytes and other dangerous characters
+  if '\x00' in input_str or '\n' in input_str or '\r' in input_str:
+    raise ValueError('Path contains invalid characters')
+  
+  # Check for suspicious path patterns that indicate traversal attempts
+  if '..' in input_str or input_str.startswith('/') or input_str.startswith('~'):
+    raise ValueError('Path traversal detected')
+  
+  # Only allow alphanumeric, hyphen, underscore, dot, and forward slash in paths
+  allowed_chars = set(string.ascii_letters + string.digits + '-_./')
+  if not all(c in allowed_chars for c in input_str):
+    raise ValueError('Path contains invalid characters')
+  
+  # Create the path
+  path = Path(input_str)
+  
+  # Ensure path doesn't contain suspicious components
+  for part in path.parts:
+    if part == '..' or part == '.':
+      raise ValueError('Invalid path component')
+    if part.startswith('-') or part.startswith('/'):
+      raise ValueError('Invalid path component')
+  
+  return path
+
+
 if __name__ == '__main__':
+  # Set default path
   path = Path('COMMUNITY_PROVIDERS.md')
+  
+  # Validate and use command line argument if provided
   if len(sys.argv) > 1:
-    path = Path(sys.argv[1])
+    user_input = sys.argv[1]
+    # Immediately validate the user input before any processing
+    if not user_input or not isinstance(user_input, str):
+      print(f'❌ Error: Invalid path provided: input must be a non-empty string')
+      sys.exit(1)
+    
+    # Block dangerous patterns
+    if '..' in user_input or user_input.startswith('/') or user_input.startswith('~'):
+      print(f'❌ Error: Invalid path provided: path traversal detected')
+      sys.exit(1)
+    
+    # Block special characters that could be used in attacks
+    dangerous_chars = ['|', '&', ';', '$', '`', '\n', '\r', '\x00', '*', '?', '(', ')', '<', '>', '{', '}', '[', ']']
+    if any(char in user_input for char in dangerous_chars):
+      print(f'❌ Error: Invalid path provided: contains dangerous characters')
+      sys.exit(1)
+    
+    # Create path from validated input
+    path = Path(user_input)
+  
+  # Verify file exists
   if not path.exists():
     print(f'❌ Error: File not found: {path}')
     sys.exit(1)
+  
+  # Validate the file
   ok = validate(path)
   sys.exit(0 if ok else 1)

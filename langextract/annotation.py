@@ -214,6 +214,7 @@ class Annotator:
       batch_length: int = 1,
       debug: bool = True,
       extraction_passes: int = 1,
+      context_window_chars: int | None = None,
       show_progress: bool = True,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
@@ -238,6 +239,9 @@ class Annotator:
         standard single extraction.
         Values > 1 reprocess tokens multiple times, potentially increasing
         costs with the potential for a more thorough extraction.
+      context_window_chars: Number of characters from the previous chunk to
+        include as context for the current chunk. Helps with coreference
+        resolution across chunk boundaries. Defaults to None (disabled).
       show_progress: Whether to show progress bar. Defaults to True.
       tokenizer: Optional tokenizer to use. If None, uses default tokenizer.
       **kwargs: Additional arguments passed to LanguageModel.infer and Resolver.
@@ -259,6 +263,7 @@ class Annotator:
           batch_length,
           debug,
           show_progress,
+          context_window_chars=context_window_chars,
           tokenizer=tokenizer,
           **kwargs,
       )
@@ -271,6 +276,7 @@ class Annotator:
           debug,
           extraction_passes,
           show_progress,
+          context_window_chars=context_window_chars,
           tokenizer=tokenizer,
           **kwargs,
       )
@@ -283,6 +289,7 @@ class Annotator:
       batch_length: int,
       debug: bool,
       show_progress: bool = True,
+      context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
@@ -291,6 +298,9 @@ class Annotator:
     Streams input without full materialization, maintains correct attribution
     across batches, and emits completed documents immediately to minimize
     peak memory usage. Handles generators from both infer() and align().
+
+    When context_window_chars is set, includes text from the previous chunk as
+    context for coreference resolution across chunk boundaries.
     """
     doc_order: list[str] = []
     doc_text_by_id: dict[str, str] = {}
@@ -345,17 +355,21 @@ class Annotator:
 
     chars_processed = 0
 
+    prompt_builder = prompting.ContextAwarePromptBuilder(
+        generator=self._prompt_generator,
+        context_window_chars=context_window_chars,
+    )
+
     try:
       for batch in batch_iter:
         if not batch:
           continue
 
         prompts = [
-            self._prompt_generator.render(
-                question=text_chunk.chunk_text,
-                additional_context=text_chunk.additional_context,
+            prompt_builder.build_prompt(
+                chunk.chunk_text, chunk.document_id, chunk.additional_context
             )
-            for text_chunk in batch
+            for chunk in batch
         ]
 
         if show_progress:
@@ -434,6 +448,7 @@ class Annotator:
       debug: bool,
       extraction_passes: int,
       show_progress: bool = True,
+      context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
@@ -466,6 +481,7 @@ class Annotator:
           batch_length,
           debug=(debug and pass_num == 0),
           show_progress=show_progress if pass_num == 0 else False,
+          context_window_chars=context_window_chars,
           tokenizer=tokenizer,
           **kwargs,
       ):
@@ -517,6 +533,7 @@ class Annotator:
       additional_context: str | None = None,
       debug: bool = True,
       extraction_passes: int = 1,
+      context_window_chars: int | None = None,
       show_progress: bool = True,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
@@ -535,6 +552,9 @@ class Annotator:
         recall by finding additional entities. Defaults to 1, which performs
         standard single extraction. Values > 1 reprocess tokens multiple times,
         potentially increasing costs.
+      context_window_chars: Number of characters from the previous chunk to
+        include as context for coreference resolution. Defaults to None
+        (disabled).
       show_progress: Whether to show progress bar. Defaults to True.
       tokenizer: Optional tokenizer instance.
       **kwargs: Additional arguments for inference and resolver_lib.
@@ -559,13 +579,14 @@ class Annotator:
 
     annotations = list(
         self.annotate_documents(
-            documents,
-            resolver,
-            max_char_buffer,
-            batch_length,
-            debug,
-            extraction_passes,
-            show_progress,
+            documents=documents,
+            resolver=resolver,
+            max_char_buffer=max_char_buffer,
+            batch_length=batch_length,
+            debug=debug,
+            extraction_passes=extraction_passes,
+            context_window_chars=context_window_chars,
+            show_progress=show_progress,
             tokenizer=tokenizer,
             **kwargs,
         )

@@ -53,6 +53,7 @@ def extract(
     debug: bool = False,
     model_url: str | None = None,
     extraction_passes: int = 1,
+    context_window_chars: int | None = None,
     config: typing.Any = None,
     model: typing.Any = None,
     *,
@@ -140,6 +141,10 @@ def extract(
         for overlaps). WARNING: Each additional pass reprocesses tokens,
         potentially increasing API costs. For example, extraction_passes=3
         reprocesses tokens 3x.
+      context_window_chars: Number of characters from the previous chunk to
+        include as context for the current chunk. This helps with coreference
+        resolution across chunk boundaries (e.g., resolving "She" to a person
+        mentioned in the previous chunk). Defaults to None (disabled).
       config: Model configuration to use for extraction. Takes precedence over
         model_id, api_key, and language_model_type parameters. When both model
         and config are provided, model takes precedence.
@@ -335,6 +340,7 @@ def extract(
         additional_context=additional_context,
         debug=debug,
         extraction_passes=extraction_passes,
+        context_window_chars=context_window_chars,
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,
@@ -350,6 +356,7 @@ def extract(
         batch_length=batch_length,
         debug=debug,
         extraction_passes=extraction_passes,
+        context_window_chars=context_window_chars,
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,

@@ -20,6 +20,7 @@ import json
 import pathlib
 
 import pydantic
+from typing_extensions import override
 import yaml
 
 from langextract.core import data
@@ -135,3 +136,141 @@ class QAPromptGenerator:
     prompt_lines.append(f"{self.question_prefix}{question}")
     prompt_lines.append(self.answer_prefix)
     return "\n".join(prompt_lines)
+
+
+class PromptBuilder:
+  """Builds prompts for text chunks using a QAPromptGenerator.
+
+  This base class provides a simple interface for prompt generation. Subclasses
+  can extend this to add stateful behavior like cross-chunk context tracking.
+  """
+
+  def __init__(self, generator: QAPromptGenerator):
+    """Initializes the builder with the given prompt generator.
+
+    Args:
+      generator: The underlying prompt generator to use.
+    """
+    self._generator = generator
+
+  def build_prompt(
+      self,
+      chunk_text: str,
+      document_id: str,
+      additional_context: str | None = None,
+  ) -> str:
+    """Builds a prompt for the given chunk.
+
+    Args:
+      chunk_text: The text of the current chunk to process.
+      document_id: Identifier for the source document.
+      additional_context: Optional additional context from the document.
+
+    Returns:
+      The rendered prompt string ready for the language model.
+    """
+    del document_id  # Unused in base class.
+    return self._generator.render(
+        question=chunk_text,
+        additional_context=additional_context,
+    )
+
+
+class ContextAwarePromptBuilder(PromptBuilder):
+  """Prompt builder with cross-chunk context tracking.
+
+  Extends PromptBuilder to inject text from the previous chunk into each
+  prompt. This helps language models resolve coreferences across chunk
+  boundaries (e.g., connecting "She" to "Dr. Sarah Johnson" from the
+  previous chunk).
+
+  Context is tracked per document_id, so multiple documents can be processed
+  without context bleeding between them.
+  """
+
+  _CONTEXT_PREFIX = "[Previous text]: ..."
+
+  def __init__(
+      self,
+      generator: QAPromptGenerator,
+      context_window_chars: int | None = None,
+  ):
+    """Initializes the builder with context tracking configuration.
+
+    Args:
+      generator: The underlying prompt generator to use.
+      context_window_chars: Number of characters from the previous chunk's
+          tail to include as context. Defaults to None (disabled).
+    """
+    super().__init__(generator)
+    self._context_window_chars = context_window_chars
+    self._prev_chunk_by_doc_id: dict[str, str] = {}
+
+  @property
+  def context_window_chars(self) -> int | None:
+    """Number of trailing characters from previous chunk to include."""
+    return self._context_window_chars
+
+  @override
+  def build_prompt(
+      self,
+      chunk_text: str,
+      document_id: str,
+      additional_context: str | None = None,
+  ) -> str:
+    """Builds a prompt, injecting previous chunk context if enabled.
+
+    Args:
+      chunk_text: The text of the current chunk to process.
+      document_id: Identifier for the source document (used to track context
+          per document).
+      additional_context: Optional additional context from the document.
+
+    Returns:
+      The rendered prompt string ready for the language model.
+    """
+    effective_context = self._build_effective_context(
+        document_id, additional_context
+    )
+    prompt = self._generator.render(
+        question=chunk_text,
+        additional_context=effective_context,
+    )
+    self._update_state(document_id, chunk_text)
+    return prompt
+
+  def _build_effective_context(
+      self,
+      document_id: str,
+      additional_context: str | None,
+  ) -> str | None:
+    """Combines previous chunk context with any additional context.
+
+    Args:
+      document_id: Identifier for the source document.
+      additional_context: Optional additional context from the document.
+
+    Returns:
+      Combined context string, or None if no context is available.
+    """
+    context_parts: list[str] = []
+
+    if self._context_window_chars and document_id in self._prev_chunk_by_doc_id:
+      prev_text = self._prev_chunk_by_doc_id[document_id]
+      window = prev_text[-self._context_window_chars :]
+      context_parts.append(f"{self._CONTEXT_PREFIX}{window}")
+
+    if additional_context:
+      context_parts.append(additional_context)
+
+    return "\n\n".join(context_parts) if context_parts else None
+
+  def _update_state(self, document_id: str, chunk_text: str) -> None:
+    """Stores current chunk as context for the next chunk in this document.
+
+    Args:
+      document_id: Identifier for the source document.
+      chunk_text: The current chunk text to store.
+    """
+    if self._context_window_chars:
+      self._prev_chunk_by_doc_id[document_id] = chunk_text

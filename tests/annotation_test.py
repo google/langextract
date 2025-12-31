@@ -1204,5 +1204,163 @@ class AnnotateDocumentsGeneratorTest(absltest.TestCase):
     self.assertNotIn("Ibuprofen", meds_doc2)
 
 
+class CrossChunkContextTest(absltest.TestCase):
+  """Tests for cross-chunk context window feature."""
+
+  def setUp(self):
+    super().setUp()
+    self.mock_language_model = self.enter_context(
+        mock.patch.object(gemini, "GeminiLanguageModel", autospec=True)
+    )
+    self.annotator = annotation.Annotator(
+        language_model=self.mock_language_model,
+        prompt_template=prompting.PromptTemplateStructured(description=""),
+    )
+
+  def test_context_window_includes_previous_chunk_text(self):
+    """Verifies that context_window_chars passes previous chunk text."""
+    # Chunk 1: "Dr. Sarah Johnson is a cardiologist."
+    # Chunk 2: "She specializes in heart surgery."
+    text = (
+        "Dr. Sarah Johnson is a cardiologist. She specializes in heart surgery."
+    )
+    self.mock_language_model.infer.side_effect = [
+        [[
+            types.ScoredOutput(
+                score=1.0,
+                output=textwrap.dedent(f"""\
+                  ```yaml
+                  {data.EXTRACTIONS_KEY}:
+                  - person: "Dr. Sarah Johnson"
+                  ```"""),
+            )
+        ]],
+        [[
+            types.ScoredOutput(
+                score=1.0,
+                output=textwrap.dedent(f"""\
+                  ```yaml
+                  {data.EXTRACTIONS_KEY}:
+                  - specialization: "heart surgery"
+                  ```"""),
+            )
+        ]],
+    ]
+    resolver = resolver_lib.Resolver(format_type=data.FormatType.YAML)
+
+    _ = self.annotator.annotate_text(
+        text,
+        max_char_buffer=40,
+        batch_length=1,
+        resolver=resolver,
+        context_window_chars=30,
+        enable_fuzzy_alignment=False,
+    )
+
+    calls = self.mock_language_model.infer.call_args_list
+    self.assertLen(calls, 2)
+
+    first_prompt = calls[0].kwargs["batch_prompts"][0]
+    context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
+    self.assertNotIn(context_prefix, first_prompt)
+
+    second_prompt = calls[1].kwargs["batch_prompts"][0]
+    self.assertIn(context_prefix, second_prompt)
+    self.assertIn("cardiologist", second_prompt)
+
+  def test_no_context_included_when_disabled(self):
+    """Verifies that no context is included when context_window_chars=None."""
+    text = (
+        "Dr. Sarah Johnson is a cardiologist. She specializes in heart surgery."
+    )
+    self.mock_language_model.infer.side_effect = [
+        [[
+            types.ScoredOutput(
+                score=1.0, output=f"```yaml\n{data.EXTRACTIONS_KEY}: []\n```"
+            )
+        ]],
+        [[
+            types.ScoredOutput(
+                score=1.0, output=f"```yaml\n{data.EXTRACTIONS_KEY}: []\n```"
+            )
+        ]],
+    ]
+    resolver = resolver_lib.Resolver(format_type=data.FormatType.YAML)
+
+    _ = self.annotator.annotate_text(
+        text,
+        max_char_buffer=40,
+        batch_length=1,
+        resolver=resolver,
+        context_window_chars=None,  # Disabled
+        enable_fuzzy_alignment=False,
+    )
+
+    calls = self.mock_language_model.infer.call_args_list
+    self.assertLen(calls, 2)
+
+    context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
+    first_prompt = calls[0].kwargs["batch_prompts"][0]
+    second_prompt = calls[1].kwargs["batch_prompts"][0]
+
+    self.assertNotIn(context_prefix, first_prompt)
+    self.assertNotIn(context_prefix, second_prompt)
+
+  def test_context_window_per_document_isolation(self):
+    """Verifies context is tracked per document, not across documents."""
+    docs = [
+        data.Document(text="Doc1 chunk1. Doc1 chunk2.", document_id="doc1"),
+        data.Document(text="Doc2 chunk1. Doc2 chunk2.", document_id="doc2"),
+    ]
+    empty_response = [[
+        types.ScoredOutput(
+            score=1.0, output=f"```yaml\n{data.EXTRACTIONS_KEY}: []\n```"
+        )
+    ]]
+    self.mock_language_model.infer.side_effect = [
+        empty_response,  # Doc1 chunk1
+        empty_response,  # Doc1 chunk2
+        empty_response,  # Doc2 chunk1
+        empty_response,  # Doc2 chunk2
+    ]
+    resolver = resolver_lib.Resolver(format_type=data.FormatType.YAML)
+
+    _ = list(
+        self.annotator.annotate_documents(
+            docs,
+            resolver=resolver,
+            max_char_buffer=15,
+            batch_length=1,
+            context_window_chars=20,  # Large enough to capture "Doc1 chunk1."
+            show_progress=False,
+        )
+    )
+
+    calls = self.mock_language_model.infer.call_args_list
+    self.assertLen(calls, 4)
+    context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
+
+    # Extract prompts in order: doc1_chunk1, doc1_chunk2, doc2_chunk1, doc2_chunk2
+    doc1_chunk1_prompt = calls[0].kwargs["batch_prompts"][0]
+    doc1_chunk2_prompt = calls[1].kwargs["batch_prompts"][0]
+    doc2_chunk1_prompt = calls[2].kwargs["batch_prompts"][0]
+    doc2_chunk2_prompt = calls[3].kwargs["batch_prompts"][0]
+
+    # First chunks of each document should NOT have context prefix
+    self.assertNotIn(context_prefix, doc1_chunk1_prompt)
+    self.assertNotIn(context_prefix, doc2_chunk1_prompt)
+
+    # Second chunks should have context from their own document only
+    self.assertIn(context_prefix, doc1_chunk2_prompt)
+    self.assertIn("Doc1", doc1_chunk2_prompt)
+
+    self.assertIn(context_prefix, doc2_chunk2_prompt)
+    self.assertIn("Doc2", doc2_chunk2_prompt)
+
+    # Doc2's chunks should never contain Doc1 content
+    self.assertNotIn("Doc1", doc2_chunk1_prompt)
+    self.assertNotIn("Doc1", doc2_chunk2_prompt)
+
+
 if __name__ == "__main__":
   absltest.main()

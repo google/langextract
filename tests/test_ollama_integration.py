@@ -16,6 +16,7 @@
 import socket
 
 import pytest
+import requests
 
 import langextract as lx
 
@@ -109,3 +110,56 @@ def test_ollama_extraction_with_fence_fallback():
       "marie" in extraction.extraction_text.lower()
       or "curie" in extraction.extraction_text.lower()
   )
+
+
+def _model_available(model_name):
+  """Check if a specific model is available in Ollama."""
+  if not _ollama_available():
+    return False
+  try:
+    response = requests.get("http://localhost:11434/api/tags", timeout=5)
+    models = [m["name"] for m in response.json().get("models", [])]
+    return any(model_name in m for m in models)
+  except (requests.RequestException, KeyError, TypeError):
+    return False
+
+
+@pytest.mark.skipif(
+    not _model_available("deepseek-r1"),
+    reason="DeepSeek-R1 not available in Ollama",
+)
+def test_deepseek_r1_extraction():
+  """Test extraction with DeepSeek-R1 reasoning model.
+
+  DeepSeek-R1 outputs <think> tags before JSON when not using format:json.
+  This test verifies the model works correctly with langextract.
+  """
+  input_text = "John Smith is a software engineer at Google."
+  prompt = "Extract people and their roles."
+
+  examples = [
+      lx.data.ExampleData(
+          text="Alice works as a designer at Apple.",
+          extractions=[
+              lx.data.Extraction(
+                  extraction_class="person",
+                  extraction_text="Alice",
+                  attributes={"role": "designer", "company": "Apple"},
+              )
+          ],
+      )
+  ]
+
+  result = lx.extract(
+      text_or_documents=input_text,
+      prompt_description=prompt,
+      examples=examples,
+      model_id="deepseek-r1:1.5b",
+      model_url="http://localhost:11434",
+      temperature=0.3,
+  )
+
+  assert len(result.extractions) > 0
+  extraction = result.extractions[0]
+  assert extraction.extraction_class == "person"
+  assert "john" in extraction.extraction_text.lower()

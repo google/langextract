@@ -32,6 +32,7 @@ import uuid
 import dotenv
 import google.auth
 import google.auth.exceptions
+import google.genai.errors
 import pytest
 
 from langextract import data
@@ -128,6 +129,7 @@ def retry_on_transient_errors(max_retries=3, backoff_factor=2.0):
           return func(*args, **kwargs)
         except (
             lx.exceptions.LangExtractError,
+            google.genai.errors.ClientError,
             ConnectionError,
             TimeoutError,
             OSError,
@@ -766,6 +768,81 @@ class TestLiveAPIGemini(unittest.TestCase):
     bucket_name = gb._get_bucket_name(VERTEX_PROJECT, VERTEX_LOCATION)
     print(f"Checking bucket: {bucket_name}")
     self._verify_gcs_cache_content(bucket_name)
+
+
+class TestCrossChunkContext(unittest.TestCase):
+  """Tests for cross-chunk context feature with real API."""
+
+  @skip_if_no_gemini
+  @live_api
+  @retry_on_transient_errors(max_retries=3)
+  def test_context_window_extracts_from_both_chunks(self):
+    """Verify context_window_chars enables extraction across chunk boundaries."""
+    input_text = (
+        "Dr. Sarah Chen is the lead researcher at the institute. "
+        "She published groundbreaking work on neural networks last year."
+    )
+    prompt = textwrap.dedent(
+        """\
+        Extract all person names, roles, and achievements mentioned in the text.
+        Include both explicit names and information associated with pronouns."""
+    )
+    examples = [
+        lx.data.ExampleData(
+            text=(
+                "Professor James Miller leads the physics department. "
+                "He won the Nobel Prize in 2020."
+            ),
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="person",
+                    extraction_text="Professor James Miller",
+                    attributes={"role": "leads the physics department"},
+                ),
+                lx.data.Extraction(
+                    extraction_class="achievement",
+                    extraction_text="won the Nobel Prize in 2020",
+                ),
+            ],
+        )
+    ]
+
+    result = lx.extract(
+        text_or_documents=input_text,
+        prompt_description=prompt,
+        examples=examples,
+        model_id=DEFAULT_GEMINI_MODEL,
+        api_key=GEMINI_API_KEY,
+        language_model_params=GEMINI_MODEL_PARAMS,
+        max_char_buffer=60,
+        context_window_chars=50,
+    )
+
+    self.assertIsNotNone(result)
+    self.assertGreater(len(result.extractions), 0)
+
+    all_extraction_text = " ".join(
+        str(e.extraction_text) + " " + str(e.attributes)
+        for e in result.extractions
+    ).lower()
+
+    has_chunk1_content = any(
+        term in all_extraction_text
+        for term in ("sarah", "chen", "researcher", "lead")
+    )
+    has_chunk2_content = any(
+        term in all_extraction_text
+        for term in ("published", "groundbreaking", "neural", "networks")
+    )
+
+    self.assertTrue(
+        has_chunk1_content,
+        f"Expected chunk 1 content (Sarah Chen). Got: {result.extractions}",
+    )
+    self.assertTrue(
+        has_chunk2_content,
+        f"Expected chunk 2 content (publication). Got: {result.extractions}",
+    )
 
 
 class TestLiveAPIOpenAI(unittest.TestCase):

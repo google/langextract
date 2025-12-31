@@ -2367,17 +2367,17 @@ class FlexibleSchemaTest(parameterized.TestCase):
     self.assertLen(result, 1)
     self.assertEqual(result[0]["person"], "Charles Darwin")
 
-  def test_strict_mode_rejects_list(self):
+  def test_lenient_mode_accepts_list(self):
+    # Some models return [...] instead of {"extractions": [...]}
     test_input = '[{"person": "Test"}]'
     resolver = resolver_lib.Resolver(
         fence_output=False,
         format_type=data.FormatType.JSON,
         require_extractions_key=True,
     )
-    with self.assertRaisesRegex(
-        resolver_lib.ResolverParsingError, ".*must be a mapping.*"
-    ):
-      resolver.string_to_extraction_data(test_input)
+    result = resolver.string_to_extraction_data(test_input)
+    self.assertLen(result, 1)
+    self.assertEqual(result[0]["person"], "Test")
 
   def test_flexible_with_attributes(self):
     test_input = textwrap.dedent("""\

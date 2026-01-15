@@ -62,3 +62,9 @@ OLLAMA_PATTERNS = (
     r'^WizardLM/',
 )
 OLLAMA_PRIORITY = 10
+
+
+# Groq provider patterns
+GROQ_PATTERNS = (r'^groq/.*',)
+GROQ_PRIORITY = 10
+

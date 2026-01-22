@@ -246,7 +246,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       if key in merged_kwargs:
         config[key] = merged_kwargs[key]
 
-    handled_keys = {'temperature', 'max_output_tokens', 'top_p', 'top_k'}
+    handled_keys = {'temperature', 'max_output_tokens', 'top_p', 'top_k', 'thinking_config'}
     for key, value in merged_kwargs.items():
       if (
           key not in handled_keys

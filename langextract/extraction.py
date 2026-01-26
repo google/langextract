@@ -37,22 +37,22 @@ def _filter_ungrounded_extractions(
     extractions: list[data.Extraction] | None,
 ) -> list[data.Extraction]:
   """Filters out extractions that are not grounded in the source text.
-  
+
   An extraction is considered ungrounded if its char_interval is None or
   if either start_pos or end_pos is None. This typically indicates that
   the extraction could not be located in the source document, which may
   occur when the LLM extracts content from few-shot examples rather than
   the actual input text.
-  
+
   Args:
     extractions: List of extractions to filter.
-    
+
   Returns:
     List of extractions with valid char_interval positions.
   """
   if not extractions:
     return []
-  
+
   grounded = []
   for extraction in extractions:
     if extraction.char_interval is None:
@@ -62,7 +62,7 @@ def _filter_ungrounded_extractions(
     if extraction.char_interval.end_pos is None:
       continue
     grounded.append(extraction)
-  
+
   return grounded
 
 
@@ -380,7 +380,7 @@ def extract(
         tokenizer=tokenizer,
         **alignment_kwargs,
     )
-    
+
     # Filter ungrounded extractions if requested
     if require_grounding:
       result = data.AnnotatedDocument(
@@ -388,7 +388,7 @@ def extract(
           extractions=_filter_ungrounded_extractions(result.extractions),
           text=result.text,
       )
-    
+
     return result
   else:
     documents = cast(Iterable[data.Document], text_or_documents)
@@ -404,7 +404,7 @@ def extract(
         tokenizer=tokenizer,
         **alignment_kwargs,
     )
-    
+
     # Filter ungrounded extractions if requested
     if require_grounding:
       filtered_results = []
@@ -416,5 +416,5 @@ def extract(
         )
         filtered_results.append(filtered_doc)
       return filtered_results
-    
+
     return list(results)

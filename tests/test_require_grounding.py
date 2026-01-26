@@ -139,7 +139,9 @@ class FilterUngroundedExtractionsTest(unittest.TestCase):
     self.assertEqual(len(result), 1)
     self.assertEqual(result[0].extraction_class, "medication")
     self.assertEqual(result[0].extraction_text, "aspirin")
-    self.assertEqual(result[0].alignment_status, data.AlignmentStatus.MATCH_EXACT)
+    self.assertEqual(
+        result[0].alignment_status, data.AlignmentStatus.MATCH_EXACT
+    )
     self.assertEqual(result[0].extraction_index, 1)
     self.assertEqual(result[0].group_index, 0)
     self.assertEqual(result[0].description, "A medication")

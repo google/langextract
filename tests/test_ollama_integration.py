@@ -29,6 +29,69 @@ def _ollama_available():
 
 
 @pytest.mark.skipif(not _ollama_available(), reason="Ollama not running")
+def test_ollama_provider_via_model_config_must_be_first_test():
+  """
+  Test Ollama provider using ModelConfig.
+
+  This test ensures that the Ollama provider can be used via ModelConfig
+  and that the provider_kwargs are correctly passed to the provider.
+
+  Previously, if the first attempt to extract passed the provider name for
+  a built-in provider rather than allowing it to be inferred by the model_id,
+  the extract call would fail with:
+    langextract.core.exceptions.InferenceConfigError:
+    No provider found matching: 'ollama'. Available providers can be listed
+    with list_providers()
+  """
+  input_text = "Isaac Asimov was a prolific science fiction writer."
+  prompt = "Extract the author's full name and their primary literary genre."
+
+  model_id = "gemma2:2b"
+  config = lx.factory.ModelConfig(
+      model_id=model_id,
+      provider="ollama",
+      provider_kwargs = {
+          "model_url": "http://localhost:11434"
+      }
+  )
+
+  examples = [
+      lx.data.ExampleData(
+          text=(
+              "J.R.R. Tolkien was an English writer, best known for"
+              " high-fantasy."
+          ),
+          extractions=[
+              lx.data.Extraction(
+                  extraction_class="author_details",
+                  extraction_text="J.R.R. Tolkien was an English writer...",
+                  attributes={
+                      "name": "J.R.R. Tolkien",
+                      "genre": "high-fantasy",
+                  },
+              )
+          ],
+      )
+  ]
+
+  result = lx.extract(
+      text_or_documents=input_text,
+      prompt_description=prompt,
+      examples=examples,
+      config=config,
+      temperature=0.3,
+      fence_output=False,
+      use_schema_constraints=False,
+  )
+
+  assert len(result.extractions) > 0
+  extraction = result.extractions[0]
+  assert extraction.extraction_class == "author_details"
+  if extraction.attributes:
+    assert "asimov" in extraction.attributes.get("name", "").lower()
+
+
+@pytest.mark.skipif(not _ollama_available(), reason="Ollama not running")
 def test_ollama_extraction():
   input_text = "Isaac Asimov was a prolific science fiction writer."
   prompt = "Extract the author's full name and their primary literary genre."

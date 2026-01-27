@@ -48,6 +48,17 @@ OLLAMA_PATTERNS = (
     r'^tinyllama',  # tinyllama:1.1b
     r'^wizardcoder',  # wizardcoder:7b, wizardcoder:13b, etc.
     r'^gpt-oss',  # Open source GPT variants
+    r'^ministral',  # ministral-3:3b, ministral-3:8b, etc.
+    r'^devstral',  # devstral-small-2:24b, etc.
+    r'^nemotron',  # nemotron-mini:4b, nemotron-3-nano:30b, etc.
+    r'^granite',  # granite4:350m, granite4:1b, granite4:3b, etc.
+    r'^glm',  # glm4:9b, etc.
+    r'^rnj',  # rnj-1:8b, etc.
+    r'^olmo',  # olmo-3:7b, etc.
+    r'^smollm',  # smollm2:135m, smollm2:360m, smollm2:1.7b, etc.
+    r'^lfm',  # lfm2.5-thinking, etc.
+    r'^falcon',  # falcon3:1b, falcon3:3b, falcon3:7b, falcon3:10b, etc.
+    r'^yi',  # yi:6b, yi:9b, yi-coder:1.5b, yi-coder:9b, etc.
     # HuggingFace model patterns
     r'^meta-llama/[Ll]lama',
     r'^google/gemma',

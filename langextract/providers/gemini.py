@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
+import random
+import time
 from typing import Any, Final, Iterator, Sequence
 
 from absl import logging
@@ -67,6 +69,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float = 0.0
   max_workers: int = 10
+  max_retries: int = 5
   fence_output: bool = False
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
@@ -104,6 +107,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float = 0.0,
       max_workers: int = 10,
+      max_retries: int = 5,
       fence_output: bool = False,
       **kwargs,
   ) -> None:
@@ -121,6 +125,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
       max_workers: Maximum number of parallel API calls.
+      max_retries: Maximum number of retries for rate limit (429) errors.
       fence_output: Whether to wrap output in markdown fences (ignored,
         Gemini handles this based on schema).
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
@@ -148,6 +153,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
+    self.max_retries = max_retries
     self.fence_output = fence_output
 
     # Extract batch config before we filter kwargs into _extra_kwargs
@@ -214,15 +220,47 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         config.setdefault('response_mime_type', 'application/json')
         config.setdefault('response_schema', self.gemini_schema.schema_dict)
 
-      response = self._client.models.generate_content(
-          model=self.model_id, contents=prompt, config=config
-      )
+      base_delay = 1.0  # seconds
+      max_delay = 120.0  # seconds
 
-      return core_types.ScoredOutput(score=1.0, output=response.text)
+      for attempt in range(self.max_retries + 1):
+        try:
+          response = self._client.models.generate_content(
+              model=self.model_id, contents=prompt, config=config
+          )
+          return core_types.ScoredOutput(score=1.0, output=response.text)
 
+        except Exception as e:
+          # Check for 429 RESOURCE_EXHAUSTED
+          is_rate_limit = False
+          error_message = str(e)
+          if "429" in error_message or "RESOURCE_EXHAUSTED" in error_message:
+            is_rate_limit = True
+
+          if is_rate_limit and attempt < self.max_retries:
+            delay = min(max_delay, base_delay * (2**attempt))
+            jitter = random.uniform(0, 0.1 * delay)
+            sleep_time = delay + jitter
+            logging.warning(
+                "Gemini API rate limit hit (429). Retrying in %.2fs (attempt %d/%d)",
+                sleep_time,
+                attempt + 1,
+                self.max_retries,
+            )
+            time.sleep(sleep_time)
+            continue
+
+          raise exceptions.InferenceRuntimeError(
+              f"Gemini API error: {error_message}", original=e
+          ) from e
+
+      # This should technically be unreachable due to the raise in the loop
+      raise exceptions.InferenceRuntimeError("Gemini API error: Maximum retries exceeded")
     except Exception as e:
+      if isinstance(e, exceptions.InferenceRuntimeError):
+        raise
       raise exceptions.InferenceRuntimeError(
-          f'Gemini API error: {str(e)}', original=e
+          f"Gemini API error: {str(e)}", original=e
       ) from e
 
   def infer(

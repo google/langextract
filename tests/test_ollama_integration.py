@@ -50,7 +50,7 @@ def test_ollama_provider_via_model_config_must_be_first_test():
   config = lx.factory.ModelConfig(
       model_id=model_id,
       provider="ollama",
-      provider_kwargs = {"model_url": "http://localhost:11434"},
+      provider_kwargs={"model_url": "http://localhost:11434"},
   )
 
   examples = [

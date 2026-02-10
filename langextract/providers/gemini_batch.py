@@ -392,7 +392,7 @@ class GCSBatchCache:
 
   def _compute_hash(self, key_data: dict) -> str:
     """Compute SHA256 hash of the canonicalized request data."""
-     # to prevent crash added default=_json_serializer
+     # to prevent crash  added default=_json_serializer
     canonical_json = json.dumps(
         key_data, sort_keys=True, ensure_ascii=False, default=_json_serializer
     )

@@ -1,4 +1,3 @@
-
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -143,7 +142,6 @@ class TokenizedText:
 
   text: str
   tokens: list[Token] = dataclasses.field(default_factory=list)
-
 
 
 # CJK Scripts that typically don't use spaces but should be separated from Latin

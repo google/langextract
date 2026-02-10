@@ -18,6 +18,7 @@ from absl.testing import absltest
 
 from langextract import exceptions
 from langextract import factory
+from langextract import providers
 from langextract.providers import router
 
 
@@ -25,6 +26,8 @@ class FactoryProviderLoadingTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
+    # Reset loading state so builtins are re-registered
+    providers._reset_for_testing()  # pylint: disable=protected-access
     # Clear registry to ensure we are testing the loading mechanism
     router.clear()
 
@@ -48,7 +51,6 @@ class FactoryProviderLoadingTest(absltest.TestCase):
 
       # If we get "API key not provided" or similar, it means the class WAS found!
       # This is SUCCESS.
-      pass
     except ImportError:
       # Also success - means we tried to import dependencies (so we found the class)
       pass

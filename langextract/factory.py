@@ -219,12 +219,12 @@ def _create_model_with_schema(
   Returns:
     A model instance with fence_output configured appropriately.
   """
+  providers.load_builtins_once()
+  providers.load_plugins_once()
 
   if config.provider:
     provider_class = router.resolve_provider(config.provider)
   else:
-    providers.load_builtins_once()
-    providers.load_plugins_once()
     provider_class = router.resolve(config.model_id)
 
   schema_instance = None

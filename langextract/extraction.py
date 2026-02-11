@@ -33,6 +33,35 @@ from langextract.core import format_handler as fh
 from langextract.core import tokenizer as tokenizer_lib
 
 
+def _attach_observer_to_model(
+    model: base_model.BaseLanguageModel, observer: typing.Any
+) -> None:
+  """Attach observer to model while preserving backward compatibility."""
+  if hasattr(model, "set_observer"):
+    model.set_observer(observer)
+  else:  # pragma: no cover - defensive fallback
+    setattr(model, "_observer", observer)
+
+
+def _flush_model_observer(model: base_model.BaseLanguageModel | None) -> None:
+  """Flush observer events if an observer is attached."""
+  if model is None:
+    return
+  observer = getattr(model, "_observer", None)
+  if observer is None and isinstance(model, base_model.BaseLanguageModel):
+    observer = model.observer
+  if observer is None or not hasattr(observer, "flush"):
+    return
+  try:
+    observer.flush()
+  except Exception as e:  # pragma: no cover - observer failures are non-fatal
+    warnings.warn(
+        f"Observer flush failed (continuing without telemetry): {e}",
+        UserWarning,
+        stacklevel=2,
+    )
+
+
 def extract(
     text_or_documents: typing.Any,
     prompt_description: str | None = None,
@@ -62,6 +91,7 @@ def extract(
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
     tokenizer: tokenizer_lib.Tokenizer | None = None,
+    observer: typing.Any | None = None,
 ) -> list[data.AnnotatedDocument] | data.AnnotatedDocument:
   """Extracts structured information from text.
 
@@ -160,6 +190,9 @@ def extract(
       prompt_validation_strict: When True and prompt_validation_level is ERROR,
         raises on non-exact matches (MATCH_FUZZY, MATCH_LESSER). Defaults to False.
       show_progress: Whether to show progress bar during extraction. Defaults to True.
+      observer: Optional observability implementation. If provided, it is
+        attached to the language model and used for telemetry events. If None
+        (default), extraction runs without observability.
 
   Returns:
       An AnnotatedDocument with the extracted information when input is a
@@ -224,6 +257,8 @@ def extract(
 
   if model:
     language_model = model
+    if observer is not None:
+      _attach_observer_to_model(language_model, observer)
     if fence_output is not None:
       language_model.set_fence_output(fence_output)
     if use_schema_constraints:
@@ -242,12 +277,17 @@ def extract(
           stacklevel=2,
       )
 
-    language_model = factory.create_model(
-        config=config,
-        examples=prompt_template.examples if use_schema_constraints else None,
-        use_schema_constraints=use_schema_constraints,
-        fence_output=fence_output,
-    )
+    create_kwargs: dict[str, typing.Any] = {
+        "config": config,
+        "examples": (
+            prompt_template.examples if use_schema_constraints else None
+        ),
+        "use_schema_constraints": use_schema_constraints,
+        "fence_output": fence_output,
+    }
+    if observer is not None:
+      create_kwargs["observer"] = observer
+    language_model = factory.create_model(**create_kwargs)
   else:
     if language_model_type is not None:
       warnings.warn(
@@ -284,12 +324,17 @@ def extract(
         model_id=model_id, provider_kwargs=filtered_kwargs
     )
 
-    language_model = factory.create_model(
-        config=config,
-        examples=prompt_template.examples if use_schema_constraints else None,
-        use_schema_constraints=use_schema_constraints,
-        fence_output=fence_output,
-    )
+    create_kwargs: dict[str, typing.Any] = {
+        "config": config,
+        "examples": (
+            prompt_template.examples if use_schema_constraints else None
+        ),
+        "use_schema_constraints": use_schema_constraints,
+        "fence_output": fence_output,
+    }
+    if observer is not None:
+      create_kwargs["observer"] = observer
+    language_model = factory.create_model(**create_kwargs)
 
   format_handler, remaining_params = fh.FormatHandler.from_resolver_params(
       resolver_params=resolver_params,
@@ -331,35 +376,38 @@ def extract(
       format_handler=format_handler,
   )
 
-  if isinstance(text_or_documents, str):
-    result = annotator.annotate_text(
-        text=text_or_documents,
-        resolver=res,
-        max_char_buffer=max_char_buffer,
-        batch_length=batch_length,
-        additional_context=additional_context,
-        debug=debug,
-        extraction_passes=extraction_passes,
-        context_window_chars=context_window_chars,
-        show_progress=show_progress,
-        max_workers=max_workers,
-        tokenizer=tokenizer,
-        **alignment_kwargs,
-    )
-    return result
-  else:
-    documents = cast(Iterable[data.Document], text_or_documents)
-    result = annotator.annotate_documents(
-        documents=documents,
-        resolver=res,
-        max_char_buffer=max_char_buffer,
-        batch_length=batch_length,
-        debug=debug,
-        extraction_passes=extraction_passes,
-        context_window_chars=context_window_chars,
-        show_progress=show_progress,
-        max_workers=max_workers,
-        tokenizer=tokenizer,
-        **alignment_kwargs,
-    )
-    return list(result)
+  try:
+    if isinstance(text_or_documents, str):
+      result = annotator.annotate_text(
+          text=text_or_documents,
+          resolver=res,
+          max_char_buffer=max_char_buffer,
+          batch_length=batch_length,
+          additional_context=additional_context,
+          debug=debug,
+          extraction_passes=extraction_passes,
+          context_window_chars=context_window_chars,
+          show_progress=show_progress,
+          max_workers=max_workers,
+          tokenizer=tokenizer,
+          **alignment_kwargs,
+      )
+      return result
+    else:
+      documents = cast(Iterable[data.Document], text_or_documents)
+      result = annotator.annotate_documents(
+          documents=documents,
+          resolver=res,
+          max_char_buffer=max_char_buffer,
+          batch_length=batch_length,
+          debug=debug,
+          extraction_passes=extraction_passes,
+          context_window_chars=context_window_chars,
+          show_progress=show_progress,
+          max_workers=max_workers,
+          tokenizer=tokenizer,
+          **alignment_kwargs,
+      )
+      return list(result)
+  finally:
+    _flush_model_observer(language_model)

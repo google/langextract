@@ -40,9 +40,20 @@ def main():
       provider="CustomGeminiProvider",
       provider_kwargs={"api_key": api_key},
   )
-  model = lx.factory.create_model(config)
+  observer = lx.observability.create_observer(
+      provider="langfuse",
+      provider_kwargs={
+          "public_key": os.getenv("LANGFUSE_PUBLIC_KEY"),
+          "secret_key": os.getenv("LANGFUSE_SECRET_KEY"),
+          "base_url": os.getenv("LANGFUSE_BASE_URL"),
+          "host": os.getenv("LANGFUSE_HOST"),
+      },
+  )
+
+  model = lx.factory.create_model(config, observer=observer)
 
   print(f"✓ Created {model.__class__.__name__}")
+  print(f"✓ Observability enabled: {getattr(observer, 'enabled', False)}")
 
   # Test inference
   prompts = ["Say hello"]

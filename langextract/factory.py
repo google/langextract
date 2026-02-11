@@ -106,6 +106,7 @@ def create_model(
     use_schema_constraints: bool = False,
     fence_output: bool | None = None,
     return_fence_output: bool = False,
+    observer: typing.Any | None = None,
 ) -> base_model.BaseLanguageModel | tuple[base_model.BaseLanguageModel, bool]:
   """Create a language model instance from configuration.
 
@@ -115,6 +116,7 @@ def create_model(
     use_schema_constraints: Whether to apply schema constraints from examples.
     fence_output: Explicit fence output preference. If None, computed from schema.
     return_fence_output: If True, also return computed fence_output value.
+    observer: Optional observability implementation attached to the model.
 
   Returns:
     An instantiated language model provider.
@@ -131,6 +133,7 @@ def create_model(
         examples=examples,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        observer=observer,
     )
     if return_fence_output:
       return model, model.requires_fence_output
@@ -167,6 +170,8 @@ def create_model(
 
   try:
     model = provider_class(**kwargs)
+    if observer is not None:
+      _attach_observer(model, observer)
     if return_fence_output:
       return model, model.requires_fence_output
     return model
@@ -179,6 +184,7 @@ def create_model(
 def create_model_from_id(
     model_id: str | None = None,
     provider: str | None = None,
+    observer: typing.Any | None = None,
     **provider_kwargs: typing.Any,
 ) -> base_model.BaseLanguageModel:
   """Convenience function to create a model.
@@ -186,6 +192,7 @@ def create_model_from_id(
   Args:
     model_id: The model identifier (e.g., "gemini-2.5-flash").
     provider: Optional explicit provider name to disambiguate.
+    observer: Optional observability implementation attached to the model.
     **provider_kwargs: Optional provider-specific keyword arguments.
 
   Returns:
@@ -194,7 +201,7 @@ def create_model_from_id(
   config = ModelConfig(
       model_id=model_id, provider=provider, provider_kwargs=provider_kwargs
   )
-  return create_model(config)
+  return create_model(config, observer=observer)
 
 
 def _create_model_with_schema(
@@ -202,6 +209,7 @@ def _create_model_with_schema(
     examples: typing.Sequence[typing.Any] | None = None,
     use_schema_constraints: bool = True,
     fence_output: bool | None = None,
+    observer: typing.Any | None = None,
 ) -> base_model.BaseLanguageModel:
   """Internal helper to create a model with optional schema constraints.
 
@@ -260,5 +268,17 @@ def _create_model_with_schema(
 
   model.apply_schema(schema_instance)
   model.set_fence_output(fence_output)
+  if observer is not None:
+    _attach_observer(model, observer)
 
   return model
+
+
+def _attach_observer(
+    model: base_model.BaseLanguageModel, observer: typing.Any
+) -> None:
+  """Attach observer to model while preserving backward compatibility."""
+  if hasattr(model, "set_observer"):
+    model.set_observer(observer)
+  else:  # pragma: no cover - backward compatibility fallback
+    setattr(model, "_observer", observer)

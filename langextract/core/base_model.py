@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Base interfaces for language models."""
+
 from __future__ import annotations
 
 import abc
@@ -47,6 +48,7 @@ class BaseLanguageModel(abc.ABC):
     self._schema: schema.BaseSchema | None = None
     self._fence_output_override: bool | None = None
     self._extra_kwargs: dict[str, Any] = kwargs.copy()
+    self._observer: Any | None = None
 
   @classmethod
   def get_schema_class(cls) -> type[Any] | None:
@@ -117,6 +119,15 @@ class BaseLanguageModel(abc.ABC):
     base = getattr(self, '_extra_kwargs', {}) or {}
     incoming = dict(runtime_kwargs or {})
     return {**base, **incoming}
+
+  def set_observer(self, observer: Any | None) -> None:
+    """Attach an observer implementation for telemetry."""
+    self._observer = observer
+
+  @property
+  def observer(self) -> Any | None:
+    """Return the observer attached to this model, if any."""
+    return getattr(self, '_observer', None)
 
   @abc.abstractmethod
   def infer(

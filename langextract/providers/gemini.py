@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Gemini provider for LangExtract."""
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
@@ -217,13 +218,77 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       response = self._client.models.generate_content(
           model=self.model_id, contents=prompt, config=config
       )
+      usage = self._extract_usage(response)
 
-      return core_types.ScoredOutput(score=1.0, output=response.text)
+      return core_types.ScoredOutput(
+          score=1.0,
+          output=response.text,
+          usage=usage,
+      )
 
     except Exception as e:
       raise exceptions.InferenceRuntimeError(
           f'Gemini API error: {str(e)}', original=e
       ) from e
+
+  @staticmethod
+  def _extract_usage(response: Any) -> core_types.TokenUsage | None:
+    """Extract token usage from Gemini response."""
+    usage_obj = getattr(response, 'usage_metadata', None) or getattr(
+        response, 'usageMetadata', None
+    )
+    if usage_obj is None:
+      return None
+
+    def _get_value(obj: Any, snake: str, camel: str) -> Any:
+      if isinstance(obj, dict):
+        if snake in obj:
+          return obj[snake]
+        return obj.get(camel)
+      value = getattr(obj, snake, None)
+      if value is not None:
+        return value
+      return getattr(obj, camel, None)
+
+    def _int_or_none(value: Any) -> int | None:
+      if isinstance(value, bool):
+        return None
+      return value if isinstance(value, int) else None
+
+    input_tokens = _int_or_none(
+        _get_value(usage_obj, 'prompt_token_count', 'promptTokenCount')
+    )
+    output_tokens = _int_or_none(
+        _get_value(usage_obj, 'candidates_token_count', 'candidatesTokenCount')
+    )
+    total_tokens = _int_or_none(
+        _get_value(usage_obj, 'total_token_count', 'totalTokenCount')
+    )
+
+    provider_details = {}
+    for snake, camel in (
+        ('cached_content_token_count', 'cachedContentTokenCount'),
+        ('tool_use_prompt_token_count', 'toolUsePromptTokenCount'),
+        ('thoughts_token_count', 'thoughtsTokenCount'),
+    ):
+      value = _int_or_none(_get_value(usage_obj, snake, camel))
+      if value is not None:
+        provider_details[snake] = value
+
+    if (
+        input_tokens is None
+        and output_tokens is None
+        and total_tokens is None
+        and not provider_details
+    ):
+      return None
+
+    return core_types.TokenUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        provider_details=provider_details or None,
+    )
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs

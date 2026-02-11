@@ -45,6 +45,7 @@ __all__ = [
     "exceptions",
     "core",
     "plugins",
+    "observability",
 ]
 
 _CACHE: Dict[str, Any] = {}
@@ -80,6 +81,7 @@ _LAZY_MODULES = {
     "visualization": "langextract.visualization",
     "core": "langextract.core",
     "plugins": "langextract.plugins",
+    "observability": "langextract.observability",
     "registry": "langextract.registry",  # Backward compat - will emit warning
 }
 

@@ -156,8 +156,6 @@ def create_model(
 
   model_id = config.model_id
 
-  model_id = config.model_id
-
   kwargs = _kwargs_with_environment_defaults(
       model_id or config.provider or "", config.provider_kwargs
   )

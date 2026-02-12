@@ -148,8 +148,15 @@ def resolve(model_id: str) -> type[base_model.BaseLanguageModel]:
   Raises:
     ValueError: If no provider is registered for the model ID.
   """
-  # Providers should be loaded by the caller (e.g., factory.create_model)
-  # Router doesn't load providers to avoid circular dependencies
+  # Ensure provider patterns are registered before attempting pattern
+  # matching. Loading providers here is safe because imports are performed
+  # lazily and this avoids surprising "no provider" errors when callers
+  # forget to load builtins/plugins (e.g., local model usage).
+  # Import inside the function to avoid circular imports at module load.
+  from langextract import providers
+
+  providers.load_builtins_once()
+  providers.load_plugins_once()
 
   sorted_entries = sorted(_entries, key=lambda e: e.priority, reverse=True)
 
@@ -182,31 +189,51 @@ def resolve_provider(provider_name: str) -> type[base_model.BaseLanguageModel]:
   Raises:
     ValueError: If no provider matches the name.
   """
-  # Providers should be loaded by the caller (e.g., factory.create_model)
-  # Router doesn't load providers to avoid circular dependencies
+  # Try to resolve from already-registered entries first without importing
+  # provider modules. This avoids importing optional dependencies (which may
+  # require API keys) when the caller explicitly requests a provider by
+  # name and it's already registered (e.g. in tests or local providers).
 
-  for entry in _entries:
-    for pattern in entry.patterns:
-      if pattern.pattern == f"^{re.escape(provider_name)}$":
-        return entry.loader()
-
-  for entry in _entries:
-    try:
-      provider_class = entry.loader()
-      class_name = provider_class.__name__
-      if provider_name.lower() in class_name.lower():
-        return provider_class
-    except (ImportError, AttributeError):
-      continue
-
-  try:
-    pattern = re.compile(f"^{provider_name}$", re.IGNORECASE)
+  def _search_entries() -> type[base_model.BaseLanguageModel] | None:
     for entry in _entries:
-      for entry_pattern in entry.patterns:
-        if pattern.pattern == entry_pattern.pattern:
+      for pattern in entry.patterns:
+        if pattern.pattern == f"^{re.escape(provider_name)}$":
           return entry.loader()
-  except re.error:
-    pass
+
+    for entry in _entries:
+      try:
+        provider_class = entry.loader()
+        class_name = provider_class.__name__
+        if provider_name.lower() in class_name.lower():
+          return provider_class
+      except (ImportError, AttributeError):
+        continue
+
+    try:
+      pattern = re.compile(f"^{provider_name}$", re.IGNORECASE)
+      for entry in _entries:
+        for entry_pattern in entry.patterns:
+          if pattern.pattern == entry_pattern.pattern:
+            return entry.loader()
+    except re.error:
+      pass
+
+    return None
+
+  provider_cls = _search_entries()
+  if provider_cls is not None:
+    return provider_cls
+
+  # If not found, load builtins/plugins (which may register lazy providers)
+  # and try again.
+  from langextract import providers
+
+  providers.load_builtins_once()
+  providers.load_plugins_once()
+
+  provider_cls = _search_entries()
+  if provider_cls is not None:
+    return provider_cls
 
   raise exceptions.InferenceConfigError(
       f"No provider found matching: {provider_name!r}. "

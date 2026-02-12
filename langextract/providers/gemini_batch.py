@@ -60,7 +60,9 @@ def _json_default(obj: Any) -> Any:
     return dataclasses.asdict(obj)
   if isinstance(obj, enum.Enum):
     return obj.value
-  raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+  raise TypeError(
+      f"Object of type {type(obj).__name__} is not JSON serializable"
+  )
 
 
 @dataclasses.dataclass(slots=True, frozen=True)

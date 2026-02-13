@@ -5,7 +5,7 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Install LangExtract and web server dependencies
-RUN pip install --no-cache-dir langextract fastapi uvicorn[standard]
+RUN pip install --no-cache-dir langextract fastapi uvicorn[standard] python-multipart
 
 # Copy the API application
 COPY app.py .

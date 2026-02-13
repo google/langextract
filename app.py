@@ -11,7 +11,8 @@ import os
 import traceback
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -134,6 +135,11 @@ def _annotated_doc_to_response(doc) -> ExtractResponse:
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return _WEB_UI_HTML
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -177,6 +183,299 @@ def extract(req: ExtractRequest):
     if isinstance(result, list):
         return [_annotated_doc_to_response(doc) for doc in result]
     return _annotated_doc_to_response(result)
+
+
+@app.post("/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    prompt_description: str = Form(...),
+    example_text: str = Form(""),
+    example_class: str = Form(""),
+    example_extraction: str = Form(""),
+    model_id: str = Form("gemini-2.5-flash"),
+    api_key: str = Form(""),
+):
+    """Accept a file upload, extract its text, and run LangExtract."""
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not read file as text. Please upload a plain-text file (.txt, .csv, .html, etc.).",
+        )
+
+    if not example_text or not example_class or not example_extraction:
+        raise HTTPException(
+            status_code=422,
+            detail="At least one example (text, class, extraction) is required.",
+        )
+
+    examples = [
+        ExampleData(
+            text=example_text,
+            extractions=[
+                Extraction(
+                    extraction_class=example_class,
+                    extraction_text=example_extraction,
+                )
+            ],
+        )
+    ]
+
+    try:
+        result = lx.extract(
+            text_or_documents=text,
+            prompt_description=prompt_description,
+            examples=examples,
+            model_id=model_id,
+            api_key=api_key if api_key else None,
+            show_progress=False,
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    doc = result[0] if isinstance(result, list) else result
+    resp = _annotated_doc_to_response(doc)
+    return resp
+
+
+# ── Web UI HTML ────────────────────────────────────────────────────────
+
+_WEB_UI_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LangExtract</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f5f7fa; color: #1a1a2e; line-height: 1.6;
+  }
+  .container { max-width: 820px; margin: 0 auto; padding: 2rem 1rem; }
+  h1 { font-size: 1.8rem; margin-bottom: .25rem; }
+  .subtitle { color: #666; margin-bottom: 2rem; font-size: .95rem; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 1.5rem;
+  }
+  .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #333; }
+  label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .3rem; color: #444; }
+  input[type=text], textarea, select {
+    width: 100%; padding: .6rem .75rem; border: 1px solid #ddd; border-radius: 8px;
+    font-size: .9rem; font-family: inherit; margin-bottom: .75rem;
+    transition: border-color .2s;
+  }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: #4a6cf7; }
+  textarea { resize: vertical; min-height: 60px; }
+  .drop-zone {
+    border: 2px dashed #ccc; border-radius: 12px; padding: 2rem;
+    text-align: center; cursor: pointer; transition: .2s;
+    background: #fafbfc; margin-bottom: .75rem;
+  }
+  .drop-zone:hover, .drop-zone.dragover { border-color: #4a6cf7; background: #f0f4ff; }
+  .drop-zone p { color: #888; font-size: .9rem; }
+  .drop-zone .filename { color: #4a6cf7; font-weight: 600; margin-top: .5rem; }
+  .row { display: flex; gap: 1rem; }
+  .row > * { flex: 1; }
+  button[type=submit] {
+    width: 100%; padding: .75rem; font-size: 1rem; font-weight: 600;
+    background: #4a6cf7; color: #fff; border: none; border-radius: 10px;
+    cursor: pointer; transition: background .2s;
+  }
+  button[type=submit]:hover { background: #3b5de7; }
+  button[type=submit]:disabled { background: #a0b0f0; cursor: not-allowed; }
+  #results { display: none; }
+  .extraction-item {
+    padding: .75rem; border-left: 4px solid #4a6cf7;
+    background: #f8f9ff; border-radius: 0 8px 8px 0; margin-bottom: .5rem;
+  }
+  .extraction-item .class-tag {
+    display: inline-block; background: #4a6cf7; color: #fff;
+    padding: .1rem .5rem; border-radius: 4px; font-size: .75rem; font-weight: 600;
+    margin-bottom: .3rem;
+  }
+  .extraction-item .text { font-size: .95rem; }
+  .extraction-item .meta { font-size: .75rem; color: #888; margin-top: .2rem; }
+  .error-msg { color: #e53e3e; background: #fff5f5; padding: 1rem; border-radius: 8px; }
+  .spinner {
+    display: inline-block; width: 18px; height: 18px;
+    border: 3px solid #fff; border-top-color: transparent;
+    border-radius: 50%; animation: spin .6s linear infinite;
+    vertical-align: middle; margin-right: .5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .doc-preview { max-height: 200px; overflow-y: auto; background: #f9f9f9;
+    padding: .75rem; border-radius: 8px; font-size: .85rem; white-space: pre-wrap;
+    color: #555; margin-bottom: .75rem; border: 1px solid #eee;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>LangExtract</h1>
+  <p class="subtitle">Upload a document and extract structured information using LLMs.</p>
+
+  <form id="uploadForm">
+    <div class="card">
+      <h2>1. Upload Document</h2>
+      <div class="drop-zone" id="dropZone">
+        <p>Drag &amp; drop a text file here, or click to browse</p>
+        <div class="filename" id="fileName"></div>
+      </div>
+      <input type="file" id="fileInput" accept=".txt,.csv,.html,.htm,.md,.json,.xml,.log" hidden>
+      <div id="docPreview" class="doc-preview" style="display:none"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Extraction Prompt</h2>
+      <label for="prompt">What should be extracted?</label>
+      <textarea id="prompt" placeholder="e.g. Extract all person names and their roles"></textarea>
+    </div>
+
+    <div class="card">
+      <h2>3. Few-Shot Example</h2>
+      <p style="font-size:.85rem;color:#666;margin-bottom:.75rem;">
+        Give one example so the model knows what to look for.
+      </p>
+      <label for="exText">Example source text</label>
+      <textarea id="exText" rows="2" placeholder="e.g. Dr. Jane Smith is the lead researcher."></textarea>
+      <div class="row">
+        <div>
+          <label for="exClass">Class / type</label>
+          <input type="text" id="exClass" placeholder="e.g. person">
+        </div>
+        <div>
+          <label for="exExtraction">Extracted text</label>
+          <input type="text" id="exExtraction" placeholder="e.g. Dr. Jane Smith">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>4. Settings</h2>
+      <div class="row">
+        <div>
+          <label for="modelId">Model</label>
+          <select id="modelId">
+            <option value="gemini-2.5-flash" selected>gemini-2.5-flash</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="gpt-4o">gpt-4o</option>
+          </select>
+        </div>
+        <div>
+          <label for="apiKey">API Key (optional if set on server)</label>
+          <input type="text" id="apiKey" placeholder="sk-... or AIza...">
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" id="submitBtn">Extract</button>
+  </form>
+
+  <div class="card" id="results" style="margin-top:1.5rem;">
+    <h2>Results</h2>
+    <div id="resultBody"></div>
+  </div>
+</div>
+
+<script>
+const dropZone   = document.getElementById('dropZone');
+const fileInput   = document.getElementById('fileInput');
+const fileName    = document.getElementById('fileName');
+const docPreview  = document.getElementById('docPreview');
+const form        = document.getElementById('uploadForm');
+const submitBtn   = document.getElementById('submitBtn');
+const resultsCard = document.getElementById('results');
+const resultBody  = document.getElementById('resultBody');
+
+let selectedFile = null;
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) pickFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) pickFile(fileInput.files[0]); });
+
+function pickFile(f) {
+  selectedFile = f;
+  fileName.textContent = f.name + ' (' + (f.size / 1024).toFixed(1) + ' KB)';
+  const reader = new FileReader();
+  reader.onload = () => {
+    docPreview.style.display = 'block';
+    docPreview.textContent = reader.result.slice(0, 2000) + (reader.result.length > 2000 ? '\\n...truncated...' : '');
+  };
+  reader.readAsText(f);
+}
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!selectedFile) return alert('Please select a file first.');
+  if (!document.getElementById('prompt').value.trim()) return alert('Please enter a prompt.');
+  if (!document.getElementById('exText').value.trim()) return alert('Please provide an example.');
+
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="spinner"></span> Extracting...';
+  resultsCard.style.display = 'none';
+
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+  fd.append('prompt_description', document.getElementById('prompt').value);
+  fd.append('example_text', document.getElementById('exText').value);
+  fd.append('example_class', document.getElementById('exClass').value);
+  fd.append('example_extraction', document.getElementById('exExtraction').value);
+  fd.append('model_id', document.getElementById('modelId').value);
+  fd.append('api_key', document.getElementById('apiKey').value);
+
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Server error');
+    renderResults(data);
+  } catch (err) {
+    resultsCard.style.display = 'block';
+    resultBody.innerHTML = '<div class="error-msg">Error: ' + escHtml(err.message) + '</div>';
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Extract';
+  }
+});
+
+function renderResults(data) {
+  resultsCard.style.display = 'block';
+  if (!data.extractions || data.extractions.length === 0) {
+    resultBody.innerHTML = '<p style="color:#888;">No extractions found.</p>';
+    return;
+  }
+  resultBody.innerHTML = '<p style="margin-bottom:.75rem;font-size:.85rem;color:#666;">'
+    + data.extractions.length + ' extraction(s) found</p>'
+    + data.extractions.map(ex =>
+      '<div class="extraction-item">'
+      + '<span class="class-tag">' + escHtml(ex.extraction_class) + '</span>'
+      + '<div class="text">' + escHtml(ex.extraction_text) + '</div>'
+      + '<div class="meta">'
+        + (ex.start_pos != null ? 'pos ' + ex.start_pos + '-' + ex.end_pos : '')
+        + (ex.alignment_status ? ' &middot; ' + ex.alignment_status : '')
+        + (ex.description ? ' &middot; ' + escHtml(ex.description) : '')
+      + '</div>'
+      + '</div>'
+    ).join('');
+}
+
+function escHtml(s) {
+  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+</script>
+</body>
+</html>
+"""
 
 
 if __name__ == "__main__":

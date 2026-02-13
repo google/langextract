@@ -12,6 +12,9 @@ import re
 import traceback
 from typing import Any
 
+import dotenv
+dotenv.load_dotenv(override=True)
+
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse

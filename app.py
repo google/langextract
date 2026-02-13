@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import traceback
 from typing import Any
 
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+import requests as http_requests
 import uvicorn
 
 import langextract as lx
@@ -132,6 +135,51 @@ def _annotated_doc_to_response(doc) -> ExtractResponse:
     )
 
 
+def _fetch_url_text(url: str) -> str:
+    """Fetch a URL with SSL fallback, returning plain text."""
+    try:
+        resp = http_requests.get(url, timeout=60)
+        resp.raise_for_status()
+    except http_requests.exceptions.SSLError:
+        # Retry without certificate verification for sites with bad chains
+        resp = http_requests.get(url, timeout=60, verify=False)
+        resp.raise_for_status()
+
+    # Detect encoding
+    text = None
+    raw = resp.content
+    for enc in ("utf-8", "latin-1", "ascii", "utf-16"):
+        try:
+            text = raw.decode(enc)
+            break
+        except (UnicodeDecodeError, LookupError):
+            continue
+    if text is None:
+        text = raw.decode("utf-8", errors="replace")
+
+    # Convert HTML to plain text if needed
+    ct = resp.headers.get("Content-Type", "")
+    is_html = "text/html" in ct or text.strip()[:50].lower().startswith(("<!doctype", "<html"))
+    if is_html:
+        soup = BeautifulSoup(text, "html.parser")
+        for tag in soup(["script", "style", "noscript", "header", "footer",
+                         "nav", "aside", "form"]):
+            tag.decompose()
+        # Try to find main content
+        main = (soup.find("main") or soup.find(attrs={"role": "main"})
+                or soup.find("article") or soup.find("body") or soup)
+        # Convert block elements to line breaks
+        for br in main.find_all("br"):
+            br.replace_with("\n")
+        for block in main.find_all(["h1","h2","h3","h4","h5","h6",
+                                     "p","li","tr","div","article","section"]):
+            block.insert_before("\n\n")
+        text = main.get_text()
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    return text
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 
@@ -236,15 +284,19 @@ async def upload_document(
                 status_code=422,
                 detail="Could not read file as text. Please upload a plain-text file.",
             )
-        input_value = text
-        fetch = False
     else:
-        input_value = url.strip()
-        fetch = True
+        # Fetch URL ourselves so we can handle SSL issues
+        try:
+            text = _fetch_url_text(url.strip())
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not fetch URL: {exc}",
+            ) from exc
 
     try:
         result = lx.extract(
-            text_or_documents=input_value,
+            text_or_documents=text,
             prompt_description=prompt_description,
             examples=examples,
             model_id=model_id,
@@ -252,7 +304,6 @@ async def upload_document(
             max_char_buffer=max_char_buffer,
             batch_length=batch_length,
             max_workers=max_workers,
-            fetch_urls=fetch,
             show_progress=False,
         )
     except Exception as exc:

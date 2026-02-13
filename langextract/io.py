@@ -34,6 +34,8 @@ from langextract.core import data
 from langextract.core import exceptions
 
 DEFAULT_TIMEOUT_SECONDS = 30
+SCRAPER_DEFAULT = 'default'
+SCRAPER_FIRECRAWL = 'firecrawl'
 _BLOCK_TAGS = {
     'h1',
     'h2',
@@ -377,11 +379,81 @@ def is_url(text: str) -> bool:
     return False
 
 
+def _download_with_firecrawl(
+    url: str,
+    firecrawl_api_key: str | None = None,
+    show_progress: bool = True,
+) -> str:
+  """Download and parse a URL using Firecrawl for robust scraping.
+
+  Firecrawl handles JavaScript-rendered pages, anti-bot protections, and
+  difficult-to-scrape government/legal sites that often fail with plain
+  HTTP requests.
+
+  Args:
+    url: The URL to scrape.
+    firecrawl_api_key: Firecrawl API key. Falls back to the
+      FIRECRAWL_API_KEY environment variable if not provided.
+    show_progress: Whether to show progress information.
+
+  Returns:
+    The extracted text content of the page.
+
+  Raises:
+    ImportError: If firecrawl-py is not installed.
+    RuntimeError: If scraping fails or returns empty content.
+  """
+  try:
+    from firecrawl import FirecrawlApp  # pylint: disable=import-outside-toplevel
+  except ImportError as exc:
+    raise ImportError(
+        "firecrawl-py is required for the Firecrawl scraper. "
+        "Install it with: pip install firecrawl-py"
+    ) from exc
+
+  api_key = firecrawl_api_key or os.environ.get('FIRECRAWL_API_KEY', '')
+  if not api_key:
+    raise ValueError(
+        "Firecrawl API key is required. Pass firecrawl_api_key or set "
+        "the FIRECRAWL_API_KEY environment variable."
+    )
+
+  app = FirecrawlApp(api_key=api_key)
+
+  if show_progress:
+    print(f"Scraping {url} with Firecrawl...")
+
+  result = app.scrape(url, formats=['markdown'])
+
+  markdown = ''
+  if isinstance(result, dict):
+    markdown = result.get('markdown', '')
+  elif hasattr(result, 'markdown'):
+    markdown = result.markdown or ''
+  else:
+    markdown = str(result)
+
+  if not markdown.strip():
+    raise RuntimeError(f"Firecrawl returned empty content for {url}")
+
+  text_content = markdown.strip()
+
+  if show_progress:
+    char_count = len(text_content)
+    word_count = len(text_content.split())
+    filename = url.split('/')[-1][:50]
+    progress.print_download_complete(char_count, word_count, filename)
+
+  return text_content
+
+
 def download_text_from_url(
     url: str,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     show_progress: bool = True,
     chunk_size: int = 8192,
+    scraper: str = SCRAPER_DEFAULT,
+    firecrawl_api_key: str | None = None,
 ) -> str:
   """Download text content from a URL with optional progress bar.
 
@@ -390,14 +462,29 @@ def download_text_from_url(
     timeout: Request timeout in seconds.
     show_progress: Whether to show a progress bar during download.
     chunk_size: Size of chunks to download at a time.
+    scraper: Scraping backend to use. 'default' uses requests +
+      BeautifulSoup. 'firecrawl' uses the Firecrawl API for robust
+      scraping of difficult pages (JS-rendered, anti-bot, government
+      sites). Defaults to 'default'.
+    firecrawl_api_key: API key for Firecrawl when scraper='firecrawl'.
+      Falls back to FIRECRAWL_API_KEY env var.
 
   Returns:
     The text content of the URL.
 
   Raises:
-    requests.RequestException: If the download fails.
+    requests.RequestException: If the download fails (default scraper).
     ValueError: If the content is not text-based.
+    ImportError: If firecrawl-py is not installed (firecrawl scraper).
+    RuntimeError: If Firecrawl scraping fails.
   """
+  if scraper == SCRAPER_FIRECRAWL:
+    return _download_with_firecrawl(
+        url=url,
+        firecrawl_api_key=firecrawl_api_key,
+        show_progress=show_progress,
+    )
+
   try:
     # Make initial request to get headers.
     # In some managed environments, HTTPS proxy tunneling may be blocked for

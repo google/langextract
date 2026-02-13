@@ -58,6 +58,8 @@ def extract(
     model: typing.Any = None,
     *,
     fetch_urls: bool = True,
+    scraper: str = 'default',
+    firecrawl_api_key: str | None = None,
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
@@ -154,6 +156,11 @@ def extract(
         URL string. When True (default), strings starting with http:// or
         https:// are fetched. When False, all strings are treated as literal
         text to analyze. This is a keyword-only parameter.
+      scraper: Scraping backend for URL fetching. 'default' uses requests +
+        BeautifulSoup. 'firecrawl' uses the Firecrawl API for robust scraping
+        of JS-rendered or difficult pages. Defaults to 'default'.
+      firecrawl_api_key: API key for Firecrawl when scraper='firecrawl'. Falls
+        back to the FIRECRAWL_API_KEY environment variable.
       prompt_validation_level: Controls pre-flight alignment checks on few-shot
         examples. OFF skips validation, WARNING logs issues but continues, ERROR
         raises on failures. Defaults to WARNING.
@@ -213,7 +220,11 @@ def extract(
       and isinstance(text_or_documents, str)
       and io.is_url(text_or_documents)
   ):
-    text_or_documents = io.download_text_from_url(text_or_documents)
+    text_or_documents = io.download_text_from_url(
+        text_or_documents,
+        scraper=scraper,
+        firecrawl_api_key=firecrawl_api_key,
+    )
 
   prompt_template = prompting.PromptTemplateStructured(
       description=prompt_description

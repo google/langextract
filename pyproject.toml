@@ -59,7 +59,8 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["openai>=1.50.0"]
-all = ["openai>=1.50.0"]
+firecrawl = ["firecrawl-py>=2.0.0"]
+all = ["openai>=1.50.0", "firecrawl-py>=2.0.0"]
 dev = [
     "pyink~=24.3.0",
     "isort>=5.13.0",

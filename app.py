@@ -21,6 +21,7 @@ import uvicorn
 
 import langextract as lx
 from langextract.core.data import Extraction, ExampleData
+from langextract.io import SCRAPER_DEFAULT, SCRAPER_FIRECRAWL
 
 app = FastAPI(
     title="LangExtract API",
@@ -82,6 +83,14 @@ class ExtractRequest(BaseModel):
     batch_length: int = Field(default=10)
     max_workers: int = Field(default=10)
     additional_context: str | None = Field(default=None)
+    scraper: str = Field(
+        default="default",
+        description="Scraping backend: 'default' or 'firecrawl'",
+    )
+    firecrawl_api_key: str | None = Field(
+        default=None,
+        description="Firecrawl API key (falls back to FIRECRAWL_API_KEY env var)",
+    )
 
 
 class ExtractionOut(BaseModel):
@@ -135,8 +144,27 @@ def _annotated_doc_to_response(doc) -> ExtractResponse:
     )
 
 
-def _fetch_url_text(url: str) -> str:
-    """Fetch a URL with SSL fallback, returning plain text."""
+def _fetch_url_text(
+    url: str,
+    scraper: str = "default",
+    firecrawl_api_key: str | None = None,
+) -> str:
+    """Fetch a URL and return plain text.
+
+    Args:
+        url: The URL to fetch.
+        scraper: 'default' for requests+BeautifulSoup, 'firecrawl' for
+            the Firecrawl API.
+        firecrawl_api_key: API key when using scraper='firecrawl'.
+    """
+    if scraper == SCRAPER_FIRECRAWL:
+        from langextract.io import _download_with_firecrawl
+        return _download_with_firecrawl(
+            url=url,
+            firecrawl_api_key=firecrawl_api_key,
+            show_progress=False,
+        )
+
     try:
         resp = http_requests.get(url, timeout=60)
         resp.raise_for_status()
@@ -222,6 +250,8 @@ def extract(req: ExtractRequest):
             max_workers=req.max_workers,
             additional_context=req.additional_context,
             fetch_urls=bool(req.url),
+            scraper=req.scraper,
+            firecrawl_api_key=req.firecrawl_api_key,
             show_progress=False,
         )
     except Exception as exc:
@@ -246,6 +276,8 @@ async def upload_document(
     max_workers: int = Form(10),
     file: UploadFile | None = File(None),
     url: str = Form(""),
+    scraper: str = Form("default"),
+    firecrawl_api_key: str = Form(""),
 ):
     """Accept a file upload or URL and run LangExtract."""
     # Determine input source
@@ -287,7 +319,11 @@ async def upload_document(
     else:
         # Fetch URL ourselves so we can handle SSL issues
         try:
-            text = _fetch_url_text(url.strip())
+            text = _fetch_url_text(
+                url.strip(),
+                scraper=scraper,
+                firecrawl_api_key=firecrawl_api_key if firecrawl_api_key else None,
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
@@ -469,7 +505,20 @@ _WEB_UI_HTML = """\
         <label for="urlInput">Document URL</label>
         <input type="url" id="urlInput"
           placeholder="https://www.ordenjuridico.gob.mx/Documentos/Federal/html/wo17186.html">
-        <p style="font-size:.8rem;color:#888;">HTML pages will be fetched and converted to text automatically.</p>
+        <div class="row" style="margin-top:.75rem;">
+          <div>
+            <label for="scraperSelect">Scraping method</label>
+            <select id="scraperSelect">
+              <option value="default" selected>Default (requests + BeautifulSoup)</option>
+              <option value="firecrawl">Firecrawl (JS-rendered, anti-bot, gov sites)</option>
+            </select>
+          </div>
+          <div id="firecrawlKeyGroup" style="display:none;">
+            <label for="firecrawlKey">Firecrawl API Key</label>
+            <input type="text" id="firecrawlKey" placeholder="fc-...">
+          </div>
+        </div>
+        <p style="font-size:.8rem;color:#888;">Use Firecrawl for pages that fail with the default scraper (JS-heavy, government, anti-bot sites).</p>
       </div>
     </div>
 
@@ -630,6 +679,13 @@ let selectedFile = null;
 let allExtractions = [];
 let classColors = {};
 
+/* ── Scraper toggle ─────────────────────────────────────────────── */
+const scraperSelect = document.getElementById('scraperSelect');
+const firecrawlKeyGroup = document.getElementById('firecrawlKeyGroup');
+scraperSelect.addEventListener('change', () => {
+  firecrawlKeyGroup.style.display = scraperSelect.value === 'firecrawl' ? 'block' : 'none';
+});
+
 /* ── Tab switching ───────────────────────────────────────────────── */
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
@@ -713,6 +769,8 @@ form.addEventListener('submit', async e => {
 
   if (isUrl) {
     fd.append('url', urlInput.value.trim());
+    fd.append('scraper', scraperSelect.value);
+    fd.append('firecrawl_api_key', document.getElementById('firecrawlKey').value);
   } else {
     fd.append('file', selectedFile);
   }

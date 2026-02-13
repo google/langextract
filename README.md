@@ -17,7 +17,7 @@
 - [Why LangExtract?](#why-langextract)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
-- [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
+- [API Key Setup for Cloud Models](#api-key-setup-for-cloud-model
 - [Adding Custom Model Providers](#adding-custom-model-providers)
 - [Using OpenAI Models](#using-openai-models)
 - [Using Local LLMs with Ollama](#using-local-llms-with-ollama)

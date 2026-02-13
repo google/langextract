@@ -399,8 +399,29 @@ def download_text_from_url(
     ValueError: If the content is not text-based.
   """
   try:
-    # Make initial request to get headers
-    response = requests.get(url, stream=True, timeout=timeout)
+    # Make initial request to get headers.
+    # In some managed environments, HTTPS proxy tunneling may be blocked for
+    # specific domains. If that happens, retry once without proxies.
+    try:
+      response = requests.get(url, stream=True, timeout=timeout)
+    except requests.exceptions.ProxyError as proxy_error:
+      parsed_url = urlparse.urlparse(url)
+      if parsed_url.scheme != 'https':
+        raise
+      try:
+        response = requests.get(
+            url,
+            stream=True,
+            timeout=timeout,
+            proxies={'http': None, 'https': None},
+        )
+      except requests.RequestException as direct_error:
+        raise requests.RequestException(
+            'Failed to download from '
+            f'{url}: Proxy connection failed ({proxy_error}) and '
+            f'direct retry failed ({direct_error})'
+        ) from direct_error
+
     response.raise_for_status()
 
     # Check content type

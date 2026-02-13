@@ -187,23 +187,27 @@ def extract(req: ExtractRequest):
 
 @app.post("/upload")
 async def upload_document(
-    file: UploadFile = File(...),
     prompt_description: str = Form(...),
     example_text: str = Form(""),
     example_class: str = Form(""),
     example_extraction: str = Form(""),
     model_id: str = Form("gemini-2.5-flash"),
     api_key: str = Form(""),
+    max_char_buffer: int = Form(2000),
+    batch_length: int = Form(15),
+    max_workers: int = Form(10),
+    file: UploadFile | None = File(None),
+    url: str = Form(""),
 ):
-    """Accept a file upload, extract its text, and run LangExtract."""
-    content = await file.read()
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(
-            status_code=422,
-            detail="Could not read file as text. Please upload a plain-text file (.txt, .csv, .html, etc.).",
-        )
+    """Accept a file upload or URL and run LangExtract."""
+    # Determine input source
+    has_file = file is not None and file.filename
+    has_url = bool(url.strip())
+
+    if not has_file and not has_url:
+        raise HTTPException(status_code=422, detail="Provide a file or a URL.")
+    if has_file and has_url:
+        raise HTTPException(status_code=422, detail="Provide a file or a URL, not both.")
 
     if not example_text or not example_class or not example_extraction:
         raise HTTPException(
@@ -223,13 +227,32 @@ async def upload_document(
         )
     ]
 
+    if has_file:
+        content = await file.read()
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=422,
+                detail="Could not read file as text. Please upload a plain-text file.",
+            )
+        input_value = text
+        fetch = False
+    else:
+        input_value = url.strip()
+        fetch = True
+
     try:
         result = lx.extract(
-            text_or_documents=text,
+            text_or_documents=input_value,
             prompt_description=prompt_description,
             examples=examples,
             model_id=model_id,
             api_key=api_key if api_key else None,
+            max_char_buffer=max_char_buffer,
+            batch_length=batch_length,
+            max_workers=max_workers,
+            fetch_urls=fetch,
             show_progress=False,
         )
     except Exception as exc:
@@ -256,7 +279,7 @@ _WEB_UI_HTML = """\
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background: #f5f7fa; color: #1a1a2e; line-height: 1.6;
   }
-  .container { max-width: 820px; margin: 0 auto; padding: 2rem 1rem; }
+  .container { max-width: 860px; margin: 0 auto; padding: 2rem 1rem; }
   h1 { font-size: 1.8rem; margin-bottom: .25rem; }
   .subtitle { color: #666; margin-bottom: 2rem; font-size: .95rem; }
   .card {
@@ -265,13 +288,27 @@ _WEB_UI_HTML = """\
   }
   .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #333; }
   label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .3rem; color: #444; }
-  input[type=text], textarea, select {
+  input[type=text], input[type=url], input[type=number], textarea, select {
     width: 100%; padding: .6rem .75rem; border: 1px solid #ddd; border-radius: 8px;
     font-size: .9rem; font-family: inherit; margin-bottom: .75rem;
     transition: border-color .2s;
   }
   input:focus, textarea:focus, select:focus { outline: none; border-color: #4a6cf7; }
   textarea { resize: vertical; min-height: 60px; }
+
+  /* Tabs for source input */
+  .tabs { display: flex; gap: 0; margin-bottom: 1rem; }
+  .tab {
+    flex: 1; padding: .6rem; text-align: center; font-size: .85rem; font-weight: 600;
+    cursor: pointer; border: 1px solid #ddd; background: #fafbfc; color: #666;
+    transition: .2s;
+  }
+  .tab:first-child { border-radius: 8px 0 0 8px; }
+  .tab:last-child { border-radius: 0 8px 8px 0; }
+  .tab.active { background: #4a6cf7; color: #fff; border-color: #4a6cf7; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
   .drop-zone {
     border: 2px dashed #ccc; border-radius: 12px; padding: 2rem;
     text-align: center; cursor: pointer; transition: .2s;
@@ -282,6 +319,17 @@ _WEB_UI_HTML = """\
   .drop-zone .filename { color: #4a6cf7; font-weight: 600; margin-top: .5rem; }
   .row { display: flex; gap: 1rem; }
   .row > * { flex: 1; }
+
+  /* Preset chips */
+  .presets { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+  .preset-chip {
+    padding: .35rem .75rem; border-radius: 20px; font-size: .8rem; font-weight: 500;
+    cursor: pointer; border: 1px solid #ddd; background: #fafbfc; color: #555;
+    transition: .2s;
+  }
+  .preset-chip:hover { border-color: #4a6cf7; color: #4a6cf7; }
+  .preset-chip.active { background: #4a6cf7; color: #fff; border-color: #4a6cf7; }
+
   button[type=submit] {
     width: 100%; padding: .75rem; font-size: 1rem; font-weight: 600;
     background: #4a6cf7; color: #fff; border: none; border-radius: 10px;
@@ -289,7 +337,19 @@ _WEB_UI_HTML = """\
   }
   button[type=submit]:hover { background: #3b5de7; }
   button[type=submit]:disabled { background: #a0b0f0; cursor: not-allowed; }
+
   #results { display: none; }
+  .results-header { display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: .75rem; }
+  .results-count { font-size: .85rem; color: #666; }
+  .filter-bar { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
+  .filter-chip {
+    padding: .25rem .6rem; border-radius: 15px; font-size: .75rem; font-weight: 500;
+    cursor: pointer; border: 1px solid #ddd; background: #fff; color: #555;
+    transition: .15s;
+  }
+  .filter-chip:hover { border-color: #4a6cf7; }
+  .filter-chip.active { background: #eef1ff; border-color: #4a6cf7; color: #4a6cf7; }
   .extraction-item {
     padding: .75rem; border-left: 4px solid #4a6cf7;
     background: #f8f9ff; border-radius: 0 8px 8px 0; margin-bottom: .5rem;
@@ -313,88 +373,238 @@ _WEB_UI_HTML = """\
     padding: .75rem; border-radius: 8px; font-size: .85rem; white-space: pre-wrap;
     color: #555; margin-bottom: .75rem; border: 1px solid #eee;
   }
+  .timer { font-size: .85rem; color: #888; margin-top: .5rem; text-align: center; }
+  details { margin-top: .5rem; }
+  details summary { cursor: pointer; font-size: .85rem; color: #666; }
+  .collapse-content { margin-top: .5rem; }
+
+  /* Color palette for different classes */
+  .tag-0 { background: #4a6cf7; } .tag-1 { background: #e53e3e; }
+  .tag-2 { background: #38a169; } .tag-3 { background: #d69e2e; }
+  .tag-4 { background: #805ad5; } .tag-5 { background: #dd6b20; }
+  .tag-6 { background: #319795; } .tag-7 { background: #b83280; }
+  .border-0 { border-left-color: #4a6cf7; } .border-1 { border-left-color: #e53e3e; }
+  .border-2 { border-left-color: #38a169; } .border-3 { border-left-color: #d69e2e; }
+  .border-4 { border-left-color: #805ad5; } .border-5 { border-left-color: #dd6b20; }
+  .border-6 { border-left-color: #319795; } .border-7 { border-left-color: #b83280; }
+
+  @media (max-width: 600px) {
+    .row { flex-direction: column; gap: .5rem; }
+  }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>LangExtract</h1>
-  <p class="subtitle">Upload a document and extract structured information using LLMs.</p>
+  <p class="subtitle">Extract structured information from documents using LLMs.</p>
 
   <form id="uploadForm">
+    <!-- Step 1: Source -->
     <div class="card">
-      <h2>1. Upload Document</h2>
-      <div class="drop-zone" id="dropZone">
-        <p>Drag &amp; drop a text file here, or click to browse</p>
-        <div class="filename" id="fileName"></div>
+      <h2>1. Document Source</h2>
+      <div class="tabs">
+        <div class="tab active" data-tab="file">Upload File</div>
+        <div class="tab" data-tab="url">Paste URL</div>
       </div>
-      <input type="file" id="fileInput" accept=".txt,.csv,.html,.htm,.md,.json,.xml,.log" hidden>
-      <div id="docPreview" class="doc-preview" style="display:none"></div>
+      <div class="tab-panel active" id="panel-file">
+        <div class="drop-zone" id="dropZone">
+          <p>Drag &amp; drop a text file here, or click to browse</p>
+          <div class="filename" id="fileName"></div>
+        </div>
+        <input type="file" id="fileInput" accept=".txt,.csv,.html,.htm,.md,.json,.xml,.log" hidden>
+        <div id="docPreview" class="doc-preview" style="display:none"></div>
+      </div>
+      <div class="tab-panel" id="panel-url">
+        <label for="urlInput">Document URL</label>
+        <input type="url" id="urlInput"
+          placeholder="https://www.ordenjuridico.gob.mx/Documentos/Federal/html/wo17186.html">
+        <p style="font-size:.8rem;color:#888;">HTML pages will be fetched and converted to text automatically.</p>
+      </div>
     </div>
 
+    <!-- Step 2: Preset or custom prompt -->
     <div class="card">
-      <h2>2. Extraction Prompt</h2>
-      <label for="prompt">What should be extracted?</label>
-      <textarea id="prompt" placeholder="e.g. Extract all person names and their roles"></textarea>
+      <h2>2. What to Extract</h2>
+      <p style="font-size:.85rem;color:#666;margin-bottom:.75rem;">
+        Pick a preset or write your own prompt. Presets auto-fill the example below.
+      </p>
+      <div class="presets" id="presets">
+        <div class="preset-chip" data-preset="legal_articles">Legal Articles</div>
+        <div class="preset-chip" data-preset="legal_definitions">Definitions</div>
+        <div class="preset-chip" data-preset="legal_obligations">Obligations &amp; Rights</div>
+        <div class="preset-chip" data-preset="legal_penalties">Penalties &amp; Sanctions</div>
+        <div class="preset-chip" data-preset="entities">People &amp; Orgs</div>
+        <div class="preset-chip" data-preset="dates">Dates &amp; Deadlines</div>
+        <div class="preset-chip" data-preset="custom">Custom</div>
+      </div>
+      <label for="prompt">Extraction prompt</label>
+      <textarea id="prompt" rows="3"
+        placeholder="Describe what the model should extract from the document..."></textarea>
     </div>
 
+    <!-- Step 3: Example -->
     <div class="card">
       <h2>3. Few-Shot Example</h2>
       <p style="font-size:.85rem;color:#666;margin-bottom:.75rem;">
-        Give one example so the model knows what to look for.
+        One example so the model knows the expected output format.
       </p>
       <label for="exText">Example source text</label>
-      <textarea id="exText" rows="2" placeholder="e.g. Dr. Jane Smith is the lead researcher."></textarea>
+      <textarea id="exText" rows="2"
+        placeholder="e.g. Articulo 1o.- Las disposiciones de este Codigo regiran en toda la Republica..."></textarea>
       <div class="row">
         <div>
           <label for="exClass">Class / type</label>
-          <input type="text" id="exClass" placeholder="e.g. person">
+          <input type="text" id="exClass" placeholder="e.g. articulo">
         </div>
         <div>
           <label for="exExtraction">Extracted text</label>
-          <input type="text" id="exExtraction" placeholder="e.g. Dr. Jane Smith">
+          <input type="text" id="exExtraction"
+            placeholder="e.g. Las disposiciones de este Codigo regiran en toda la Republica">
         </div>
       </div>
     </div>
 
+    <!-- Step 4: Settings -->
     <div class="card">
       <h2>4. Settings</h2>
       <div class="row">
         <div>
           <label for="modelId">Model</label>
           <select id="modelId">
-            <option value="gemini-2.5-flash" selected>gemini-2.5-flash</option>
-            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="gemini-2.5-flash" selected>gemini-2.5-flash (fast)</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro (best)</option>
             <option value="gpt-4o">gpt-4o</option>
           </select>
         </div>
         <div>
           <label for="apiKey">API Key (optional if set on server)</label>
-          <input type="text" id="apiKey" placeholder="sk-... or AIza...">
+          <input type="text" id="apiKey" placeholder="AIza... or sk-...">
         </div>
       </div>
+      <details>
+        <summary>Advanced parameters</summary>
+        <div class="collapse-content">
+          <div class="row">
+            <div>
+              <label for="chunkSize">Chunk size (chars)</label>
+              <input type="number" id="chunkSize" value="2000" min="500" max="10000">
+            </div>
+            <div>
+              <label for="batchLen">Batch length</label>
+              <input type="number" id="batchLen" value="15" min="1" max="50">
+            </div>
+            <div>
+              <label for="workers">Max workers</label>
+              <input type="number" id="workers" value="10" min="1" max="20">
+            </div>
+          </div>
+        </div>
+      </details>
     </div>
 
     <button type="submit" id="submitBtn">Extract</button>
+    <div class="timer" id="timer" style="display:none"></div>
   </form>
 
+  <!-- Results -->
   <div class="card" id="results" style="margin-top:1.5rem;">
-    <h2>Results</h2>
+    <div class="results-header">
+      <h2>Results</h2>
+      <span class="results-count" id="resultsCount"></span>
+    </div>
+    <div class="filter-bar" id="filterBar"></div>
     <div id="resultBody"></div>
   </div>
 </div>
 
 <script>
-const dropZone   = document.getElementById('dropZone');
+/* ── Presets ─────────────────────────────────────────────────────── */
+const PRESETS = {
+  legal_articles: {
+    prompt: "Extract every numbered article (Articulo) from this legal document. For each article, extract its full text content including any sub-sections (fracciones). The extraction_class should be 'articulo' and extraction_text should be the complete article text.",
+    exText: "Articulo 1o.- Las disposiciones de este Codigo regiran en toda la Republica en asuntos del orden federal.",
+    exClass: "articulo",
+    exExtraction: "Las disposiciones de este Codigo regiran en toda la Republica en asuntos del orden federal."
+  },
+  legal_definitions: {
+    prompt: "Extract all legal definitions found in this document. Look for terms being formally defined, including phrases like 'se entiende por', 'se considera', 'para los efectos de'. The extraction_class should be 'definicion'.",
+    exText: "Se entiende por domicilio de una persona fisica el lugar donde reside con el proposito de establecerse en el.",
+    exClass: "definicion",
+    exExtraction: "domicilio de una persona fisica el lugar donde reside con el proposito de establecerse en el"
+  },
+  legal_obligations: {
+    prompt: "Extract all obligations, rights, and duties described in this legal document. Look for language indicating requirements ('debe', 'esta obligado', 'tiene derecho', 'podra'). Classify each as 'obligacion', 'derecho', or 'prohibicion'.",
+    exText: "Toda persona tiene derecho a la proteccion de la ley contra injerencias arbitrarias en su vida privada.",
+    exClass: "derecho",
+    exExtraction: "Toda persona tiene derecho a la proteccion de la ley contra injerencias arbitrarias en su vida privada"
+  },
+  legal_penalties: {
+    prompt: "Extract all penalties, sanctions, fines, and consequences described in this legal document. Look for monetary amounts, imprisonment terms, and other sanctions. The extraction_class should be 'sancion'.",
+    exText: "El que incurra en esta falta sera sancionado con multa de hasta cien dias de salario minimo.",
+    exClass: "sancion",
+    exExtraction: "multa de hasta cien dias de salario minimo"
+  },
+  entities: {
+    prompt: "Extract all named entities: people, organizations, institutions, and government bodies mentioned in this document.",
+    exText: "El Presidente de la Republica y el Congreso de la Union estableceran las bases.",
+    exClass: "institucion",
+    exExtraction: "Congreso de la Union"
+  },
+  dates: {
+    prompt: "Extract all dates, deadlines, time periods, and temporal references from this document. Include specific dates, durations, and statutory time limits.",
+    exText: "El plazo para interponer el recurso sera de quince dias habiles contados a partir del dia siguiente.",
+    exClass: "plazo",
+    exExtraction: "quince dias habiles contados a partir del dia siguiente"
+  },
+  custom: {
+    prompt: "", exText: "", exClass: "", exExtraction: ""
+  }
+};
+
+/* ── DOM refs ────────────────────────────────────────────────────── */
+const dropZone    = document.getElementById('dropZone');
 const fileInput   = document.getElementById('fileInput');
-const fileName    = document.getElementById('fileName');
+const fileNameEl  = document.getElementById('fileName');
 const docPreview  = document.getElementById('docPreview');
+const urlInput    = document.getElementById('urlInput');
 const form        = document.getElementById('uploadForm');
 const submitBtn   = document.getElementById('submitBtn');
 const resultsCard = document.getElementById('results');
 const resultBody  = document.getElementById('resultBody');
+const filterBar   = document.getElementById('filterBar');
+const resultsCount= document.getElementById('resultsCount');
+const timerEl     = document.getElementById('timer');
 
 let selectedFile = null;
+let allExtractions = [];
+let classColors = {};
 
+/* ── Tab switching ───────────────────────────────────────────────── */
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+/* ── Preset selection ────────────────────────────────────────────── */
+document.querySelectorAll('.preset-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    const p = PRESETS[chip.dataset.preset];
+    if (p) {
+      document.getElementById('prompt').value = p.prompt;
+      document.getElementById('exText').value = p.exText;
+      document.getElementById('exClass').value = p.exClass;
+      document.getElementById('exExtraction').value = p.exExtraction;
+    }
+  });
+});
+
+/* ── File handling ───────────────────────────────────────────────── */
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
@@ -406,71 +616,133 @@ fileInput.addEventListener('change', () => { if (fileInput.files.length) pickFil
 
 function pickFile(f) {
   selectedFile = f;
-  fileName.textContent = f.name + ' (' + (f.size / 1024).toFixed(1) + ' KB)';
+  fileNameEl.textContent = f.name + ' (' + (f.size / 1024).toFixed(1) + ' KB)';
   const reader = new FileReader();
   reader.onload = () => {
     docPreview.style.display = 'block';
-    docPreview.textContent = reader.result.slice(0, 2000) + (reader.result.length > 2000 ? '\\n...truncated...' : '');
+    docPreview.textContent = reader.result.slice(0, 2000)
+      + (reader.result.length > 2000 ? '\\n...truncated...' : '');
   };
   reader.readAsText(f);
 }
 
+/* ── Form submit ─────────────────────────────────────────────────── */
 form.addEventListener('submit', async e => {
   e.preventDefault();
-  if (!selectedFile) return alert('Please select a file first.');
+  const isUrl = document.querySelector('.tab.active').dataset.tab === 'url';
+  const hasFile = selectedFile != null;
+  const hasUrl  = urlInput.value.trim().length > 0;
+
+  if (!isUrl && !hasFile) return alert('Please select a file first.');
+  if (isUrl && !hasUrl) return alert('Please enter a URL.');
   if (!document.getElementById('prompt').value.trim()) return alert('Please enter a prompt.');
   if (!document.getElementById('exText').value.trim()) return alert('Please provide an example.');
 
   submitBtn.disabled = true;
   submitBtn.innerHTML = '<span class="spinner"></span> Extracting...';
   resultsCard.style.display = 'none';
+  timerEl.style.display = 'block';
+
+  const t0 = Date.now();
+  const tickId = setInterval(() => {
+    const s = ((Date.now() - t0) / 1000).toFixed(0);
+    timerEl.textContent = 'Processing... ' + s + 's';
+  }, 1000);
 
   const fd = new FormData();
-  fd.append('file', selectedFile);
   fd.append('prompt_description', document.getElementById('prompt').value);
   fd.append('example_text', document.getElementById('exText').value);
   fd.append('example_class', document.getElementById('exClass').value);
   fd.append('example_extraction', document.getElementById('exExtraction').value);
   fd.append('model_id', document.getElementById('modelId').value);
   fd.append('api_key', document.getElementById('apiKey').value);
+  fd.append('max_char_buffer', document.getElementById('chunkSize').value);
+  fd.append('batch_length', document.getElementById('batchLen').value);
+  fd.append('max_workers', document.getElementById('workers').value);
+
+  if (isUrl) {
+    fd.append('url', urlInput.value.trim());
+  } else {
+    fd.append('file', selectedFile);
+  }
 
   try {
     const res = await fetch('/upload', { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Server error');
-    renderResults(data);
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    renderResults(data, elapsed);
   } catch (err) {
     resultsCard.style.display = 'block';
     resultBody.innerHTML = '<div class="error-msg">Error: ' + escHtml(err.message) + '</div>';
   } finally {
+    clearInterval(tickId);
+    timerEl.style.display = 'none';
     submitBtn.disabled = false;
     submitBtn.textContent = 'Extract';
   }
 });
 
-function renderResults(data) {
+/* ── Render results ──────────────────────────────────────────────── */
+function renderResults(data, elapsed) {
   resultsCard.style.display = 'block';
-  if (!data.extractions || data.extractions.length === 0) {
+  allExtractions = data.extractions || [];
+
+  if (allExtractions.length === 0) {
+    resultsCount.textContent = '';
+    filterBar.innerHTML = '';
     resultBody.innerHTML = '<p style="color:#888;">No extractions found.</p>';
     return;
   }
-  resultBody.innerHTML = '<p style="margin-bottom:.75rem;font-size:.85rem;color:#666;">'
-    + data.extractions.length + ' extraction(s) found</p>'
-    + data.extractions.map(ex =>
-      '<div class="extraction-item">'
-      + '<span class="class-tag">' + escHtml(ex.extraction_class) + '</span>'
+
+  // Build class color map
+  const classes = [...new Set(allExtractions.map(e => e.extraction_class))];
+  classColors = {};
+  classes.forEach((c, i) => { classColors[c] = i % 8; });
+
+  // Summary
+  resultsCount.textContent = allExtractions.length + ' result(s) in ' + elapsed + 's';
+
+  // Filter chips
+  filterBar.innerHTML = '<div class="filter-chip active" data-filter="__all__">All</div>'
+    + classes.map(c =>
+      '<div class="filter-chip" data-filter="' + escAttr(c) + '">'
+      + escHtml(c) + ' (' + allExtractions.filter(e => e.extraction_class === c).length + ')'
+      + '</div>'
+    ).join('');
+
+  filterBar.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      filterBar.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      const f = chip.dataset.filter;
+      renderList(f === '__all__' ? allExtractions : allExtractions.filter(e => e.extraction_class === f));
+    });
+  });
+
+  renderList(allExtractions);
+}
+
+function renderList(items) {
+  resultBody.innerHTML = items.map(ex => {
+    const ci = classColors[ex.extraction_class] || 0;
+    return '<div class="extraction-item border-' + ci + '">'
+      + '<span class="class-tag tag-' + ci + '">' + escHtml(ex.extraction_class) + '</span>'
       + '<div class="text">' + escHtml(ex.extraction_text) + '</div>'
       + '<div class="meta">'
         + (ex.start_pos != null ? 'pos ' + ex.start_pos + '-' + ex.end_pos : '')
         + (ex.alignment_status ? ' &middot; ' + ex.alignment_status : '')
         + (ex.description ? ' &middot; ' + escHtml(ex.description) : '')
       + '</div>'
-      + '</div>'
-    ).join('');
+      + '</div>';
+  }).join('');
 }
 
 function escHtml(s) {
   const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+function escAttr(s) {
+  return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 }
 </script>
 </body>

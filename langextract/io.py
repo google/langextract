@@ -21,6 +21,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import re
 from typing import Any, Iterator
 from urllib import parse as urlparse
 
@@ -33,6 +34,124 @@ from langextract.core import data
 from langextract.core import exceptions
 
 DEFAULT_TIMEOUT_SECONDS = 30
+_BLOCK_TAGS = {
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'p',
+    'li',
+    'tr',
+    'div',
+    'article',
+    'section',
+}
+_NOISY_TAGS = {
+    'script',
+    'style',
+    'noscript',
+    'header',
+    'footer',
+    'nav',
+    'aside',
+    'form',
+    'input',
+    'select',
+    'textarea',
+    'button',
+    'option',
+    'label',
+}
+
+
+def _looks_like_html(content_type: str, text_content: str) -> bool:
+  """Detects whether the downloaded text appears to be HTML."""
+  normalized = text_content.lstrip().lower()
+  return (
+      'text/html' in content_type
+      or normalized.startswith('<!doctype html')
+      or normalized.startswith('<html')
+  )
+
+
+def _normalize_html_text(html_content: str) -> str:
+  """Parses HTML and extracts readable text with paragraph boundaries."""
+  try:
+    from bs4 import BeautifulSoup  # pylint: disable=import-outside-toplevel
+
+    soup = BeautifulSoup(html_content, 'lxml')
+
+    for noisy in soup.find_all(_NOISY_TAGS):
+      noisy.decompose()
+
+    for container in soup.select(
+        '[class*="menu" i], [id*="menu" i], [class*="sidebar" i], '
+        '[id*="sidebar" i], [class*="breadcrumb" i], [id*="breadcrumb" i], '
+        '[class*="navigation" i], [id*="navigation" i]'
+    ):
+      container.decompose()
+
+    content_root = None
+    for selector in [
+        'main',
+        '[role="main"]',
+        'article',
+        '.article',
+        '.post-content',
+        '.entry-content',
+        '#content',
+        '.content',
+        'body',
+    ]:
+      candidate = soup.select_one(selector)
+      if candidate and candidate.get_text(strip=True):
+        content_root = candidate
+        break
+
+    if content_root is None:
+      content_root = soup
+
+    for br in content_root.find_all('br'):
+      br.replace_with('\n')
+
+    for tag in content_root.find_all(_BLOCK_TAGS):
+      tag.insert_before('\n\n')
+      tag.insert_after('\n\n')
+
+    text_content = content_root.get_text(separator=' ', strip=False)
+  except ImportError:
+    text_content = html_content
+    for tag in _NOISY_TAGS:
+      text_content = re.sub(
+          rf'<{tag}\b[^>]*>.*?</{tag}>',
+          ' ',
+          text_content,
+          flags=re.IGNORECASE | re.DOTALL,
+      )
+    text_content = re.sub(
+        (
+            r'<[^>]*(class|id)=(?:"|\')[^"\']*'
+            r'(menu|sidebar|breadcrumb|navigation)[^"\']*(?:"|\')[^>]*>.*?</[^>]+>'
+        ),
+        ' ',
+        text_content,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text_content = re.sub(
+        r'</?(h[1-6]|p|li|tr|div|article|section|main|body)\b[^>]*>',
+        '\n\n',
+        text_content,
+        flags=re.IGNORECASE,
+    )
+    text_content = re.sub(r'<br\s*/?>', '\n', text_content, flags=re.IGNORECASE)
+    text_content = re.sub(r'<[^>]+>', ' ', text_content)
+
+  lines = [re.sub(r'\s+', ' ', line).strip() for line in text_content.split('\n')]
+  non_empty = [line for line in lines if line]
+  cleaned = '\n\n'.join(non_empty)
+  return cleaned.strip()
 
 
 class InvalidDatasetError(exceptions.LangExtractError):
@@ -332,6 +451,9 @@ def download_text_from_url(
 
     if text_content is None:
       raise ValueError(f'Could not decode content from {url} as text')
+
+    if _looks_like_html(content_type, text_content):
+      text_content = _normalize_html_text(text_content)
 
     # Show content summary with clean formatting
     if show_progress:

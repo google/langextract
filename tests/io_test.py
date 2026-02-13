@@ -116,6 +116,34 @@ class HtmlNormalizationTest(absltest.TestCase):
 
     self.assertEqual(text, plain_text)
 
+  @mock.patch("requests.get", autospec=True)
+  def test_download_text_from_url_retries_without_proxy_on_https(self, mock_get):
+    html = "<html><body><main><p>Legal text.</p></main></body></html>"
+
+    response = mock.Mock()
+    response.raise_for_status.return_value = None
+    response.headers = {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Length": str(len(html.encode("utf-8"))),
+    }
+    response.iter_content.return_value = [html.encode("utf-8")]
+
+    mock_get.side_effect = [
+        io.requests.exceptions.ProxyError("proxy blocked"),
+        response,
+    ]
+
+    text = io.download_text_from_url(
+        "https://example.com/legal", show_progress=False
+    )
+
+    self.assertIn("Legal text.", text)
+    self.assertEqual(mock_get.call_count, 2)
+    self.assertEqual(mock_get.call_args_list[1].kwargs["proxies"], {
+        "http": None,
+        "https": None,
+    })
+
 
 if __name__ == "__main__":
   absltest.main()

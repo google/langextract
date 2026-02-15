@@ -354,6 +354,7 @@ class Annotator:
     )
 
     chars_processed = 0
+    suppress_parse_errors = bool(kwargs.get("suppress_parse_errors"))
 
     prompt_builder = prompting.ContextAwarePromptBuilder(
         generator=self._prompt_generator,
@@ -399,9 +400,21 @@ class Annotator:
                 "No scored outputs from language model."
             )
 
-          resolved_extractions = resolver.resolve(
-              scored_outputs[0].output, debug=debug, **kwargs
-          )
+          try:
+            resolved_extractions = resolver.resolve(
+                scored_outputs[0].output, debug=debug, **kwargs
+            )
+          except Exception as e:  # pylint: disable=broad-exception-caught
+            if suppress_parse_errors:
+              logging.exception(
+                  "Failed to resolve model output for document_id=%s; skipping"
+                  " chunk. error=%s",
+                  text_chunk.document_id,
+                  e,
+              )
+              resolved_extractions = []
+            else:
+              raise
 
           token_offset = (
               text_chunk.token_interval.start_index
@@ -414,17 +427,29 @@ class Annotator:
               else 0
           )
 
-          aligned_extractions = resolver.align(
-              resolved_extractions,
-              text_chunk.chunk_text,
-              token_offset,
-              char_offset,
-              tokenizer_inst=tokenizer,
-              **kwargs,
-          )
+          if resolved_extractions:
+            try:
+              aligned_extractions = resolver.align(
+                  resolved_extractions,
+                  text_chunk.chunk_text,
+                  token_offset,
+                  char_offset,
+                  tokenizer_inst=tokenizer,
+                  **kwargs,
+              )
 
-          for extraction in aligned_extractions:
-            per_doc[text_chunk.document_id].append(extraction)
+              for extraction in aligned_extractions:
+                per_doc[text_chunk.document_id].append(extraction)
+            except Exception as e:  # pylint: disable=broad-exception-caught
+              if suppress_parse_errors:
+                logging.exception(
+                    "Failed to align extractions for document_id=%s; skipping"
+                    " chunk. error=%s",
+                    text_chunk.document_id,
+                    e,
+                )
+              else:
+                raise
 
           if show_progress and text_chunk.char_interval is not None:
             chars_processed += (

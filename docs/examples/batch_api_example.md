@@ -70,6 +70,8 @@ results = lx.extract(
     model_id="gemini-2.5-flash",
     max_char_buffer=500,
     batch_length=1000,
+    # Optional: continue even if a few chunks return malformed output.
+    resolver_params={"suppress_parse_errors": True},
     language_model_params={
         "vertexai": True,
         "project": "your-gcp-project", # TODO: Replace with your Project ID.

@@ -203,6 +203,84 @@ class AnnotatorTest(absltest.TestCase):
         batch_prompts=[f"\n\nQ: {text}\nA: "],
     )
 
+  def test_annotate_documents_suppress_parse_errors_skips_bad_chunk(self):
+    docs = [
+        data.Document("Alice", document_id="doc1"),
+        data.Document("Bob", document_id="doc2"),
+    ]
+
+    # First chunk resolves cleanly; second chunk parses but fails during
+    # extraction processing (wrong value type for extraction text).
+    self.mock_language_model.infer.return_value = [
+        [types.ScoredOutput(score=1.0, output='{"extractions":[{"entity":"Alice"}]}')],
+        [
+            types.ScoredOutput(
+                score=1.0,
+                output='{"extractions":[{"entity":["not","a","string"]}]}',
+            )
+        ],
+    ]
+
+    test_resolver = resolver_lib.Resolver(
+        format_type=data.FormatType.JSON,
+        fence_output=False,
+    )
+
+    results = list(
+        self.annotator.annotate_documents(
+            documents=docs,
+            resolver=test_resolver,
+            max_char_buffer=1000,
+            batch_length=10,
+            debug=False,
+            show_progress=False,
+            suppress_parse_errors=True,
+        )
+    )
+
+    self.assertLen(results, 2)
+    self.assertEqual(results[0].text, "Alice")
+    self.assertEqual(results[1].text, "Bob")
+
+    self.assertLen(results[0].extractions or [], 1)
+    self.assertEmpty(results[1].extractions or [])
+    self.assertEqual(results[0].extractions[0].extraction_class, "entity")
+    self.assertEqual(results[0].extractions[0].extraction_text, "Alice")
+
+  def test_annotate_documents_raises_on_bad_chunk_by_default(self):
+    docs = [
+        data.Document("Alice", document_id="doc1"),
+        data.Document("Bob", document_id="doc2"),
+    ]
+
+    self.mock_language_model.infer.return_value = [
+        [types.ScoredOutput(score=1.0, output='{"extractions":[{"entity":"Alice"}]}')],
+        [
+            types.ScoredOutput(
+                score=1.0,
+                output='{"extractions":[{"entity":["not","a","string"]}]}',
+            )
+        ],
+    ]
+
+    test_resolver = resolver_lib.Resolver(
+        format_type=data.FormatType.JSON,
+        fence_output=False,
+    )
+
+    with self.assertRaises(ValueError):
+      list(
+          self.annotator.annotate_documents(
+              documents=docs,
+              resolver=test_resolver,
+              max_char_buffer=1000,
+              batch_length=10,
+              debug=False,
+              show_progress=False,
+              suppress_parse_errors=False,
+          )
+      )
+
   def test_annotate_text_without_index_suffix(self):
     text = (
         "Patient Jane Doe, ID 67890, received 10mg of Lisinopril daily for"

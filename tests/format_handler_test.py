@@ -257,6 +257,21 @@ class FormatHandlerTest(parameterized.TestCase):
 class NonGeminiModelParsingTest(parameterized.TestCase):
   """Regression tests for non-Gemini model parsing edge cases."""
 
+  def test_lenient_json_parses_trailing_commas(self):
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    # Common LLM mistake: trailing commas in objects/lists.
+    input_with_trailing_commas = (
+        '{"extractions":[{"person":"Alice","person_attributes":{},}],}'
+    )
+    parsed = handler.parse_output(input_with_trailing_commas)
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["person"], "Alice")
+
   def test_think_tags_stripped_before_parsing(self):
     # Reasoning models output <think> tags before JSON
     handler = format_handler.FormatHandler(

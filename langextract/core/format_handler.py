@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 import warnings
 
 import yaml
@@ -169,10 +169,22 @@ class FormatHandler:
     if not text:
       raise exceptions.FormatParseError("Empty or invalid input string.")
 
-    content = self._extract_content(text)
+    strict_bool = bool(strict)
 
     try:
-      parsed = self._parse_with_fallback(content, strict)
+      content = self._extract_content(text)
+      parsed = self._parse_with_fallback(content, strict_bool)
+    except exceptions.FormatParseError as e:
+      # In non-strict mode, allow multiple fenced blocks if exactly one of them
+      # parses cleanly into the expected structure.
+      if (
+          self.use_fences
+          and not strict_bool
+          and "Multiple fenced blocks found" in str(e)
+      ):
+        parsed = self._parse_one_of_multiple_fenced_blocks(text)
+      else:
+        raise
     except (yaml.YAMLError, json.JSONDecodeError) as e:
       msg = (
           f"Failed to parse {self.format_type.value.upper()} content:"
@@ -180,15 +192,67 @@ class FormatHandler:
       )
       raise exceptions.FormatParseError(msg) from e
 
+    return self._coerce_items(parsed, strict)
+
+  def _parse_one_of_multiple_fenced_blocks(self, text: str) -> Any:
+    """Parse one fenced block when multiple are present.
+
+    Attempts to parse each fenced block (prefer blocks matching the configured
+    format tag), and succeeds only when exactly one block parses and validates.
+    """
+    matches = list(_FENCE_RE.finditer(text))
+    if not matches:
+      raise exceptions.FormatParseError(
+          "Input string does not contain valid fence markers."
+      )
+
+    valid_tags = {
+        data.FormatType.YAML: {_YAML_FORMAT, _YML_FORMAT},
+        data.FormatType.JSON: {_JSON_FORMAT},
+    }
+    candidates = [
+        m
+        for m in matches
+        if self._is_valid_language_tag(m.group("lang"), valid_tags)
+    ]
+    blocks_to_try = candidates or matches
+
+    successes = []
+    for m in blocks_to_try:
+      body = m.group("body").strip()
+      try:
+        parsed = self._parse_with_fallback(body, strict=False)
+        # Validate structure using the same rules as parse_output.
+        self._coerce_items(parsed, strict=False)
+      except (
+          exceptions.FormatError,
+          yaml.YAMLError,
+          json.JSONDecodeError,
+          ValueError,
+          TypeError,
+      ):
+        continue
+      successes.append(parsed)
+
+    if len(successes) == 1:
+      return successes[0]
+
+    raise exceptions.FormatParseError(
+        "Multiple fenced blocks found. Expected exactly one."
+    )
+
+  def _coerce_items(
+      self, parsed: Any, strict: bool | None
+  ) -> Sequence[Mapping[str, ExtractionValueType]]:
+    """Coerce a parsed JSON/YAML object into the list-of-mappings shape."""
     if parsed is None:
       if self.use_wrapper:
         raise exceptions.FormatParseError(
             f"Content must be a mapping with an '{self.wrapper_key}' key."
         )
-      else:
-        raise exceptions.FormatParseError(
-            "Content must be a list of extractions or a dict."
-        )
+      raise exceptions.FormatParseError(
+          "Content must be a list of extractions or a dict."
+      )
 
     require_wrapper = self.wrapper_key is not None and (
         self.use_wrapper or bool(strict)
@@ -263,7 +327,7 @@ class FormatHandler:
     try:
       if self.format_type == data.FormatType.YAML:
         return yaml.safe_load(content)
-      return json.loads(content)
+      return self._parse_json(content, strict=strict)
     except (yaml.YAMLError, json.JSONDecodeError):
       if strict:
         raise
@@ -272,8 +336,58 @@ class FormatHandler:
         stripped = _THINK_TAG_RE.sub("", content).strip()
         if self.format_type == data.FormatType.YAML:
           return yaml.safe_load(stripped)
-        return json.loads(stripped)
+        return self._parse_json(stripped, strict=False)
       raise
+
+  def _strip_trailing_commas(self, content: str) -> str:
+    """Remove trailing commas (best-effort) in lenient JSON repair."""
+    prev = None
+    current = content
+    # Iterate to handle nested structures where one substitution reveals another.
+    while prev != current:
+      prev = current
+      current = re.sub(r",\s*([}\]])", r"\1", current)
+    return current
+
+  def _parse_json(self, content: str, *, strict: bool) -> Any:
+    """Parse JSON content with best-effort repair in non-strict mode."""
+    try:
+      return json.loads(content)
+    except json.JSONDecodeError:
+      if strict:
+        raise
+
+    # 1) Allow control characters inside strings.
+    try:
+      return json.loads(content, strict=False)
+    except json.JSONDecodeError:
+      pass
+
+    # 2) Remove trailing commas.
+    repaired = self._strip_trailing_commas(content)
+    if repaired != content:
+      try:
+        return json.loads(repaired)
+      except json.JSONDecodeError:
+        try:
+          return json.loads(repaired, strict=False)
+        except json.JSONDecodeError:
+          pass
+
+    # 3) If the model added extra text, attempt to decode the first JSON value.
+    start_candidates = [content.find("{"), content.find("[")]
+    start_candidates = [i for i in start_candidates if i != -1]
+    if start_candidates:
+      start = min(start_candidates)
+      decoder = json.JSONDecoder(strict=False)
+      try:
+        obj, _end = decoder.raw_decode(content[start:])
+        return obj
+      except json.JSONDecodeError:
+        pass
+
+    # Fall back to the original JSONDecodeError.
+    return json.loads(content)
 
   def _extract_content(self, text: str) -> str:
     """Extract content from text, handling fences if configured.

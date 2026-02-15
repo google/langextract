@@ -2319,6 +2319,41 @@ class FenceFallbackTest(parameterized.TestCase):
     ):
       resolver.string_to_extraction_data(test_input)
 
+  def test_multiple_fenced_blocks_uses_single_valid_block_in_non_strict_mode(
+      self,
+  ):
+    test_input = textwrap.dedent("""\
+        preamble
+        ```json
+        {"extractions": [{"item": "first"}]
+        ```
+        Some explanation text
+        ```json
+        {"extractions": [{"item": "second"}]}
+        ```""")
+    resolver = resolver_lib.Resolver(
+        fence_output=True,
+        format_type=data.FormatType.JSON,
+        strict_fences=False,
+    )
+    result = resolver.string_to_extraction_data(test_input)
+    self.assertLen(result, 1)
+    self.assertEqual(result[0]["item"], "second")
+
+  def test_resolve_normalizes_cjk_radicals_in_extractions(self):
+    resolver = resolver_lib.Resolver(
+        fence_output=False,
+        format_type=data.FormatType.JSON,
+    )
+    test_input = (
+        '{"extractions":[{"entity":"⻬","entity_attributes":{"note":"⺠"}}]}'
+    )
+
+    extractions = resolver.resolve(test_input)
+    self.assertLen(extractions, 1)
+    self.assertEqual(extractions[0].extraction_text, "齐")
+    self.assertEqual(extractions[0].attributes, {"note": "民"})
+
 
 class FlexibleSchemaTest(parameterized.TestCase):
   """Tests for flexible schema formats without extractions key."""

@@ -36,6 +36,7 @@ from langextract.core import exceptions
 from langextract.core import format_handler as fh
 from langextract.core import schema
 from langextract.core import tokenizer as tokenizer_lib
+from langextract.core import unicode_utils
 
 _FUZZY_ALIGNMENT_MIN_THRESHOLD = 0.75
 
@@ -451,6 +452,8 @@ class Resolver(AbstractResolver):
         if not isinstance(extraction_value, str):
           extraction_value = str(extraction_value)
 
+        extraction_value = unicode_utils.normalize_unicode(extraction_value)
+
         if index_suffix:
           index_key = extraction_class + index_suffix
           extraction_index = group.get(index_key, None)
@@ -466,6 +469,8 @@ class Resolver(AbstractResolver):
         if attributes_suffix:
           attributes_key = extraction_class + attributes_suffix
           attributes = group.get(attributes_key, None)
+          if attributes is not None:
+            attributes = unicode_utils.normalize_unicode_in_data(attributes)
 
         processed_extractions.append(
             data.Extraction(

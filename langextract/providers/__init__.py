@@ -56,7 +56,9 @@ def load_builtins_once() -> None:
   """
   global _builtins_loaded  # pylint: disable=global-statement
 
-  if _builtins_loaded:
+  # If the router registry was cleared (common in tests), allow built-ins to be
+  # re-registered even if we've previously loaded them.
+  if _builtins_loaded and router.list_entries():
     return
 
   # Register built-ins lazily so they can be re-registered after a registry.clear()

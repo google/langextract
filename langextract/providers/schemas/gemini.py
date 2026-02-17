@@ -23,6 +23,7 @@ from typing import Any
 import warnings
 
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import format_handler as fh
 from langextract.core import schema
 
@@ -93,6 +94,24 @@ class GeminiSchema(schema.BaseSchema):
           UserWarning,
           stacklevel=3,
       )
+
+  @classmethod
+  def from_schema_dict(cls, schema_dict: dict[str, Any]) -> GeminiSchema:
+    """Create a GeminiSchema from a user-provided JSON schema dict.
+
+    The schema must describe an object with an `extractions` array key, matching
+    LangExtract's resolver expectations.
+    """
+    if not isinstance(schema_dict, dict):
+      raise exceptions.InferenceConfigError("schema_dict must be a dict")
+
+    props = schema_dict.get("properties")
+    if not isinstance(props, dict) or data.EXTRACTIONS_KEY not in props:
+      raise exceptions.InferenceConfigError(
+          f"schema_dict must contain '{data.EXTRACTIONS_KEY}' in properties"
+      )
+
+    return cls(_schema_dict=schema_dict)
 
   @classmethod
   def from_examples(

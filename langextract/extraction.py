@@ -58,6 +58,7 @@ def extract(
     model: typing.Any = None,
     *,
     fetch_urls: bool = True,
+    output_schema: typing.Any | None = None,
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
@@ -154,6 +155,11 @@ def extract(
         URL string. When True (default), strings starting with http:// or
         https:// are fetched. When False, all strings are treated as literal
         text to analyze. This is a keyword-only parameter.
+      output_schema: Optional JSON schema to apply for structured output. When
+        provided, this overrides schema generation from examples for providers
+        that support strict schema constraints (e.g. Gemini). `output_schema`
+        may be a JSON-schema dict or a Pydantic model/class with a
+        `model_json_schema()` method.
       prompt_validation_level: Controls pre-flight alignment checks on few-shot
         examples. OFF skips validation, WARNING logs issues but continues, ERROR
         raises on failures. Defaults to WARNING.
@@ -172,6 +178,28 @@ def extract(
       requests.RequestException: If URL download fails.
       pv.PromptAlignmentError: If validation fails in ERROR mode.
   """
+  schema_dict: dict[str, typing.Any] | None = None
+  if output_schema is not None:
+    if isinstance(output_schema, dict):
+      schema_dict = output_schema
+    else:
+      schema_fn = getattr(output_schema, "model_json_schema", None)
+      if callable(schema_fn):
+        schema_dict = schema_fn()
+      else:
+        raise TypeError(
+            "'output_schema' must be a dict or a Pydantic model/class with"
+            " model_json_schema()."
+        )
+
+    if use_schema_constraints is False:
+      warnings.warn(
+          "'output_schema' provided; enabling use_schema_constraints.",
+          UserWarning,
+          stacklevel=2,
+      )
+      use_schema_constraints = True
+
   if not examples:
     raise ValueError(
         "Examples are required for reliable extraction. Please provide at least"
@@ -226,6 +254,13 @@ def extract(
     language_model = model
     if fence_output is not None:
       language_model.set_fence_output(fence_output)
+    if output_schema is not None:
+      warnings.warn(
+          "'output_schema' is ignored when 'model' is provided. Apply schema"
+          " constraints directly to the model instead.",
+          UserWarning,
+          stacklevel=2,
+      )
     if use_schema_constraints:
       warnings.warn(
           "'use_schema_constraints' is ignored when 'model' is provided. "
@@ -247,6 +282,7 @@ def extract(
         examples=prompt_template.examples if use_schema_constraints else None,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        schema_dict=schema_dict,
     )
   else:
     if language_model_type is not None:
@@ -289,6 +325,7 @@ def extract(
         examples=prompt_template.examples if use_schema_constraints else None,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        schema_dict=schema_dict,
     )
 
   format_handler, remaining_params = fh.FormatHandler.from_resolver_params(

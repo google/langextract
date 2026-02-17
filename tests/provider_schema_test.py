@@ -541,6 +541,87 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
       )
 
 
+class UserSchemaOverrideTest(absltest.TestCase):
+  """Tests for user-provided schema dictionaries."""
+
+  @mock.patch("google.genai.Client", autospec=True)
+  def test_factory_uses_user_schema_dict_for_gemini(self, mock_client_class):
+    mock_client = mock.Mock()
+    mock_client_class.return_value = mock_client
+
+    examples_data = [
+        data.ExampleData(
+            text="Patient has diabetes",
+            extractions=[
+                data.Extraction(
+                    extraction_class="condition",
+                    extraction_text="diabetes",
+                    attributes={"severity": "mild"},
+                )
+            ],
+        )
+    ]
+
+    user_schema = {
+        "type": "object",
+        "properties": {
+            "extractions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "condition": {"type": "string"},
+                        "condition_attributes": {
+                            "type": "object",
+                            "properties": {
+                                "severity": {
+                                    "type": "string",
+                                    "enum": ["mild", "moderate", "severe"],
+                                }
+                            },
+                        },
+                    },
+                },
+            }
+        },
+        "required": ["extractions"],
+    }
+
+    config = factory.ModelConfig(
+        model_id="gemini-2.5-flash",
+        provider_kwargs={"api_key": "test_key"},
+    )
+    model = factory.create_model(
+        config=config,
+        examples=examples_data,
+        use_schema_constraints=True,
+        fence_output=None,
+        schema_dict=user_schema,
+    )
+
+    self.assertIsInstance(model, gemini.GeminiLanguageModel)
+    self.assertIsNotNone(model.gemini_schema)
+    self.assertEqual(model.gemini_schema.schema_dict, user_schema)
+
+  @mock.patch("google.genai.Client", autospec=True)
+  def test_factory_rejects_invalid_user_schema_dict(self, mock_client_class):
+    mock_client = mock.Mock()
+    mock_client_class.return_value = mock_client
+
+    config = factory.ModelConfig(
+        model_id="gemini-2.5-flash",
+        provider_kwargs={"api_key": "test_key"},
+    )
+    with self.assertRaises(exceptions.InferenceConfigError):
+      _ = factory.create_model(
+          config=config,
+          examples=[],
+          use_schema_constraints=True,
+          fence_output=None,
+          schema_dict={"type": "object", "properties": {}},
+      )
+
+
 class SchemaShimTest(absltest.TestCase):
   """Tests for backward compatibility shims in schema module."""
 

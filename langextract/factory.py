@@ -106,6 +106,7 @@ def create_model(
     use_schema_constraints: bool = False,
     fence_output: bool | None = None,
     return_fence_output: bool = False,
+    schema_dict: dict[str, typing.Any] | None = None,
 ) -> base_model.BaseLanguageModel | tuple[base_model.BaseLanguageModel, bool]:
   """Create a language model instance from configuration.
 
@@ -115,6 +116,9 @@ def create_model(
     use_schema_constraints: Whether to apply schema constraints from examples.
     fence_output: Explicit fence output preference. If None, computed from schema.
     return_fence_output: If True, also return computed fence_output value.
+    schema_dict: Optional user-provided JSON schema to use for structured output.
+      When provided, this overrides schema generation from examples for providers
+      that support strict schema constraints.
 
   Returns:
     An instantiated language model provider.
@@ -125,12 +129,13 @@ def create_model(
     ValueError: If no provider is registered for the model_id.
     InferenceConfigError: If provider instantiation fails.
   """
-  if use_schema_constraints or fence_output is not None:
+  if use_schema_constraints or fence_output is not None or schema_dict is not None:
     model = _create_model_with_schema(
         config=config,
         examples=examples,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        schema_dict=schema_dict,
     )
     if return_fence_output:
       return model, model.requires_fence_output
@@ -202,6 +207,7 @@ def _create_model_with_schema(
     examples: typing.Sequence[typing.Any] | None = None,
     use_schema_constraints: bool = True,
     fence_output: bool | None = None,
+    schema_dict: dict[str, typing.Any] | None = None,
 ) -> base_model.BaseLanguageModel:
   """Internal helper to create a model with optional schema constraints.
 
@@ -215,6 +221,8 @@ def _create_model_with_schema(
     use_schema_constraints: Whether to generate and apply schema constraints.
     fence_output: Whether to wrap output in markdown fences. If None,
       will be computed based on schema's requires_raw_output.
+    schema_dict: Optional user-provided JSON schema to use for structured output.
+      When provided, this overrides schema generation from examples.
 
   Returns:
     A model instance with fence_output configured appropriately.
@@ -228,8 +236,19 @@ def _create_model_with_schema(
     provider_class = router.resolve(config.model_id)
 
   schema_instance = None
-  if use_schema_constraints and examples:
-    schema_class = provider_class.get_schema_class()
+  schema_class = provider_class.get_schema_class()
+  if schema_dict is not None:
+    if schema_class is None:
+      raise exceptions.InferenceConfigError(
+          f"Provider {provider_class.__name__} does not support schema constraints."
+      )
+    from_schema = getattr(schema_class, "from_schema_dict", None)
+    if not callable(from_schema):
+      raise exceptions.InferenceConfigError(
+          f"Provider {provider_class.__name__} does not support user-provided schemas."
+      )
+    schema_instance = from_schema(schema_dict)  # type: ignore[misc]
+  elif use_schema_constraints and examples:
     if schema_class is not None:
       schema_instance = schema_class.from_examples(examples)
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import dataclasses
 import enum
 import uuid
+from typing import Any
 
 from langextract.core import tokenizer
 from langextract.core import types
@@ -79,6 +80,8 @@ class Extraction:
     description: A description of the extraction.
     attributes: A list of attributes of the extraction.
     token_interval: The token interval of the extraction.
+    provenance: Optional structured provenance metadata for grounded extractions
+      (e.g., PDF page and bounding boxes from an upstream document converter).
   """
 
   extraction_class: str
@@ -89,6 +92,7 @@ class Extraction:
   group_index: int | None = None
   description: str | None = None
   attributes: dict[str, str | list[str]] | None = None
+  provenance: list[dict[str, Any]] | None = None
   _token_interval: tokenizer.TokenInterval | None = dataclasses.field(
       default=None, repr=False, compare=False
   )
@@ -105,6 +109,7 @@ class Extraction:
       group_index: int | None = None,
       description: str | None = None,
       attributes: dict[str, str | list[str]] | None = None,
+      provenance: list[dict[str, Any]] | None = None,
   ):
     self.extraction_class = extraction_class
     self.extraction_text = extraction_text
@@ -115,6 +120,7 @@ class Extraction:
     self.group_index = group_index
     self.description = description
     self.attributes = attributes
+    self.provenance = provenance
 
   @property
   def token_interval(self) -> tokenizer.TokenInterval | None:

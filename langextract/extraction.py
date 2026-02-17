@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import pathlib
 import typing
 from typing import cast
 import warnings
 
 from langextract import annotation
+from langextract import docling_support
 from langextract import factory
 from langextract import io
 from langextract import prompt_validation as pv
@@ -172,6 +174,8 @@ def extract(
       requests.RequestException: If URL download fails.
       pv.PromptAlignmentError: If validation fails in ERROR mode.
   """
+  converted: docling_support.ConvertedDocument | None = None
+
   if not examples:
     raise ValueError(
         "Examples are required for reliable extraction. Please provide at least"
@@ -214,6 +218,11 @@ def extract(
       and io.is_url(text_or_documents)
   ):
     text_or_documents = io.download_text_from_url(text_or_documents)
+  elif isinstance(text_or_documents, (str, pathlib.Path)):
+    path = pathlib.Path(text_or_documents)
+    if path.is_file():
+      converted = docling_support.convert_file(path)
+      text_or_documents = converted.text
 
   prompt_template = prompting.PromptTemplateStructured(
       description=prompt_description
@@ -346,6 +355,8 @@ def extract(
         tokenizer=tokenizer,
         **alignment_kwargs,
     )
+    if converted is not None:
+      result = docling_support.attach_provenance(result, converted)
     return result
   else:
     documents = cast(Iterable[data.Document], text_or_documents)

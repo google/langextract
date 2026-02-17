@@ -27,7 +27,6 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 import concurrent.futures
 import dataclasses
-import enum
 import hashlib
 import json
 import logging as std_logging
@@ -44,6 +43,7 @@ from google.api_core import exceptions as google_exceptions
 from google.cloud import storage
 
 from langextract.core import exceptions
+from langextract.core import json_utils
 
 _MIME_TYPE_JSON = "application/json"
 _DEFAULT_LOCATION = "us-central1"
@@ -386,7 +386,7 @@ class GCSBatchCache:
 
   def _compute_hash(self, key_data: dict) -> str:
     """Compute SHA256 hash of the canonicalized request data."""
-    canonical_json = json.dumps(key_data, sort_keys=True, ensure_ascii=False)
+    canonical_json = json_utils.dumps_canonical(key_data)
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
   def _get_single(self, key_hash: str) -> str | None:
@@ -443,19 +443,12 @@ class GCSBatchCache:
             "Cache write error for %s: %s", key_hash, e, exc_info=True
         )
 
-    def _json_default(obj):
-      if dataclasses.is_dataclass(obj):
-        return dataclasses.asdict(obj)
-      if isinstance(obj, enum.Enum):
-        return obj.value
-      raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
       for key_data, text in items:
         # If text is not a string, try to serialize it
         if not isinstance(text, str):
           try:
-            text = json.dumps(text, default=_json_default, ensure_ascii=False)
+            text = json_utils.dumps_canonical(text)
           except Exception as e:
             logging.warning("Serialization error: %s", e)
             continue

@@ -14,6 +14,9 @@
 
 """Tests for Gemini Batch API functionality."""
 
+import dataclasses
+import enum
+import hashlib
 import io
 import json
 from unittest import mock
@@ -26,6 +29,7 @@ from google.api_core import exceptions
 from langextract.providers import gemini
 from langextract.providers import gemini_batch as gb
 from langextract.providers import schemas
+from langextract.core import json_utils
 
 
 def create_mock_batch_job(
@@ -678,6 +682,60 @@ class GCSBatchCachingTest(absltest.TestCase):
     data1 = {"a": 1, "b": 2}
     data2 = {"b": 2, "a": 1}
     self.assertEqual(cache._compute_hash(data1), cache._compute_hash(data2))
+
+
+class TestGCSBatchCache(absltest.TestCase):
+  """Unit tests for GCSBatchCache hashing/canonicalization."""
+
+  def setUp(self):
+    super().setUp()
+    self.enter_context(mock.patch.object(gb.storage, "Client", autospec=True))
+
+  def test_compute_hash_serializes_enums_dataclasses_and_sets(self):
+    class _Safety(enum.Enum):
+      ALLOW = "allow"
+      BLOCK = "block"
+
+    @dataclasses.dataclass(frozen=True)
+    class _Cfg:
+      threshold: int
+      mode: _Safety
+
+    class _ModelLike:
+      def __init__(self, v):
+        self._v = v
+
+      def model_dump(self, mode="python"):
+        del mode  # unused
+        return {"v": self._v}
+
+    cache = gb.GCSBatchCache(bucket_name="bucket", project="project")
+    key_data = {
+        "cfg": _Cfg(threshold=3, mode=_Safety.ALLOW),
+        "safety_settings": {_Safety.BLOCK, _Safety.ALLOW},
+        "model_like": _ModelLike(_Safety.BLOCK),
+        # Non-string dict keys should be supported (canonicalized to strings).
+        _Safety.BLOCK: {"nested": _Cfg(threshold=1, mode=_Safety.BLOCK)},
+    }
+
+    # Should not crash on non-JSON-native types.
+    key_hash = cache._compute_hash(key_data)
+    self.assertIsInstance(key_hash, str)
+    self.assertLen(key_hash, 64)  # sha256 hex
+
+    # Deterministic across key orderings.
+    key_data_reordered = {
+        _Safety.BLOCK: {"nested": _Cfg(threshold=1, mode=_Safety.BLOCK)},
+        "model_like": _ModelLike(_Safety.BLOCK),
+        "safety_settings": {_Safety.ALLOW, _Safety.BLOCK},
+        "cfg": _Cfg(threshold=3, mode=_Safety.ALLOW),
+    }
+    self.assertEqual(cache._compute_hash(key_data_reordered), key_hash)
+
+    # Matches the canonical JSON + sha256 contract.
+    canonical = json_utils.dumps_canonical(key_data)
+    expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    self.assertEqual(key_hash, expected)
 
 
 if __name__ == "__main__":

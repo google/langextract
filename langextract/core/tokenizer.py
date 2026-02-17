@@ -534,6 +534,16 @@ def _is_end_of_sentence_token(
       .char_interval.end_pos
   ]
   if _END_OF_SENTENCE_PATTERN.search(current_token_text):
+    # Decimal points (e.g., "21.56") should not terminate a sentence.
+    if (
+        current_token_text == "."
+        and current_idx > 0
+        and current_idx + 1 < len(tokens)
+        and tokens[current_idx - 1].token_type == TokenType.NUMBER
+        and tokens[current_idx + 1].token_type == TokenType.NUMBER
+    ):
+      return False
+
     if current_idx > 0:
       prev_token_text = text[
           tokens[current_idx - 1]

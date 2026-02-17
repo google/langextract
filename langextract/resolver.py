@@ -31,6 +31,7 @@ from typing import Final
 
 from absl import logging
 
+from langextract.core import alignment_utils
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
@@ -786,25 +787,6 @@ class WordAligner:
         )
         continue
 
-      extraction.token_interval = tokenizer_lib.TokenInterval(
-          start_index=i + token_offset,
-          end_index=i + n + token_offset,
-      )
-
-      try:
-        start_token = tokenized_text.tokens[i]
-        end_token = tokenized_text.tokens[i + n - 1]
-        extraction.char_interval = data.CharInterval(
-            start_pos=char_offset + start_token.char_interval.start_pos,
-            end_pos=char_offset + end_token.char_interval.end_pos,
-        )
-      except IndexError as e:
-        raise IndexError(
-            "Failed to align extraction with source text. Extraction token"
-            f" interval {extraction.token_interval} does not match source text"
-            f" tokens {tokenized_text.tokens}."
-        ) from e
-
       extraction_text_len = len(
           list(
               _tokenize_with_lowercase(
@@ -817,6 +799,37 @@ class WordAligner:
             "Delimiter prevents blocks greater than extraction length: "
             f"extraction_text_len={extraction_text_len}, block_size={n}"
         )
+
+      end_idx = i + n
+      if extraction_text_len > n and accept_match_lesser:
+        extended_end = alignment_utils.maybe_extend_lesser_match_end(
+            tokenized_text=tokenized_text,
+            start_index=i,
+            matched_tokens=n,
+            extraction_tokens=extraction_text_len,
+        )
+        if extended_end is not None:
+          end_idx = extended_end
+
+      extraction.token_interval = tokenizer_lib.TokenInterval(
+          start_index=i + token_offset,
+          end_index=end_idx + token_offset,
+      )
+
+      try:
+        start_token = tokenized_text.tokens[i]
+        end_token = tokenized_text.tokens[end_idx - 1]
+        extraction.char_interval = data.CharInterval(
+            start_pos=char_offset + start_token.char_interval.start_pos,
+            end_pos=char_offset + end_token.char_interval.end_pos,
+        )
+      except IndexError as e:
+        raise IndexError(
+            "Failed to align extraction with source text. Extraction token"
+            f" interval {extraction.token_interval} does not match source text"
+            f" tokens {tokenized_text.tokens}."
+        ) from e
+
       if extraction_text_len == n:
         extraction.alignment_status = data.AlignmentStatus.MATCH_EXACT
         exact_matches += 1

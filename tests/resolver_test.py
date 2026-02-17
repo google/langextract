@@ -583,6 +583,53 @@ class AlignEntitiesTest(parameterized.TestCase):
     self.aligner = resolver_lib.WordAligner()
     self.maxDiff = 10000
 
+  def test_match_lesser_long_extraction_extends_char_interval(self):
+    """MATCH_LESSER spans for long extractions should be informative.
+
+    For long, paraphrased extractions (common in Chinese), difflib may only
+    exactly match a small prefix. We extend the span to a conservative sentence
+    boundary so `char_interval` is not reduced to just the matched prefix.
+    """
+    source_text = (
+        "营养成分：每份汉堡约200克，含548大卡热量，其中蛋白质21.56克、"
+        "脂肪18.12克、碳水化合物75.7克，能提供充足能量，但作为快餐食品，"
+        "营养均衡方面有所欠缺。"
+    )
+    extraction = data.Extraction(
+        extraction_class="营养成分",
+        extraction_text=(
+            "每份约200克，含548大卡热量，蛋白质21.56克，脂肪18.12克，"
+            "碳水化合物75.7克，能提供充足能量，但营养均衡有所欠缺"
+        ),
+    )
+
+    aligned = self.aligner.align_extractions(
+        [[extraction]],
+        source_text,
+        enable_fuzzy_alignment=False,
+        accept_match_lesser=True,
+        tokenizer_impl=tokenizer.UnicodeTokenizer(),
+    )
+
+    self.assertLen(aligned, 1)
+    self.assertLen(aligned[0], 1)
+    aligned_extraction = aligned[0][0]
+    self.assertEqual(
+        aligned_extraction.alignment_status, data.AlignmentStatus.MATCH_LESSER
+    )
+    self.assertIsNotNone(aligned_extraction.char_interval)
+
+    expected_start = source_text.index("每份汉堡")
+    expected_end = source_text.rindex("。") + 1
+    self.assertEqual(aligned_extraction.char_interval.start_pos, expected_start)
+    self.assertEqual(aligned_extraction.char_interval.end_pos, expected_end)
+    self.assertIn(
+        "有所欠缺",
+        source_text[
+            aligned_extraction.char_interval.start_pos : aligned_extraction.char_interval.end_pos
+        ],
+    )
+
   @parameterized.named_parameters(
       (
           "basic_alignment",

@@ -28,4 +28,5 @@ __all__ = [
     "schema",
     "data",
     "tokenizer",
+    "alignment_utils",
 ]

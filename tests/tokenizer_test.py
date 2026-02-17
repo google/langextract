@@ -966,6 +966,13 @@ class SentenceRangeTest(parameterized.TestCase):
     interval = tokenizer.find_sentence_range(text_cr, tokens, 0)
     self.assertEqual(interval.end_index, 3)
 
+  def test_decimal_points_do_not_terminate_sentences(self):
+    text = "Value is 21.56. Next."
+    tokenized = tokenizer.tokenize(text)
+    interval = tokenizer.find_sentence_range(text, tokenized.tokens, 0)
+    self.assertEqual(interval.end_index, 6)
+    self.assertEqual(tokenizer.tokens_text(tokenized, interval), "Value is 21.56.")
+
   def test_unicode_sentence_boundaries(self):
     """Verify that Unicode sentence terminators are respected."""
     # Japanese full stop

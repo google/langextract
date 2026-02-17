@@ -32,6 +32,7 @@ from langextract.core import types
 from langextract.providers import gemini
 from langextract.providers import ollama
 from langextract.providers import openai
+from langextract.providers import schemas
 
 
 class TestBaseLanguageModel(absltest.TestCase):
@@ -670,6 +671,51 @@ class TestOpenAILanguageModel(absltest.TestCase):
     call_args = mock_client.chat.completions.create.call_args
     self.assertEqual(
         call_args.kwargs["response_format"], {"type": "json_object"}
+    )
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_schema_constraints_use_json_schema_response_format(
+      self, mock_openai_class
+  ):
+    """Schema constraints should switch OpenAI to json_schema response_format."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"extractions": []}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    model = openai.OpenAILanguageModel(
+        api_key="test-key", format_type=data.FormatType.JSON
+    )
+
+    examples_data = [
+        data.ExampleData(
+            text="Patient has diabetes",
+            extractions=[
+                data.Extraction(
+                    extraction_class="condition",
+                    extraction_text="diabetes",
+                    attributes={"severity": "moderate"},
+                )
+            ],
+        )
+    ]
+    test_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+    model.apply_schema(test_schema)
+
+    list(model.infer(["test prompt"]))
+
+    call_args = mock_client.chat.completions.create.call_args
+    response_format = call_args.kwargs["response_format"]
+    self.assertEqual(response_format["type"], "json_schema")
+    self.assertIn("json_schema", response_format)
+    self.assertIn("schema", response_format["json_schema"])
+    self.assertIn(
+        data.EXTRACTIONS_KEY,
+        response_format["json_schema"]["schema"]["properties"],
     )
 
   @mock.patch("openai.OpenAI")

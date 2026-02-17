@@ -51,12 +51,13 @@ class ProviderSchemaDiscoveryTest(absltest.TestCase):
     )
 
   def test_openai_returns_none(self):
-    """Test that OpenAILanguageModel returns None (no schema support yet)."""
+    """Test that OpenAILanguageModel returns OpenAISchema."""
     # OpenAI imports dependencies in __init__, not at module level
     schema_class = openai.OpenAILanguageModel.get_schema_class()
-    self.assertIsNone(
+    self.assertEqual(
         schema_class,
-        msg="OpenAILanguageModel should return None (no schema support)",
+        schemas.openai.OpenAISchema,
+        msg="OpenAILanguageModel should return OpenAISchema class",
     )
 
 
@@ -539,6 +540,43 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
           call_kwargs["config"],
           msg="response_schema should be forwarded to genai API config",
       )
+
+
+class OpenAISchemaProviderIntegrationTest(absltest.TestCase):
+  """Tests for OpenAISchema provider integration."""
+
+  def test_openai_rejects_yaml_with_schema(self):
+    """OpenAI schema constraints should be JSON-only (no YAML)."""
+    examples_data = [
+        data.ExampleData(
+            text="Test",
+            extractions=[
+                data.Extraction(
+                    extraction_class="test",
+                    extraction_text="test text",
+                )
+            ],
+        )
+    ]
+
+    config = factory.ModelConfig(
+        model_id="gpt-4o-mini",
+        provider_kwargs={"api_key": "test_key", "format_type": data.FormatType.YAML},
+    )
+
+    with self.assertRaises(exceptions.InferenceConfigError) as cm:
+      _ = factory.create_model(
+          config=config,
+          examples=examples_data,
+          use_schema_constraints=True,
+          fence_output=None,
+      )
+
+    self.assertIn(
+        "only supports JSON format",
+        str(cm.exception),
+        msg="Error should mention JSON-only constraint",
+    )
 
 
 class SchemaShimTest(absltest.TestCase):

@@ -28,6 +28,7 @@ from langextract.core import schema
 from langextract.core import types as core_types
 from langextract.providers import patterns
 from langextract.providers import router
+from langextract.providers import schemas as provider_schemas
 
 
 @router.register(
@@ -42,6 +43,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
   api_key: str | None = None
   base_url: str | None = None
   organization: str | None = None
+  openai_schema: provider_schemas.OpenAISchema | None = None
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float | None = None
   max_workers: int = 10
@@ -53,9 +55,27 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
   @property
   def requires_fence_output(self) -> bool:
     """OpenAI JSON mode returns raw JSON without fences."""
+    if (
+        hasattr(self, "_fence_output_override")
+        and self._fence_output_override is not None
+    ):
+      return self._fence_output_override
     if self.format_type == data.FormatType.JSON:
       return False
     return super().requires_fence_output
+
+  @classmethod
+  def get_schema_class(cls) -> type[schema.BaseSchema] | None:
+    """Return OpenAISchema for structured output support."""
+    return provider_schemas.OpenAISchema
+
+  def apply_schema(self, schema_instance: schema.BaseSchema | None) -> None:
+    """Apply a schema instance to this provider."""
+    super().apply_schema(schema_instance)
+    if isinstance(schema_instance, provider_schemas.OpenAISchema):
+      self.openai_schema = schema_instance
+    else:
+      self.openai_schema = None
 
   def __init__(
       self,
@@ -161,7 +181,16 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
       if temp is not None:
         api_params['temperature'] = temp
 
-      if self.format_type == data.FormatType.JSON:
+      if self.openai_schema is not None:
+        if self.format_type != data.FormatType.JSON:
+          raise exceptions.InferenceConfigError(
+              'OpenAI structured output only supports JSON format. '
+              'Set format_type=JSON or use_schema_constraints=False.'
+          )
+        api_params['response_format'] = self.openai_schema.to_provider_config()[
+            'response_format'
+        ]
+      elif self.format_type == data.FormatType.JSON:
         api_params.setdefault('response_format', {'type': 'json_object'})
 
       if (v := normalized_config.get('max_output_tokens')) is not None:

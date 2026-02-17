@@ -673,6 +673,35 @@ class TestOpenAILanguageModel(absltest.TestCase):
     )
 
   @mock.patch("openai.OpenAI")
+  @mock.patch("langextract.providers.openai.openai_batch.infer_batch")
+  def test_openai_uses_batch_api_when_enabled(
+      self, mock_infer_batch, mock_openai_class
+  ):
+    """When configured, OpenAI provider should route to Batch API."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_infer_batch.return_value = ['{"extractions": []}', '{"extractions": []}']
+
+    model = openai.OpenAILanguageModel(
+        api_key="test-key",
+        batch={"enabled": True, "threshold": 2},
+    )
+
+    results = list(model.infer(["p1", "p2"]))
+
+    self.assertEqual(
+        results,
+        [
+            [types.ScoredOutput(score=1.0, output='{"extractions": []}')],
+            [types.ScoredOutput(score=1.0, output='{"extractions": []}')],
+        ],
+    )
+
+    mock_infer_batch.assert_called_once()
+    mock_client.chat.completions.create.assert_not_called()
+
+  @mock.patch("openai.OpenAI")
   def test_openai_temperature_zero(self, mock_openai_class):
     """Verify temperature=0.0 is properly passed to the API."""
     mock_client = mock.Mock()

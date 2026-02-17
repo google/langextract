@@ -129,6 +129,8 @@ def extract(
         Default is True. 'suppress_parse_errors' (bool): Whether to suppress
         parsing errors and continue pipeline. Default is False.
       language_model_params: Additional parameters for the language model.
+        OpenAI supports the Batch API via a nested `batch` dict, e.g.
+        `language_model_params={"batch": {"enabled": True, "threshold": 50}}`.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract
         namespace. Note: Debug logging remains enabled for the process once activated.

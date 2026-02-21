@@ -391,6 +391,56 @@ class PromptAlignmentValidationTest(parameterized.TestCase):
     self.assertEqual(report.has_non_exact, expected_has_non_exact)
 
 
+class IssueKindPublicApiTest(absltest.TestCase):
+  """Tests verifying IssueKind is exported and usable as public API."""
+
+  def test_issuekind_is_importable(self):
+    """IssueKind should be importable from the public module."""
+    from langextract.prompt_validation import IssueKind  # pylint: disable=g-import-not-at-top
+    self.assertIsNotNone(IssueKind)
+
+  def test_issuekind_in_all(self):
+    """IssueKind should be listed in __all__."""
+    from langextract import prompt_validation  # pylint: disable=g-import-not-at-top
+    self.assertIn("IssueKind", prompt_validation.__all__)
+
+  def test_filter_failed_issues_via_public_issuekind(self):
+    """Users can filter individual failed issues without accessing private API."""
+    from langextract.prompt_validation import IssueKind  # pylint: disable=g-import-not-at-top
+
+    examples = [
+        data.ExampleData(
+            text="Patient takes aspirin.",
+            extractions=[
+                data.Extraction(
+                    extraction_class="Medication",
+                    extraction_text="metformin",  # not in text → FAILED
+                    attributes={},
+                ),
+            ],
+        ),
+        data.ExampleData(
+            text="Type 2 diabetes.",
+            extractions=[
+                data.Extraction(
+                    extraction_class="Diagnosis",
+                    extraction_text="type-2 diabetes",  # fuzzy → NON_EXACT
+                    attributes={},
+                ),
+            ],
+        ),
+    ]
+
+    report = prompt_validation.validate_prompt_alignment(examples)
+
+    failed = [i for i in report.issues if i.issue_kind == IssueKind.FAILED]
+    non_exact = [i for i in report.issues if i.issue_kind == IssueKind.NON_EXACT]
+
+    self.assertLen(failed, 1)
+    self.assertLen(non_exact, 1)
+    self.assertEqual(failed[0].extraction_text_preview, "metformin")
+
+
 class ExtractIntegrationTest(absltest.TestCase):
   """Minimal integration test for extract() entry point validation."""
 

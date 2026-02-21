@@ -47,6 +47,7 @@ ALIGNMENT_PARAM_KEYS: Final[frozenset[str]] = frozenset({
     "fuzzy_alignment_threshold",
     "accept_match_lesser",
     "suppress_parse_errors",
+    "drop_unaligned_extractions",
 })
 
 
@@ -314,6 +315,10 @@ class Resolver(AbstractResolver):
     """
     logging.debug("Starting alignment process for provided chunk text.")
 
+    drop_unaligned_extractions = bool(
+        kwargs.pop("drop_unaligned_extractions", False)
+    )
+
     if not extractions:
       logging.debug(
           "No extractions found in the annotated text; exiting alignment"
@@ -340,6 +345,8 @@ class Resolver(AbstractResolver):
     )
 
     for extraction in itertools.chain(*aligned_yaml_extractions):
+      if drop_unaligned_extractions and extraction.char_interval is None:
+        continue
       logging.debug("Yielding aligned extraction: %s", extraction)
       yield extraction
 

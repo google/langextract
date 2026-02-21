@@ -25,6 +25,7 @@ import yaml
 
 from langextract.core import data
 from langextract.core import exceptions
+from langextract.core import json_parsing
 
 ExtractionValueType = str | int | float | dict | list | None
 
@@ -268,12 +269,41 @@ class FormatHandler:
       if strict:
         raise
       # Reasoning models (DeepSeek-R1, QwQ) emit <think> tags before JSON.
-      if _THINK_TAG_RE.search(content):
-        stripped = _THINK_TAG_RE.sub("", content).strip()
-        if self.format_type == data.FormatType.YAML:
+      stripped = (
+          _THINK_TAG_RE.sub("", content).strip()
+          if _THINK_TAG_RE.search(content)
+          else content
+      )
+
+      if self.format_type == data.FormatType.YAML:
+        try:
           return yaml.safe_load(stripped)
+        except yaml.YAMLError:
+          # Some models emit multiple YAML documents; use the last one.
+          docs = [d for d in yaml.safe_load_all(stripped) if d is not None]
+          if docs:
+            return docs[-1]
+          raise
+
+      # JSON
+      try:
         return json.loads(stripped)
-      raise
+      except json.JSONDecodeError:
+        # Models may echo example payloads before the final answer. Prefer the
+        # last parseable JSON object/array in the output.
+        require_wrapper = self.wrapper_key is not None and (
+            self.use_wrapper or bool(strict)
+        )
+
+        def _accept(obj) -> bool:
+          if require_wrapper:
+            return isinstance(obj, dict) and (
+                (self.wrapper_key in obj if self.wrapper_key else False)
+                or data.EXTRACTIONS_KEY in obj
+            )
+          return isinstance(obj, (dict, list))
+
+        return json_parsing.parse_last_json(stripped, accept=_accept)
 
   def _extract_content(self, text: str) -> str:
     """Extract content from text, handling fences if configured.
@@ -319,13 +349,15 @@ class FormatHandler:
     if len(candidates) == 1:
       return candidates[0].group("body").strip()
     elif len(candidates) > 1:
-      raise exceptions.FormatParseError(
-          "Multiple fenced blocks found. Expected exactly one."
-      )
+      # In non-strict mode, prefer the last candidate. This is particularly
+      # useful when a model echoes few-shot examples before the actual answer.
+      return candidates[-1].group("body").strip()
 
     if matches:
-      if not self.strict_fences and len(matches) == 1:
-        return matches[0].group("body").strip()
+      if not self.strict_fences:
+        # If there are fenced blocks but no valid language tags, use the last
+        # fenced block as a best-effort fallback.
+        return matches[-1].group("body").strip()
       raise exceptions.FormatParseError(
           f"No {self.format_type.value} code block found."
       )

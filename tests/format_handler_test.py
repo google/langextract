@@ -305,6 +305,41 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
     self.assertLen(parsed, 1)
     self.assertEqual(parsed[0]["person"], "John Smith")
 
+  def test_lenient_json_prefers_last_payload_when_multiple_present(self):
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    output = textwrap.dedent("""\
+        Example:
+        {"extractions": [{"person": "Alice"}]}
+        Answer:
+        {"extractions": [{"person": "Bob"}]}""")
+    parsed = handler.parse_output(output)
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["person"], "Bob")
+
+  def test_lenient_fences_prefers_last_block_when_multiple_present(self):
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=True,
+        strict_fences=False,
+    )
+    output = textwrap.dedent("""\
+        ```json
+        {"extractions": [{"person": "Alice"}]}
+        ```
+        ```json
+        {"extractions": [{"person": "Bob"}]}
+        ```""")
+    parsed = handler.parse_output(output)
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["person"], "Bob")
+
 
 if __name__ == "__main__":
   absltest.main()

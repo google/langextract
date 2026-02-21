@@ -1989,6 +1989,36 @@ class ResolverTest(parameterized.TestCase):
 
     self.assertEmpty(aligned_extractions)
 
+  def test_align_can_drop_unaligned_extractions(self):
+    text = "This is a sample text with some extractions."
+    annotated_extractions = [
+        data.Extraction(extraction_class="medication", extraction_text="Aspirin")
+    ]
+
+    aligned_default = list(
+        self.default_resolver.align(
+            extractions=annotated_extractions,
+            source_text=text,
+            token_offset=0,
+            char_offset=0,
+            enable_fuzzy_alignment=False,
+        )
+    )
+    self.assertLen(aligned_default, 1)
+    self.assertIsNone(aligned_default[0].char_interval)
+
+    aligned_dropped = list(
+        self.default_resolver.align(
+            extractions=annotated_extractions,
+            source_text=text,
+            token_offset=0,
+            char_offset=0,
+            enable_fuzzy_alignment=False,
+            drop_unaligned_extractions=True,
+        )
+    )
+    self.assertEmpty(aligned_dropped)
+
   def test_align_successful(self):
     tokenized_text = tokenizer.TokenizedText(
         text="zero one two",
@@ -2299,7 +2329,7 @@ class FenceFallbackTest(parameterized.TestCase):
     self.assertLen(result, 1)
     self.assertEqual(result[0]["person"], "Default Test")
 
-  def test_rejects_multiple_fenced_blocks(self):
+  def test_lenient_prefers_last_fenced_block_when_multiple_present(self):
     test_input = textwrap.dedent("""\
         preamble
         ```json
@@ -2314,10 +2344,9 @@ class FenceFallbackTest(parameterized.TestCase):
         format_type=data.FormatType.JSON,
         strict_fences=False,
     )
-    with self.assertRaisesRegex(
-        resolver_lib.ResolverParsingError, "Multiple fenced blocks found"
-    ):
-      resolver.string_to_extraction_data(test_input)
+    result = resolver.string_to_extraction_data(test_input)
+    self.assertLen(result, 1)
+    self.assertEqual(result[0]["item"], "second")
 
 
 class FlexibleSchemaTest(parameterized.TestCase):

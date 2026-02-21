@@ -48,4 +48,9 @@ BUILTIN_PROVIDERS: list[ProviderConfig] = [
         'target': 'langextract.providers.openai:OpenAILanguageModel',
         'priority': patterns.OPENAI_PRIORITY,
     },
+    {
+        'patterns': patterns.VLLM_PATTERNS,
+        'target': 'langextract.providers.vllm:VLLMLanguageModel',
+        'priority': patterns.VLLM_PRIORITY,
+    },
 ]

@@ -213,6 +213,28 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
     self.assertEqual(model.base_url, "http://custom:11434")
 
+  @mock.patch.dict(os.environ, {"VLLM_BASE_URL": "http://custom:8000/v1"})
+  def test_vllm_uses_base_url_from_environment(self):
+    """Factory should use VLLM_BASE_URL from environment for vLLM models."""
+
+    @router.register(r"^vllm", priority=100)
+    class FakeVLLMProvider(base_model.BaseLanguageModel):  # pylint: disable=unused-variable
+
+      def __init__(self, model_id, base_url=None, **kwargs):
+        self.model_id = model_id
+        self.base_url = base_url
+        super().__init__()
+
+      def infer(self, batch_prompts, **kwargs):
+        return [[types.ScoredOutput(score=1.0, output="vllm")]]
+
+      def infer_batch(self, prompts, batch_size=32):
+        return self.infer(prompts)
+
+    config = factory.ModelConfig(model_id="vllm:llama3")
+    model = factory.create_model(config)
+    self.assertEqual(model.base_url, "http://custom:8000/v1")
+
   def test_ollama_models_select_without_api_keys(self):
     """Test that Ollama models resolve without API keys or explicit type."""
 

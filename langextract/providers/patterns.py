@@ -62,3 +62,10 @@ OLLAMA_PATTERNS = (
     r'^WizardLM/',
 )
 OLLAMA_PRIORITY = 10
+
+# vLLM provider patterns (OpenAI-compatible server)
+VLLM_PATTERNS = (
+    r"^vllm[:/]",
+    r"^vllm-",
+)
+VLLM_PRIORITY = 10

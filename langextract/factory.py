@@ -97,6 +97,9 @@ def _kwargs_with_environment_defaults(
         "OLLAMA_BASE_URL", "http://localhost:11434"
     )
 
+  if "vllm" in model_id.lower() and "base_url" not in resolved:
+    resolved["base_url"] = os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")
+
   return resolved
 
 

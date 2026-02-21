@@ -308,6 +308,7 @@ class Annotator:
         list
     )
     next_emit_idx = 0
+    global_images = kwargs.pop("images", None)
 
     def _capture_docs(src: Iterable[data.Document]) -> Iterator[data.Document]:
       """Captures document order and text lazily as chunks are produced."""
@@ -387,7 +388,31 @@ class Annotator:
           except AttributeError:
             pass
 
-        outputs = self._language_model.infer(batch_prompts=prompts, **kwargs)
+        prompt_images: list[list[data.Image] | None] = []
+        for chunk in batch:
+          doc_images = (
+              chunk.document.images if chunk.document is not None else None
+          )
+          if doc_images and global_images:
+            prompt_images.append([*doc_images, *global_images])
+          elif doc_images:
+            prompt_images.append(doc_images)
+          elif global_images:
+            prompt_images.append(global_images)
+          else:
+            prompt_images.append(None)
+
+        if any(prompt_images):
+          if not getattr(self._language_model, "supports_images", False):
+            raise exceptions.InferenceConfigError(
+                "Image inputs were provided, but the selected provider does not"
+                " support multimodal extraction."
+            )
+          outputs = self._language_model.infer(
+              batch_prompts=prompts, images=prompt_images, **kwargs
+          )
+        else:
+          outputs = self._language_model.infer(batch_prompts=prompts, **kwargs)
         if not isinstance(outputs, list):
           outputs = list(outputs)
 

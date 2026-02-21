@@ -91,6 +91,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     if isinstance(schema_instance, schemas.gemini.GeminiSchema):
       self.gemini_schema = schema_instance
 
+  @property
+  def supports_images(self) -> bool:
+    return True
+
   def __init__(
       self,
       model_id: str = _DEFAULT_MODEL_ID,
@@ -200,7 +204,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       )
 
   def _process_single_prompt(
-      self, prompt: str, config: dict
+      self,
+      prompt: str,
+      config: dict,
+      images: Sequence[data.Image] | None = None,
   ) -> core_types.ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
     try:
@@ -214,8 +221,22 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         config.setdefault('response_mime_type', 'application/json')
         config.setdefault('response_schema', self.gemini_schema.schema_dict)
 
+      contents: Any = prompt
+      if images:
+        # pylint: disable=import-outside-toplevel
+        from google import genai
+
+        parts = [genai.types.Part.from_text(prompt)]
+        for img in images:
+          parts.append(
+              genai.types.Part.from_bytes(
+                  data=img.data, mime_type=img.mime_type
+              )
+          )
+        contents = parts
+
       response = self._client.models.generate_content(
-          model=self.model_id, contents=prompt, config=config
+          model=self.model_id, contents=contents, config=config
       )
 
       return core_types.ScoredOutput(score=1.0, output=response.text)
@@ -239,6 +260,27 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     """
     merged_kwargs = self.merge_kwargs(kwargs)
 
+    images_arg = merged_kwargs.get("images")
+    prompt_images: list[list[data.Image] | None] = [None] * len(batch_prompts)
+    if images_arg:
+      if (
+          isinstance(images_arg, list)
+          and images_arg
+          and isinstance(images_arg[0], data.Image)
+      ):
+        prompt_images = [images_arg] * len(batch_prompts)
+      elif (
+          isinstance(images_arg, list)
+          and len(images_arg) == len(batch_prompts)
+          and all(x is None or isinstance(x, list) for x in images_arg)
+      ):
+        prompt_images = images_arg
+      else:
+        raise TypeError(
+            "images must be a list[data.Image] (applied to all prompts) or "
+            "a list[list[data.Image] | None] aligned with batch_prompts."
+        )
+
     config = {
         'temperature': merged_kwargs.get('temperature', self.temperature),
     }
@@ -255,8 +297,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       ):
         config[key] = value
 
-    # Use batch API if threshold met
-    if self._batch_cfg and self._batch_cfg.enabled:
+    # Use batch API if threshold met. Multimodal inputs are not currently
+    # supported by the batch API path.
+    if self._batch_cfg and self._batch_cfg.enabled and not any(prompt_images):
       if len(batch_prompts) >= self._batch_cfg.threshold:
         try:
           if self.gemini_schema:
@@ -310,7 +353,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       ) as executor:
         future_to_index = {
             executor.submit(
-                self._process_single_prompt, prompt, config.copy()
+                self._process_single_prompt,
+                prompt,
+                config.copy(),
+                prompt_images[i],
             ): i
             for i, prompt in enumerate(batch_prompts)
         }
@@ -335,6 +381,6 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           yield [result]
     else:
       # Sequential processing for single prompt or worker
-      for prompt in batch_prompts:
-        result = self._process_single_prompt(prompt, config.copy())
+      for i, prompt in enumerate(batch_prompts):
+        result = self._process_single_prompt(prompt, config.copy(), prompt_images[i])
         yield [result]  # pylint: disable=duplicate-code

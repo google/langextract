@@ -436,6 +436,32 @@ class TestGeminiLanguageModel(absltest.TestCase):
         "unknown_runtime_param", config, "Unknown kwargs should be filtered out"
     )
 
+  @mock.patch("google.genai.Client")
+  def test_gemini_infer_with_images_builds_parts(self, mock_client_class):
+    mock_client = mock.Mock()
+    mock_client_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.text = '{"result": "test"}'
+    mock_client.models.generate_content.return_value = mock_response
+
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-2.5-flash",
+        api_key="test-key",
+    )
+
+    image = data.Image(data=b"img", mime_type="image/png")
+    with mock.patch("google.genai.types.Part.from_text") as mock_from_text, mock.patch(
+        "google.genai.types.Part.from_bytes"
+    ) as mock_from_bytes:
+      mock_from_text.return_value = "TEXT_PART"
+      mock_from_bytes.return_value = "IMG_PART"
+
+      list(model.infer(["prompt"], images=[[image]]))
+
+    call_args = mock_client.models.generate_content.call_args
+    self.assertEqual(call_args.kwargs["contents"], ["TEXT_PART", "IMG_PART"])
+
   def test_gemini_requires_auth_config(self):
     """Test that Gemini requires either API key or Vertex AI config."""
     with self.assertRaises(exceptions.InferenceConfigError) as cm:
@@ -564,6 +590,41 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
         [types.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')]
     ]
     self.assertEqual(results, expected_results)
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_infer_with_images_builds_multimodal_message(
+      self, mock_openai_class
+  ):
+    import base64
+
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"name": "Bob"}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    model = openai.OpenAILanguageModel(
+        model_id="gpt-4o-mini",
+        api_key="test-api-key",
+    )
+
+    image_bytes = b"\x89PNG\r\n\x1a\nfake"
+    image = data.Image(data=image_bytes, mime_type="image/png")
+    list(model.infer(["prompt"], images=[[image]]))
+
+    call_args = mock_client.chat.completions.create.call_args
+    messages = call_args.kwargs["messages"]
+    self.assertEqual(messages[1]["role"], "user")
+    self.assertIsInstance(messages[1]["content"], list)
+    self.assertEqual(messages[1]["content"][0]["type"], "text")
+
+    url = messages[1]["content"][1]["image_url"]["url"]
+    self.assertTrue(url.startswith("data:image/png;base64,"))
+    b64 = url.split(",", 1)[1]
+    self.assertEqual(base64.b64decode(b64), image_bytes)
 
 
 class TestOpenAILanguageModel(absltest.TestCase):

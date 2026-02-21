@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import dataclasses
 from typing import Any, Iterator, Sequence
@@ -56,6 +57,10 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     if self.format_type == data.FormatType.JSON:
       return False
     return super().requires_fence_output
+
+  @property
+  def supports_images(self) -> bool:
+    return True
 
   def __init__(
       self,
@@ -131,7 +136,10 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     return result
 
   def _process_single_prompt(
-      self, prompt: str, config: dict
+      self,
+      prompt: str,
+      config: dict,
+      images: Sequence[data.Image] | None = None,
   ) -> core_types.ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
     try:
@@ -147,7 +155,22 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
             'You are a helpful assistant that responds in YAML format.'
         )
 
-      messages = [{'role': 'user', 'content': prompt}]
+      user_content: Any = prompt
+      if images:
+        parts: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for img in images:
+          b64 = base64.b64encode(img.data).decode("ascii")
+          parts.append(
+              {
+                  "type": "image_url",
+                  "image_url": {
+                      "url": f"data:{img.mime_type};base64,{b64}",
+                  },
+              }
+          )
+        user_content = parts
+
+      messages = [{'role': 'user', 'content': user_content}]
       if system_message:
         messages.insert(0, {'role': 'system', 'content': system_message})
 
@@ -207,6 +230,27 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     """
     merged_kwargs = self.merge_kwargs(kwargs)
 
+    images_arg = merged_kwargs.get("images")
+    prompt_images: list[list[data.Image] | None] = [None] * len(batch_prompts)
+    if images_arg:
+      if (
+          isinstance(images_arg, list)
+          and images_arg
+          and isinstance(images_arg[0], data.Image)
+      ):
+        prompt_images = [images_arg] * len(batch_prompts)
+      elif (
+          isinstance(images_arg, list)
+          and len(images_arg) == len(batch_prompts)
+          and all(x is None or isinstance(x, list) for x in images_arg)
+      ):
+        prompt_images = images_arg
+      else:
+        raise TypeError(
+            "images must be a list[data.Image] (applied to all prompts) or "
+            "a list[list[data.Image] | None] aligned with batch_prompts."
+        )
+
     config = {}
 
     temp = merged_kwargs.get('temperature', self.temperature)
@@ -238,7 +282,10 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
       ) as executor:
         future_to_index = {
             executor.submit(
-                self._process_single_prompt, prompt, config.copy()
+                self._process_single_prompt,
+                prompt,
+                config.copy(),
+                prompt_images[i],
             ): i
             for i, prompt in enumerate(batch_prompts)
         }
@@ -263,6 +310,6 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
           yield [result]
     else:
       # Sequential processing for single prompt or worker
-      for prompt in batch_prompts:
-        result = self._process_single_prompt(prompt, config.copy())
+      for i, prompt in enumerate(batch_prompts):
+        result = self._process_single_prompt(prompt, config.copy(), prompt_images[i])
         yield [result]  # pylint: disable=duplicate-code

@@ -30,6 +30,7 @@ ATTRIBUTE_SUFFIX = "_attributes"
 __all__ = [
     "AlignmentStatus",
     "CharInterval",
+    "Image",
     "Extraction",
     "Document",
     "AnnotatedDocument",
@@ -58,6 +59,14 @@ class CharInterval:
 
   start_pos: int | None = None
   end_pos: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class Image:
+  """Binary image input for multimodal extraction."""
+
+  data: bytes
+  mime_type: str = "image/png"
 
 
 @dataclasses.dataclass(init=False)
@@ -139,6 +148,7 @@ class Document:
 
   text: str
   additional_context: str | None = None
+  images: list[Image] | None = None
   _document_id: str | None = dataclasses.field(
       default=None, init=False, repr=False, compare=False
   )
@@ -152,9 +162,11 @@ class Document:
       *,
       document_id: str | None = None,
       additional_context: str | None = None,
+      images: list[Image] | None = None,
   ):
     self.text = text
     self.additional_context = additional_context
+    self.images = images
     self._document_id = document_id
 
   @property

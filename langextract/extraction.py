@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import mimetypes
+import pathlib
 import typing
 from typing import cast
 import warnings
@@ -31,6 +33,52 @@ from langextract.core import base_model
 from langextract.core import data
 from langextract.core import format_handler as fh
 from langextract.core import tokenizer as tokenizer_lib
+
+
+_DEFAULT_IMAGE_MIME_TYPE = "image/png"
+
+
+def _normalize_images(
+    images: typing.Sequence[typing.Any] | None,
+) -> list[data.Image] | None:
+  """Normalize supported image inputs into `data.Image`."""
+  if not images:
+    return None
+
+  out: list[data.Image] = []
+  for item in images:
+    if isinstance(item, data.Image):
+      out.append(item)
+      continue
+
+    if isinstance(item, (bytes, bytearray, memoryview)):
+      out.append(data.Image(data=bytes(item), mime_type=_DEFAULT_IMAGE_MIME_TYPE))
+      continue
+
+    if (
+        isinstance(item, tuple)
+        and len(item) == 2
+        and isinstance(item[0], str)
+        and isinstance(item[1], (bytes, bytearray, memoryview))
+    ):
+      out.append(data.Image(data=bytes(item[1]), mime_type=item[0]))
+      continue
+
+    if isinstance(item, (str, pathlib.Path)):
+      path = pathlib.Path(item)
+      raw = path.read_bytes()
+      mime, _ = mimetypes.guess_type(str(path))
+      if mime is None:
+        mime = _DEFAULT_IMAGE_MIME_TYPE
+      out.append(data.Image(data=raw, mime_type=mime))
+      continue
+
+    raise TypeError(
+        "Unsupported image input type. Expected data.Image, bytes, "
+        "(mime_type, bytes), or a filesystem path."
+    )
+
+  return out
 
 
 def extract(
@@ -58,6 +106,7 @@ def extract(
     model: typing.Any = None,
     *,
     fetch_urls: bool = True,
+    images: typing.Sequence[typing.Any] | None = None,
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
@@ -154,6 +203,9 @@ def extract(
         URL string. When True (default), strings starting with http:// or
         https:// are fetched. When False, all strings are treated as literal
         text to analyze. This is a keyword-only parameter.
+      images: Optional images to attach to each prompt for multimodal-capable
+        models. Items may be `data.Image`, raw bytes (assumed PNG),
+        `(mime_type, bytes)`, or filesystem paths.
       prompt_validation_level: Controls pre-flight alignment checks on few-shot
         examples. OFF skips validation, WARNING logs issues but continues, ERROR
         raises on failures. Defaults to WARNING.
@@ -214,6 +266,8 @@ def extract(
       and io.is_url(text_or_documents)
   ):
     text_or_documents = io.download_text_from_url(text_or_documents)
+
+  normalized_images = _normalize_images(images)
 
   prompt_template = prompting.PromptTemplateStructured(
       description=prompt_description
@@ -344,6 +398,7 @@ def extract(
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,
+        images=normalized_images,
         **alignment_kwargs,
     )
     return result
@@ -360,6 +415,7 @@ def extract(
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,
+        images=normalized_images,
         **alignment_kwargs,
     )
     return list(result)

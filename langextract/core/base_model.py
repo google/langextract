@@ -101,6 +101,11 @@ class BaseLanguageModel(abc.ABC):
       return True
     return not schema_obj.requires_raw_output
 
+  @property
+  def supports_images(self) -> bool:
+    """Whether this provider supports image inputs."""
+    return False
+
   def merge_kwargs(
       self, runtime_kwargs: Mapping[str, Any] | None = None
   ) -> dict[str, Any]:

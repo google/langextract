@@ -12,22 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Core abstractions for LangExtract.
-
-This package contains the foundational base models and types used throughout
-LangExtract. Each module can be imported independently for fine-grained
-dependency management in build systems.
-"""
+"""Text sanitization helpers for robust model output parsing."""
 
 from __future__ import annotations
 
-__all__ = [
-    "base_model",
-    "types",
-    "exceptions",
-    "schema",
-    "data",
-    "tokenizer",
-    "json_lenient",
-    "text_sanitizer",
-]
+import re
+
+_BOM = "\ufeff"
+_NUL_RE = re.compile(r"\x00+")
+
+
+def sanitize_for_parsing(text: str) -> str:
+  """Best-effort cleanup for model outputs before parsing.
+
+  This intentionally avoids rewriting common whitespace like newlines or tabs.
+  """
+  if not text:
+    return text
+  out = text
+  if out.startswith(_BOM):
+    out = out.lstrip(_BOM)
+  out = _NUL_RE.sub("", out)
+  return out
+

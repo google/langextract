@@ -118,7 +118,9 @@ def extract(
       resolver_params: Parameters for the `resolver.Resolver`, which parses the
         raw language model output string (e.g., extracting JSON from ```json ...
         ``` blocks) into structured `data.Extraction` objects. This dictionary
-        overrides default settings. Keys include: - 'extraction_index_suffix'
+        overrides default settings. In non-strict mode, JSON parsing is
+        lenient and can tolerate some model quirks (e.g., unescaped control
+        characters inside strings). Keys include: - 'extraction_index_suffix'
         (str | None): Suffix for keys indicating extraction order. Default is
         None (order by appearance). Additional alignment parameters can be
         included: 'enable_fuzzy_alignment' (bool): Whether to use fuzzy matching

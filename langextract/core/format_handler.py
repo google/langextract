@@ -25,6 +25,7 @@ import yaml
 
 from langextract.core import data
 from langextract.core import exceptions
+from langextract.core import json_lenient
 
 ExtractionValueType = str | int | float | dict | list | None
 
@@ -263,7 +264,7 @@ class FormatHandler:
     try:
       if self.format_type == data.FormatType.YAML:
         return yaml.safe_load(content)
-      return json.loads(content)
+      return json.loads(content) if strict else json_lenient.loads(content)
     except (yaml.YAMLError, json.JSONDecodeError):
       if strict:
         raise
@@ -272,7 +273,7 @@ class FormatHandler:
         stripped = _THINK_TAG_RE.sub("", content).strip()
         if self.format_type == data.FormatType.YAML:
           return yaml.safe_load(stripped)
-        return json.loads(stripped)
+        return json_lenient.loads(stripped)
       raise
 
   def _extract_content(self, text: str) -> str:

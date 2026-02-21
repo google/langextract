@@ -305,6 +305,21 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
     self.assertLen(parsed, 1)
     self.assertEqual(parsed[0]["person"], "John Smith")
 
+  def test_lenient_json_allows_unescaped_control_characters(self):
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    # Invalid JSON (raw newline/tab inside the string) should still parse in
+    # non-strict mode via a strict=False decoder.
+    output = """{"extractions": [{"person": "Line1
+Line2\tEnd"}]}"""
+    parsed = handler.parse_output(output)
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["person"], "Line1\nLine2\tEnd")
+
 
 if __name__ == "__main__":
   absltest.main()

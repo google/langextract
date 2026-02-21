@@ -22,12 +22,15 @@ pylint warnings are expected for test fixtures.
 
 from unittest import mock
 
+import requests
+
 from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import exceptions
 from langextract.core import base_model
 from langextract.core import data
+from langextract.core import retry_utils
 from langextract.core import types
 from langextract.providers import gemini
 from langextract.providers import ollama
@@ -85,6 +88,37 @@ class TestBaseLanguageModel(absltest.TestCase):
         result,
         "merge_kwargs should work even without _extra_kwargs attribute",
     )
+
+
+class TestRetryUtils(absltest.TestCase):
+
+  def test_is_retryable_error_detects_status_code_attribute(self):
+    cfg = retry_utils.RetryConfig()
+    err = Exception("nope")
+    err.status_code = 503  # type: ignore[attr-defined]
+    self.assertTrue(retry_utils.is_retryable_error(err, cfg=cfg))
+
+  def test_is_retryable_error_detects_code_method(self):
+    class _E(Exception):
+
+      def code(self):
+        return 503
+
+    cfg = retry_utils.RetryConfig()
+    self.assertTrue(retry_utils.is_retryable_error(_E("x"), cfg=cfg))
+
+  def test_is_retryable_error_detects_http_error_response(self):
+    cfg = retry_utils.RetryConfig()
+    resp = mock.Mock()
+    resp.status_code = 503
+    http_err = requests.exceptions.HTTPError("fail")
+    http_err.response = resp  # type: ignore[attr-defined]
+    self.assertTrue(retry_utils.is_retryable_error(http_err, cfg=cfg))
+
+  def test_is_retryable_error_detects_message_substring(self):
+    cfg = retry_utils.RetryConfig()
+    err = Exception("503 The model is overloaded")
+    self.assertTrue(retry_utils.is_retryable_error(err, cfg=cfg))
 
 
 class TestOllamaLanguageModel(absltest.TestCase):
@@ -343,6 +377,30 @@ class TestOllamaLanguageModel(absltest.TestCase):
           "Timeout from constructor should flow through infer()",
       )
 
+  @mock.patch("requests.post")
+  def test_ollama_retries_on_retryable_status_codes(self, mock_post):
+    """503 responses should be retried when configured."""
+    resp_503 = mock.Mock()
+    resp_503.status_code = 503
+    http_err = requests.exceptions.HTTPError("service unavailable")
+    http_err.response = resp_503  # type: ignore[attr-defined]
+    resp_503.raise_for_status.side_effect = http_err
+
+    resp_200 = mock.Mock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = {"response": '{"ok": 1}', "done": True}
+
+    mock_post.side_effect = [resp_503, resp_200]
+
+    model = ollama.OllamaLanguageModel(
+        model_id="test-model",
+        retry={"max_attempts": 2, "initial_delay_s": 0.0, "jitter_ratio": 0.0},
+    )
+
+    results = list(model.infer(["prompt"]))
+    self.assertEqual(results[0][0].output, '{"ok": 1}')
+    self.assertEqual(mock_post.call_count, 2)
+
 
 class TestGeminiLanguageModel(absltest.TestCase):
 
@@ -520,6 +578,51 @@ class TestGeminiLanguageModel(absltest.TestCase):
         http_options=http_options,
     )
 
+  @mock.patch("google.genai.Client")
+  def test_gemini_retries_on_overloaded_errors(self, mock_client_class):
+    """503 overload errors should be retried when configured."""
+    mock_client = mock.Mock()
+    mock_client_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.text = '{"ok": 1}'
+    mock_client.models.generate_content.side_effect = [
+        Exception("503 The model is overloaded"),
+        mock_response,
+    ]
+
+    model = gemini.GeminiLanguageModel(
+        api_key="test-key",
+        retry={"max_attempts": 2, "initial_delay_s": 0.0, "jitter_ratio": 0.0},
+    )
+
+    results = list(model.infer(["prompt"]))
+    self.assertEqual(results[0][0].output, '{"ok": 1}')
+    self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+  @mock.patch("google.genai.Client")
+  def test_gemini_retry_disabled_does_not_retry(self, mock_client_class):
+    mock_client = mock.Mock()
+    mock_client_class.return_value = mock_client
+    mock_client.models.generate_content.side_effect = Exception(
+        "503 The model is overloaded"
+    )
+
+    model = gemini.GeminiLanguageModel(
+        api_key="test-key",
+        retry={
+            "enabled": False,
+            "max_attempts": 2,
+            "initial_delay_s": 0.0,
+            "jitter_ratio": 0.0,
+        },
+    )
+
+    with self.assertRaises(exceptions.InferenceRuntimeError):
+      list(model.infer(["prompt"]))
+
+    self.assertEqual(mock_client.models.generate_content.call_count, 1)
+
 
 class TestOpenAILanguageModelInference(parameterized.TestCase):
 
@@ -564,6 +667,29 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
         [types.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')]
     ]
     self.assertEqual(results, expected_results)
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_retries_on_retryable_errors(self, mock_openai_class):
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    retryable = Exception("service unavailable")
+    retryable.status_code = 503  # type: ignore[attr-defined]
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"ok": 1}'))
+    ]
+    mock_client.chat.completions.create.side_effect = [retryable, mock_response]
+
+    model = openai.OpenAILanguageModel(
+        api_key="test-api-key",
+        retry={"max_attempts": 2, "initial_delay_s": 0.0, "jitter_ratio": 0.0},
+    )
+
+    results = list(model.infer(["prompt"]))
+    self.assertEqual(results[0][0].output, '{"ok": 1}')
+    self.assertEqual(mock_client.chat.completions.create.call_count, 2)
 
 
 class TestOpenAILanguageModel(absltest.TestCase):

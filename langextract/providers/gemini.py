@@ -26,6 +26,7 @@ from absl import logging
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
+from langextract.core import retry_utils
 from langextract.core import schema
 from langextract.core import types as core_types
 from langextract.providers import gemini_batch
@@ -150,6 +151,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.max_workers = max_workers
     self.fence_output = fence_output
 
+    retry_cfg_dict = kwargs.pop('retry', None)
+    self._retry_cfg = retry_utils.RetryConfig.from_dict(retry_cfg_dict)
+
     # Extract batch config before we filter kwargs into _extra_kwargs
     batch_cfg_dict = kwargs.pop('batch', None)
     self._batch_cfg = gemini_batch.BatchConfig.from_dict(batch_cfg_dict)
@@ -214,8 +218,22 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         config.setdefault('response_mime_type', 'application/json')
         config.setdefault('response_schema', self.gemini_schema.schema_dict)
 
-      response = self._client.models.generate_content(
-          model=self.model_id, contents=prompt, config=config
+      def _call():
+        return self._client.models.generate_content(
+            model=self.model_id, contents=prompt, config=config
+        )
+
+      def _on_retry(attempt: int, err: BaseException, delay_s: float) -> None:
+        logging.warning(
+            "Gemini API transient error (attempt %d/%d): %s. Retrying in %.2fs",
+            attempt,
+            self._retry_cfg.max_attempts,
+            err,
+            delay_s,
+        )
+
+      response = retry_utils.call_with_retry(
+          _call, cfg=self._retry_cfg, on_retry=_on_retry
       )
 
       return core_types.ScoredOutput(score=1.0, output=response.text)

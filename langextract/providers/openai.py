@@ -21,9 +21,12 @@ import concurrent.futures
 import dataclasses
 from typing import Any, Iterator, Sequence
 
+from absl import logging
+
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
+from langextract.core import retry_utils
 from langextract.core import schema
 from langextract.core import types as core_types
 from langextract.providers import patterns
@@ -98,6 +101,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
+    retry_cfg_dict = kwargs.pop("retry", None)
+    self._retry_cfg = retry_utils.RetryConfig.from_dict(retry_cfg_dict)
 
     if not self.api_key:
       raise exceptions.InferenceConfigError('API key not provided.')
@@ -181,7 +186,21 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
         if (v := normalized_config.get(key)) is not None:
           api_params[key] = v
 
-      response = self._client.chat.completions.create(**api_params)
+      def _call():
+        return self._client.chat.completions.create(**api_params)
+
+      def _on_retry(attempt: int, err: BaseException, delay_s: float) -> None:
+        logging.warning(
+            "OpenAI API transient error (attempt %d/%d): %s. Retrying in %.2fs",
+            attempt,
+            self._retry_cfg.max_attempts,
+            err,
+            delay_s,
+        )
+
+      response = retry_utils.call_with_retry(
+          _call, cfg=self._retry_cfg, on_retry=_on_retry
+      )
 
       # Extract the response text using the v1.x response format
       output_text = response.choices[0].message.content

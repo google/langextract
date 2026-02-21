@@ -89,6 +89,7 @@ from urllib.parse import urljoin
 from urllib.parse import urlparse
 import warnings
 
+from absl import logging
 import requests
 
 # Import from core modules directly
@@ -96,6 +97,7 @@ from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
+from langextract.core import retry_utils
 from langextract.core import schema
 from langextract.core import types as core_types
 from langextract.providers import patterns
@@ -228,6 +230,8 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
     self._api_key = kwargs.pop('api_key', None)
     self._auth_scheme = kwargs.pop('auth_scheme', 'Bearer')
     self._auth_header = kwargs.pop('auth_header', 'Authorization')
+    retry_cfg_dict = kwargs.pop('retry', None)
+    self._retry_cfg = retry_utils.RetryConfig.from_dict(retry_cfg_dict)
 
     if self._api_key:
       host = urlparse(self._model_url).hostname
@@ -270,6 +274,8 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
             **combined_kwargs,
         )
         yield [core_types.ScoredOutput(score=1.0, output=response['response'])]
+      except exceptions.InferenceError:
+        raise
       except Exception as e:
         raise exceptions.InferenceRuntimeError(
             f'Ollama API error: {str(e)}', original=e
@@ -422,33 +428,56 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       else:
         headers[self._auth_header] = self._api_key
 
-    try:
-      response = self._requests.post(
-          api_url,
-          headers=headers,
-          json=payload,
-          timeout=request_timeout,
-      )
-    except self._requests.exceptions.RequestException as e:
-      if isinstance(e, self._requests.exceptions.ReadTimeout):
-        msg = (
-            f'Ollama Model timed out (timeout={request_timeout},'
-            f' num_threads={num_threads})'
+    def _call() -> Mapping[str, Any]:
+      try:
+        response = self._requests.post(
+            api_url,
+            headers=headers,
+            json=payload,
+            timeout=request_timeout,
         )
+      except self._requests.exceptions.RequestException as e:
+        if isinstance(e, self._requests.exceptions.ReadTimeout):
+          msg = (
+              f'Ollama Model timed out (timeout={request_timeout},'
+              f' num_threads={num_threads})'
+          )
+          raise exceptions.InferenceRuntimeError(
+              msg, original=e, provider='Ollama'
+          ) from e
         raise exceptions.InferenceRuntimeError(
-            msg, original=e, provider='Ollama'
+            f'Ollama request failed: {str(e)}', original=e, provider='Ollama'
         ) from e
-      raise exceptions.InferenceRuntimeError(
-          f'Ollama request failed: {str(e)}', original=e, provider='Ollama'
-      ) from e
 
-    response.encoding = 'utf-8'
-    if response.status_code == 200:
-      return response.json()
-    if response.status_code == 404:
-      raise exceptions.InferenceConfigError(
-          f"Can't find Ollama {model}. Try: ollama run {model}"
-      )
-    else:
+      response.encoding = 'utf-8'
+      if response.status_code == 200:
+        return response.json()
+      if response.status_code == 404:
+        raise exceptions.InferenceConfigError(
+            f"Can't find Ollama {model}. Try: ollama run {model}"
+        )
+
+      try:
+        response.raise_for_status()
+      except self._requests.exceptions.HTTPError as e:
+        raise exceptions.InferenceRuntimeError(
+            f'Bad status code from Ollama: {response.status_code}',
+            original=e,
+            provider='Ollama',
+        ) from e
+
       msg = f'Bad status code from Ollama: {response.status_code}'
       raise exceptions.InferenceRuntimeError(msg, provider='Ollama')
+
+    def _on_retry(attempt: int, err: BaseException, delay_s: float) -> None:
+      logging.warning(
+          "Ollama transient error (attempt %d/%d): %s. Retrying in %.2fs",
+          attempt,
+          self._retry_cfg.max_attempts,
+          err,
+          delay_s,
+      )
+
+    return retry_utils.call_with_retry(
+        _call, cfg=self._retry_cfg, on_retry=_on_retry
+    )

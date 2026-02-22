@@ -110,6 +110,9 @@ class AlignmentPolicy:
 
   enable_fuzzy_alignment: bool = True
   fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD
+  # Prompt validation runs before any model calls; keep fuzzy alignment bounded
+  # so long examples can't dominate runtime.
+  fuzzy_alignment_max_candidates: int | None = 250
   accept_match_lesser: bool = True
 
 
@@ -155,6 +158,7 @@ def validate_prompt_alignment(
         char_offset=0,
         enable_fuzzy_alignment=policy.enable_fuzzy_alignment,
         fuzzy_alignment_threshold=policy.fuzzy_alignment_threshold,
+        fuzzy_alignment_max_candidates=policy.fuzzy_alignment_max_candidates,
         accept_match_lesser=policy.accept_match_lesser,
         tokenizer_impl=tokenizer,
     )

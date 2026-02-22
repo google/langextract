@@ -390,6 +390,38 @@ class PromptAlignmentValidationTest(parameterized.TestCase):
     self.assertEqual(report.has_failed, expected_has_failed)
     self.assertEqual(report.has_non_exact, expected_has_non_exact)
 
+  def test_long_examples_do_not_hang_fuzzy_alignment(self):
+    """Regression test for long examples causing very slow fuzzy alignment."""
+    words = [f"w{i}" for i in range(3000)]
+    # Add a plural token that will only match after normalization.
+    words[2500] = "hamstrings"
+    long_text = " ".join(words)
+
+    # Prefix with an out-of-source token so exact/lesser matching won't align.
+    extraction_tokens = ["prefix"] + words[2480:2520]
+    extraction_tokens[1 + (2500 - 2480)] = "hamstring"  # singular form
+    extraction_text = " ".join(extraction_tokens)
+
+    example = data.ExampleData(
+        text=long_text,
+        extractions=[
+            data.Extraction(
+                extraction_class="Quote",
+                extraction_text=extraction_text,
+                attributes={},
+            )
+        ],
+    )
+
+    report = prompt_validation.validate_prompt_alignment([example])
+
+    self.assertFalse(report.has_failed)
+    self.assertTrue(report.has_non_exact)
+    self.assertLen(report.issues, 1)
+    self.assertEqual(
+        report.issues[0].alignment_status, data.AlignmentStatus.MATCH_FUZZY
+    )
+
 
 class ExtractIntegrationTest(absltest.TestCase):
   """Minimal integration test for extract() entry point validation."""

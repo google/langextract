@@ -34,10 +34,14 @@ from absl import logging
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
+from langextract.core import fuzzy_alignment as fuzzy_alignment_lib
 from langextract.core import schema
 from langextract.core import tokenizer as tokenizer_lib
 
 _FUZZY_ALIGNMENT_MIN_THRESHOLD = 0.75
+_FUZZY_ALIGNMENT_EXHAUSTIVE_MAX_WINDOWS = 200_000
+_DEFAULT_FUZZY_ALIGNMENT_MAX_CANDIDATES = 250
+_DEFAULT_FUZZY_ALIGNMENT_MAX_ANCHOR_OCCURRENCES = 64
 
 # Default suffix for extraction index keys (e.g., "entity_index")
 DEFAULT_INDEX_SUFFIX = "_index"  # Suffix for index fields in extraction sorting
@@ -45,6 +49,7 @@ DEFAULT_INDEX_SUFFIX = "_index"  # Suffix for index fields in extraction sorting
 ALIGNMENT_PARAM_KEYS: Final[frozenset[str]] = frozenset({
     "enable_fuzzy_alignment",
     "fuzzy_alignment_threshold",
+    "fuzzy_alignment_max_candidates",
     "accept_match_lesser",
     "suppress_parse_errors",
 })
@@ -128,6 +133,7 @@ class AbstractResolver(abc.ABC):
       char_offset: int | None = None,
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
+      fuzzy_alignment_max_candidates: int | None = None,
       accept_match_lesser: bool = True,
       **kwargs,
   ) -> Iterator[data.Extraction]:
@@ -284,6 +290,7 @@ class Resolver(AbstractResolver):
       char_offset: int | None = None,
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
+      fuzzy_alignment_max_candidates: int | None = None,
       accept_match_lesser: bool = True,
       tokenizer_inst: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
@@ -304,6 +311,8 @@ class Resolver(AbstractResolver):
       enable_fuzzy_alignment: Whether to enable fuzzy alignment fallback.
       fuzzy_alignment_threshold: Minimum overlap ratio required for fuzzy
         alignment.
+      fuzzy_alignment_max_candidates: Optional cap on the number of candidate
+        starts evaluated by the fast-path fuzzy aligner.
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
         status).
       tokenizer_inst: Optional tokenizer instance.
@@ -331,6 +340,7 @@ class Resolver(AbstractResolver):
         char_offset or 0,
         enable_fuzzy_alignment=enable_fuzzy_alignment,
         fuzzy_alignment_threshold=fuzzy_alignment_threshold,
+        fuzzy_alignment_max_candidates=fuzzy_alignment_max_candidates,
         accept_match_lesser=accept_match_lesser,
         tokenizer_impl=tokenizer_inst,
     )
@@ -543,6 +553,7 @@ class WordAligner:
       char_offset: int,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
+      fuzzy_alignment_max_candidates: int | None = None,
   ) -> data.Extraction | None:
     """Fuzzy-align an extraction using difflib.SequenceMatcher on tokens.
 
@@ -561,6 +572,8 @@ class WordAligner:
       char_offset: The character offset of the current chunk.
       fuzzy_alignment_threshold: The minimum ratio for a fuzzy match.
       tokenizer_impl: Optional tokenizer instance.
+      fuzzy_alignment_max_candidates: Optional cap on the number of candidate
+        starts evaluated by the fast-path fuzzy aligner.
 
     Returns:
       The aligned data.Extraction if successful, None otherwise.
@@ -588,6 +601,57 @@ class WordAligner:
 
     len_e = len(extraction_tokens)
     max_window = len(source_tokens)
+
+    if len_e > max_window:
+      return None
+
+    windows_to_check = (
+        (max_window - len_e + 1) * (max_window - len_e + 2) // 2
+        if max_window >= len_e
+        else 0
+    )
+
+    if windows_to_check > _FUZZY_ALIGNMENT_EXHAUSTIVE_MAX_WINDOWS:
+      max_candidates = (
+          fuzzy_alignment_max_candidates
+          if fuzzy_alignment_max_candidates is not None
+          else _DEFAULT_FUZZY_ALIGNMENT_MAX_CANDIDATES
+      )
+      best = fuzzy_alignment_lib.find_best_fuzzy_span(
+          source_tokens=[_normalize_token(t) for t in source_tokens],
+          extraction_tokens=extraction_tokens_norm,
+          max_candidates=max_candidates,
+          max_anchor_occurrences=_DEFAULT_FUZZY_ALIGNMENT_MAX_ANCHOR_OCCURRENCES,
+      )
+      if best is None:
+        return None
+
+      start_idx, end_idx, matched = best
+      ratio = matched / len_e
+      if ratio < fuzzy_alignment_threshold:
+        return None
+
+      window_size = end_idx - start_idx
+      try:
+        extraction.token_interval = tokenizer_lib.TokenInterval(
+            start_index=start_idx + token_offset,
+            end_index=start_idx + window_size + token_offset,
+        )
+
+        start_token = tokenized_text.tokens[start_idx]
+        end_token = tokenized_text.tokens[start_idx + window_size - 1]
+        extraction.char_interval = data.CharInterval(
+            start_pos=char_offset + start_token.char_interval.start_pos,
+            end_pos=char_offset + end_token.char_interval.end_pos,
+        )
+
+        extraction.alignment_status = data.AlignmentStatus.MATCH_FUZZY
+        return extraction
+      except IndexError:
+        logging.exception(
+            "Index error while setting intervals during fuzzy alignment."
+        )
+        return None
 
     extraction_counts = collections.Counter(extraction_tokens_norm)
     min_overlap = int(len_e * fuzzy_alignment_threshold)
@@ -669,6 +733,7 @@ class WordAligner:
       delim: str = "\u241F",  # Unicode Symbol for unit separator
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
+      fuzzy_alignment_max_candidates: int | None = None,
       accept_match_lesser: bool = True,
       tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
   ) -> Sequence[Sequence[data.Extraction]]:
@@ -695,6 +760,8 @@ class WordAligner:
         fails.
       fuzzy_alignment_threshold: Minimum token overlap ratio for fuzzy alignment
         (0-1).
+      fuzzy_alignment_max_candidates: Optional cap on the number of candidate
+        starts evaluated by the fast-path fuzzy aligner.
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
         status).
       tokenizer_impl: Optional tokenizer instance.
@@ -854,6 +921,7 @@ class WordAligner:
             char_offset,
             fuzzy_alignment_threshold,
             tokenizer_impl=tokenizer_impl,
+            fuzzy_alignment_max_candidates=fuzzy_alignment_max_candidates,
         )
         if aligned_extraction:
           aligned_extractions.append(aligned_extraction)

@@ -25,6 +25,7 @@ import yaml
 
 from langextract.core import data
 from langextract.core import exceptions
+from langextract.core import refusal
 
 ExtractionValueType = str | int | float | dict | list | None
 
@@ -72,6 +73,7 @@ class FormatHandler:
       attribute_suffix: str = data.ATTRIBUTE_SUFFIX,
       strict_fences: bool = False,
       allow_top_level_list: bool = True,
+      treat_refusals_as_empty: bool = True,
   ) -> None:
     """Initialize format handler.
 
@@ -89,6 +91,8 @@ class FormatHandler:
         with model output variations.
       allow_top_level_list: Allow top-level list when not strict and
         wrapper not required.
+      treat_refusals_as_empty: If True, treat common refusal/no-entity plain
+        text responses as an empty extraction list.
     """
     self.format_type = format_type
     self.use_wrapper = use_wrapper
@@ -102,6 +106,7 @@ class FormatHandler:
     self.attribute_suffix = attribute_suffix
     self.strict_fences = strict_fences
     self.allow_top_level_list = allow_top_level_list
+    self.treat_refusals_as_empty = treat_refusals_as_empty
 
   def __repr__(self) -> str:
     return (
@@ -110,7 +115,8 @@ class FormatHandler:
         f"wrapper_key={self.wrapper_key!r}, use_fences={self.use_fences}, "
         f"attribute_suffix={self.attribute_suffix!r}, "
         f"strict_fences={self.strict_fences}, "
-        f"allow_top_level_list={self.allow_top_level_list})"
+        f"allow_top_level_list={self.allow_top_level_list}, "
+        f"treat_refusals_as_empty={self.treat_refusals_as_empty})"
     )
 
   def format_extraction_example(
@@ -170,10 +176,14 @@ class FormatHandler:
       raise exceptions.FormatParseError("Empty or invalid input string.")
 
     content = self._extract_content(text)
+    if self.treat_refusals_as_empty and refusal.looks_like_refusal(content):
+      return []
 
     try:
       parsed = self._parse_with_fallback(content, strict)
     except (yaml.YAMLError, json.JSONDecodeError) as e:
+      if self.treat_refusals_as_empty and refusal.looks_like_refusal(content):
+        return []
       msg = (
           f"Failed to parse {self.format_type.value.upper()} content:"
           f" {str(e)[:200]}"
@@ -222,6 +232,8 @@ class FormatHandler:
       # Some models return [...] instead of {"extractions": [...]}.
       items = parsed
     else:
+      if self.treat_refusals_as_empty and refusal.looks_like_refusal(content):
+        return []
       raise exceptions.FormatParseError(
           f"Expected list or dict, got {type(parsed)}"
       )

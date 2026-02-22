@@ -22,6 +22,7 @@ from absl.testing import parameterized
 from langextract import prompting
 from langextract import resolver
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import format_handler
 
 
@@ -206,6 +207,62 @@ class FormatHandlerTest(parameterized.TestCase):
     self.assertEqual(
         extractions[0].extraction_text, "Bob", "Extraction text should be 'Bob'"
     )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="json_refusal_plain_text",
+          handler=format_handler.FormatHandler(
+              format_type=data.FormatType.JSON,
+              use_wrapper=True,
+              wrapper_key="extractions",
+              use_fences=True,
+          ),
+          model_output="No entities found in this chunk.",
+      ),
+      dict(
+          testcase_name="json_refusal_fenced",
+          handler=format_handler.FormatHandler(
+              format_type=data.FormatType.JSON,
+              use_wrapper=True,
+              wrapper_key="extractions",
+              use_fences=True,
+          ),
+          model_output="```json\nI'm sorry, I can't find any entities.\n```",
+      ),
+      dict(
+          testcase_name="yaml_refusal_plain_text",
+          handler=format_handler.FormatHandler(
+              format_type=data.FormatType.YAML,
+              use_wrapper=True,
+              wrapper_key="extractions",
+              use_fences=False,
+          ),
+          model_output="None found.",
+      ),
+  )
+  def test_parse_refusal_returns_empty_list(self, handler, model_output):
+    parsed = handler.parse_output(model_output)
+    self.assertEmpty(parsed)
+
+  def test_parse_non_refusal_plain_text_still_raises(self):
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    with self.assertRaises(exceptions.FormatParseError):
+      handler.parse_output("Hello world")
+
+  def test_parse_malformed_json_still_raises(self):
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    with self.assertRaises(exceptions.FormatParseError):
+      handler.parse_output('{"extractions": [')
 
   @parameterized.named_parameters(
       dict(

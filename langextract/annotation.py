@@ -40,6 +40,7 @@ from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
+from langextract.core import refusal as refusal_lib
 from langextract.core import tokenizer as tokenizer_lib
 
 
@@ -399,9 +400,21 @@ class Annotator:
                 "No scored outputs from language model."
             )
 
+          output_text = scored_outputs[0].output or ""
           resolved_extractions = resolver.resolve(
-              scored_outputs[0].output, debug=debug, **kwargs
+              output_text, debug=debug, **kwargs
           )
+          if (
+              debug
+              and not resolved_extractions
+              and refusal_lib.looks_like_refusal(output_text)
+          ):
+            logging.info(
+                "Chunk produced refusal-like output; treating as empty "
+                "extractions. document_id=%s char_interval=%s",
+                text_chunk.document_id,
+                text_chunk.char_interval,
+            )
 
           token_offset = (
               text_chunk.token_interval.start_index

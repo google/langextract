@@ -21,6 +21,7 @@ import warnings
 from absl.testing import absltest
 from absl.testing import parameterized
 
+from langextract import prompt_validation
 from langextract import prompting
 import langextract as lx
 from langextract.core import base_model
@@ -154,6 +155,63 @@ class InitTest(parameterized.TestCase):
     )
 
     self.assertDataclassEqual(expected_result, actual_result)
+
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_treats_refusal_chunks_as_empty(self, mock_create_model):
+    """Chunks that return refusal text should not fail the whole extraction."""
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = False
+    mock_model.schema = None
+
+    good = [[
+        types.ScoredOutput(
+            output=(
+                '{"extractions":[{"entity":"Aspirin","entity_attributes":{}}]}'
+            ),
+            score=1.0,
+        )
+    ]]
+    refusal = [[types.ScoredOutput(output="No entities found.", score=1.0)]]
+
+    calls = {"n": 0}
+
+    def infer_side_effect(batch_prompts, **kwargs):  # pylint: disable=unused-argument
+      calls["n"] += 1
+      return good if calls["n"] == 1 else refusal
+
+    mock_model.infer.side_effect = infer_side_effect
+    mock_create_model.return_value = mock_model
+
+    examples = [
+        lx.data.ExampleData(
+            text="Aspirin helps.",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="Aspirin",
+                    attributes={},
+                )
+            ],
+        )
+    ]
+
+    text = "Aspirin helps. " + ("filler " * 200)
+    result = lx.extract(
+        text_or_documents=text,
+        prompt_description="Extract entities.",
+        examples=examples,
+        api_key="test_key",
+        use_schema_constraints=False,
+        max_char_buffer=20,
+        batch_length=1,
+        show_progress=False,
+        prompt_validation_level=prompt_validation.PromptValidationLevel.OFF,
+    )
+
+    self.assertGreaterEqual(mock_model.infer.call_count, 2)
+    self.assertTrue(
+        any(e.extraction_text == "Aspirin" for e in result.extractions)
+    )
 
   @mock.patch("langextract.extraction.resolver.Resolver.align")
   @mock.patch("langextract.extraction.factory.create_model")

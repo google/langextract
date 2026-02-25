@@ -1,4 +1,3 @@
-# Copyright 2025 Google LLC.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -145,16 +144,30 @@ class TokenizedText:
   tokens: list[Token] = dataclasses.field(default_factory=list)
 
 
-_LETTERS_PATTERN = r"[^\W\d_]+"
+# CJK Scripts that typically don't use spaces but should be separated from Latin
+_CJK_SCRIPTS = r"\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}"
+
+# Enhanced logic: "Word chars" MINUS "CJK chars".
+# This prevents "Hello世界" from being one token. instead: "Hello" and "世界".
+# Requires regex V1 flag for set subtraction operations.
+_LETTERS_PATTERN = rf"[[^\W\d_]--[{_CJK_SCRIPTS}]]+"
 _DIGITS_PATTERN = r"\d+"
 # Group identical symbols (e.g. "!!") but split mixed ones.
 _SYMBOLS_PATTERN = r"([^\w\s]|_)\1*"
+# CJK characters are treated as their own group of "letters"
+_CJK_PATTERN = rf"[{_CJK_SCRIPTS}]+"
+
 _END_OF_SENTENCE_PATTERN = regex.compile(r"[.?!。！？\u0964][\"'”’»)\]}]*$")
 
 _TOKEN_PATTERN = regex.compile(
-    rf"{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_SYMBOLS_PATTERN}"
+    rf"{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_CJK_PATTERN}|{_SYMBOLS_PATTERN}",
+    flags=regex.V1,
 )
-_WORD_PATTERN = regex.compile(rf"(?:{_LETTERS_PATTERN}|{_DIGITS_PATTERN})\Z")
+_WORD_PATTERN = regex.compile(
+    rf"(?:{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_CJK_PATTERN})\Z",
+    flags=regex.V1,
+)
+
 
 # Abbreviations that do not end sentences.
 # TODO: Evaluate removal for large-context use cases.

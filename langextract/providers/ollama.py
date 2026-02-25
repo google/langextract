@@ -79,6 +79,7 @@ Prerequisites:
     2. Pull the model: ollama pull gemma2:2b
     3. Ollama server will start automatically when you use extract()
 """
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
@@ -252,11 +253,20 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
     Args:
       batch_prompts: A list of string prompts.
       **kwargs: Additional generation params.
+        `collect_usage` (bool, optional): When True, include token usage in
+        returned `ScoredOutput`. When omitted, usage is auto-collected only if
+        an enabled observer is attached to this model.
 
     Yields:
       Lists of ScoredOutputs.
     """
     combined_kwargs = self.merge_kwargs(kwargs)
+    collect_usage = combined_kwargs.pop('collect_usage', None)
+    if collect_usage is None:
+      observer = getattr(self, '_observer', None)
+      collect_usage = bool(
+          observer is not None and getattr(observer, 'enabled', True)
+      )
 
     for prompt in batch_prompts:
       try:
@@ -269,11 +279,51 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
             model_url=self._model_url,
             **combined_kwargs,
         )
-        yield [core_types.ScoredOutput(score=1.0, output=response['response'])]
+        usage = self._extract_usage(response) if collect_usage else None
+        yield [
+            core_types.ScoredOutput(
+                score=1.0,
+                output=response['response'],
+                usage=usage,
+            )
+        ]
       except Exception as e:
         raise exceptions.InferenceRuntimeError(
             f'Ollama API error: {str(e)}', original=e
         ) from e
+
+  @staticmethod
+  def _extract_usage(
+      response: Mapping[str, Any],
+  ) -> core_types.TokenUsage | None:
+    """Extract token usage from Ollama response payload."""
+    prompt_tokens = response.get('prompt_eval_count')
+    completion_tokens = response.get('eval_count')
+    if prompt_tokens is None and completion_tokens is None:
+      return None
+
+    total = None
+    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+      total = prompt_tokens + completion_tokens
+
+    details = {}
+    for key in (
+        'prompt_eval_duration',
+        'eval_duration',
+        'total_duration',
+        'load_duration',
+        'done_reason',
+    ):
+      value = response.get(key)
+      if value is not None:
+        details[key] = value
+
+    return core_types.TokenUsage(
+        input_tokens=prompt_tokens,
+        output_tokens=completion_tokens,
+        total_tokens=total,
+        provider_details=details or None,
+    )
 
   def _ollama_query(
       self,

@@ -18,6 +18,7 @@ Note: This file tests the deprecated registry module which is now an alias
 for router. The no-name-in-module warning for providers.registry is expected.
 Test helper classes also intentionally have few public methods.
 """
+
 # pylint: disable=no-name-in-module
 
 import re

@@ -20,6 +20,7 @@
 - [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
 - [Adding Custom Model Providers](#adding-custom-model-providers)
 - [Using OpenAI Models](#using-openai-models)
+- [Optional Observability with Langfuse](#optional-observability-with-langfuse)
 - [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
 - [More Examples](#more-examples)
   - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
@@ -320,6 +321,47 @@ result = lx.extract(
 ```
 
 Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
+
+## Optional Observability with Langfuse
+
+LangExtract supports optional observability via Langfuse. This is disabled by
+default and does not affect extraction when not configured.
+
+Install optional dependency:
+
+```bash
+pip install "langextract[langfuse]"
+```
+
+Configure and attach observer:
+
+```python
+import os
+import langextract as lx
+
+observer = lx.observability.create_observer(
+    provider="langfuse",
+    provider_kwargs={
+        "public_key": os.getenv("LANGFUSE_PUBLIC_KEY"),
+        "secret_key": os.getenv("LANGFUSE_SECRET_KEY"),
+        "base_url": os.getenv("LANGFUSE_BASE_URL"),
+        "host": os.getenv("LANGFUSE_HOST"),
+    },
+)
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="gemini-2.5-flash",
+    observer=observer,  # Optional
+)
+```
+
+You can also attach the observer when creating a model via
+`lx.factory.create_model(config, observer=observer)`.
+For stable trace/session grouping, pass explicit document IDs using
+`lx.data.Document(text=..., document_id="your-doc-id")`.
 
 ## Using Local LLMs with Ollama
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:

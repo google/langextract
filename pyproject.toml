@@ -57,7 +57,8 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["openai>=1.50.0"]
-all = ["openai>=1.50.0"]
+langfuse = ["langfuse>=3.0.0"]
+all = ["openai>=1.50.0", "langfuse>=3.0.0"]
 dev = [
     "pyink~=24.3.0",
     "isort>=5.13.0",

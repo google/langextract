@@ -13,14 +13,17 @@
 # limitations under the License.
 
 """Core data types for LangExtract."""
+
 from __future__ import annotations
 
 import dataclasses
 import enum
 import textwrap
+from typing import Any
 
 __all__ = [
     'ScoredOutput',
+    'TokenUsage',
     'FormatType',
     'ConstraintType',
     'Constraint',
@@ -52,11 +55,23 @@ class Constraint:
 
 
 @dataclasses.dataclass(frozen=True)
+class TokenUsage:
+  """Token usage information for a single generation."""
+
+  input_tokens: int | None = None
+  output_tokens: int | None = None
+  total_tokens: int | None = None
+  provider_details: dict[str, Any] | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class ScoredOutput:
   """Scored output from language model inference."""
 
   score: float | None = None
   output: str | None = None
+  usage: TokenUsage | None = None
+  metadata: dict[str, Any] | None = None
 
   def __str__(self) -> str:
     score_str = '-' if self.score is None else f'{self.score:.2f}'

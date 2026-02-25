@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """OpenAI provider for LangExtract."""
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
@@ -185,13 +186,49 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
 
       # Extract the response text using the v1.x response format
       output_text = response.choices[0].message.content
+      usage = self._extract_usage(response)
 
-      return core_types.ScoredOutput(score=1.0, output=output_text)
+      return core_types.ScoredOutput(
+          score=1.0,
+          output=output_text,
+          usage=usage,
+      )
 
     except Exception as e:
       raise exceptions.InferenceRuntimeError(
           f'OpenAI API error: {str(e)}', original=e
       ) from e
+
+  @staticmethod
+  def _extract_usage(response: Any) -> core_types.TokenUsage | None:
+    """Extract token usage from OpenAI response object."""
+    usage_obj = getattr(response, 'usage', None)
+    if usage_obj is None:
+      return None
+
+    def _int_or_none(value: Any) -> int | None:
+      if isinstance(value, bool):
+        return None
+      return value if isinstance(value, int) else None
+
+    prompt_tokens = _int_or_none(getattr(usage_obj, 'prompt_tokens', None))
+    completion_tokens = _int_or_none(
+        getattr(usage_obj, 'completion_tokens', None)
+    )
+    total_tokens = _int_or_none(getattr(usage_obj, 'total_tokens', None))
+
+    if (
+        prompt_tokens is None
+        and completion_tokens is None
+        and total_tokens is None
+    ):
+      return None
+
+    return core_types.TokenUsage(
+        input_tokens=prompt_tokens,
+        output_tokens=completion_tokens,
+        total_tokens=total_tokens,
+    )
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs

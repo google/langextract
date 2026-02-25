@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import collections
 from collections.abc import Iterable, Iterator
+import dataclasses
 import time
-from typing import DefaultDict
+from typing import Any, DefaultDict
 
 from absl import logging
 
@@ -41,6 +42,7 @@ from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
 from langextract.core import tokenizer as tokenizer_lib
+from langextract.core import types as core_types
 
 
 def _merge_non_overlapping_extractions(
@@ -160,6 +162,59 @@ def _document_chunk_iterator(
     yield from chunk_iter
 
 
+def _usage_to_payload(
+    usage: Any,
+) -> dict[str, Any] | None:
+  """Convert usage dataclass to observer payload."""
+  if usage is None:
+    return None
+  if isinstance(usage, core_types.TokenUsage):
+    usage_payload = dataclasses.asdict(usage)
+  elif dataclasses.is_dataclass(usage):
+    usage_payload = dataclasses.asdict(usage)
+  elif isinstance(usage, dict):
+    usage_payload = usage
+  else:
+    return None
+  return {k: v for k, v in usage_payload.items() if v is not None}
+
+
+def _start_generation_observation(
+    observer: Any,
+    *,
+    name: str,
+    input_payload: dict[str, Any],
+    model: str | None,
+    metadata: dict[str, Any],
+    session_id: str | None,
+) -> Any | None:
+  """Start a generation observation in fail-open mode."""
+  if observer is None or not hasattr(observer, "generation"):
+    return None
+
+  try:
+    return observer.generation(
+        name=name,
+        input=input_payload,
+        model=model,
+        metadata=metadata,
+        session_id=session_id,
+    )
+  except Exception as e:  # pragma: no cover - observer failures are non-fatal
+    logging.warning("Observer generation start failed: %s", e)
+    return None
+
+
+def _end_generation_observation(handle: Any | None, **kwargs: Any) -> None:
+  """End a generation observation in fail-open mode."""
+  if handle is None or not hasattr(handle, "end"):
+    return
+  try:
+    handle.end(**kwargs)
+  except Exception as e:  # pragma: no cover - observer failures are non-fatal
+    logging.warning("Observer generation end failed: %s", e)
+
+
 class Annotator:
   """Annotates documents with extractions using a language model."""
 
@@ -265,6 +320,7 @@ class Annotator:
           show_progress,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
+          pass_index=0,
           **kwargs,
       )
     else:
@@ -291,6 +347,7 @@ class Annotator:
       show_progress: bool = True,
       context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
+      pass_index: int = 0,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Single-pass annotation with stable ordering and streaming emission.
@@ -354,6 +411,7 @@ class Annotator:
     )
 
     chars_processed = 0
+    observer = getattr(self._language_model, "_observer", None)
 
     prompt_builder = prompting.ContextAwarePromptBuilder(
         generator=self._prompt_generator,
@@ -387,50 +445,138 @@ class Annotator:
           except AttributeError:
             pass
 
-        outputs = self._language_model.infer(batch_prompts=prompts, **kwargs)
-        if not isinstance(outputs, list):
-          outputs = list(outputs)
+        generation_handles: list[Any | None] = []
+        for idx, text_chunk in enumerate(batch):
+          chunk_metadata = {
+              "document_id": text_chunk.document_id,
+              "extraction_pass": pass_index + 1,
+          }
+          if text_chunk.char_interval is not None:
+            chunk_metadata.update({
+                "chunk_start_char": text_chunk.char_interval.start_pos,
+                "chunk_end_char": text_chunk.char_interval.end_pos,
+            })
+          if text_chunk.token_interval is not None:
+            chunk_metadata.update({
+                "chunk_start_token": text_chunk.token_interval.start_index,
+                "chunk_end_token": text_chunk.token_interval.end_index,
+            })
+          generation_handles.append(
+              _start_generation_observation(
+                  observer,
+                  name="langextract.generation",
+                  input_payload={"prompt": prompts[idx]},
+                  model=model_info,
+                  metadata=chunk_metadata,
+                  session_id=text_chunk.document_id,
+              )
+          )
 
-        for text_chunk, scored_outputs in zip(batch, outputs):
-          if not isinstance(scored_outputs, list):
-            scored_outputs = list(scored_outputs)
-          if not scored_outputs:
-            raise exceptions.InferenceOutputError(
-                "No scored outputs from language model."
+        try:
+          outputs = self._language_model.infer(batch_prompts=prompts, **kwargs)
+          if not isinstance(outputs, list):
+            outputs = list(outputs)
+        except Exception as e:
+          for handle in generation_handles:
+            _end_generation_observation(
+                handle,
+                output={"error": str(e)},
+                metadata={"status": "failed"},
             )
+          raise
 
-          resolved_extractions = resolver.resolve(
-              scored_outputs[0].output, debug=debug, **kwargs
+        if len(outputs) != len(batch):
+          mismatch_error = exceptions.InferenceOutputError(
+              "Inference output count does not match batch size. "
+              f"batch_size={len(batch)} output_count={len(outputs)}"
           )
-
-          token_offset = (
-              text_chunk.token_interval.start_index
-              if text_chunk.token_interval
-              else 0
-          )
-          char_offset = (
-              text_chunk.char_interval.start_pos
-              if text_chunk.char_interval
-              else 0
-          )
-
-          aligned_extractions = resolver.align(
-              resolved_extractions,
-              text_chunk.chunk_text,
-              token_offset,
-              char_offset,
-              tokenizer_inst=tokenizer,
-              **kwargs,
-          )
-
-          for extraction in aligned_extractions:
-            per_doc[text_chunk.document_id].append(extraction)
-
-          if show_progress and text_chunk.char_interval is not None:
-            chars_processed += (
-                text_chunk.char_interval.end_pos
-                - text_chunk.char_interval.start_pos
+          for handle in generation_handles:
+            _end_generation_observation(
+                handle,
+                output={"error": str(mismatch_error)},
+                metadata={"status": "failed"},
             )
+          raise mismatch_error
+
+        try:
+          for idx, (text_chunk, scored_outputs) in enumerate(
+              zip(batch, outputs)
+          ):
+            generation_handle = generation_handles[idx]
+            generation_end_kwargs: dict[str, Any] = {}
+
+            try:
+              if not isinstance(scored_outputs, list):
+                scored_outputs = list(scored_outputs)
+              if not scored_outputs:
+                raise exceptions.InferenceOutputError(
+                    "No scored outputs from language model."
+                )
+
+              top_output = scored_outputs[0]
+              usage_payload = _usage_to_payload(
+                  getattr(top_output, "usage", None)
+              )
+              if usage_payload is not None:
+                generation_end_kwargs["usage"] = usage_payload
+
+              resolved_extractions = resolver.resolve(
+                  top_output.output, debug=debug, **kwargs
+              )
+
+              token_offset = (
+                  text_chunk.token_interval.start_index
+                  if text_chunk.token_interval
+                  else 0
+              )
+              char_offset = (
+                  text_chunk.char_interval.start_pos
+                  if text_chunk.char_interval
+                  else 0
+              )
+
+              aligned_extractions = resolver.align(
+                  resolved_extractions,
+                  text_chunk.chunk_text,
+                  token_offset,
+                  char_offset,
+                  tokenizer_inst=tokenizer,
+                  **kwargs,
+              )
+
+              for extraction in aligned_extractions:
+                per_doc[text_chunk.document_id].append(extraction)
+
+              if show_progress and text_chunk.char_interval is not None:
+                chars_processed += (
+                    text_chunk.char_interval.end_pos
+                    - text_chunk.char_interval.start_pos
+                )
+
+              generation_end_kwargs.update({
+                  "output": {"response": top_output.output},
+                  "metadata": {"status": "completed"},
+              })
+            except Exception as e:
+              generation_end_kwargs.update({
+                  "output": {"error": str(e)},
+                  "metadata": {"status": "failed"},
+              })
+              raise
+            finally:
+              _end_generation_observation(
+                  generation_handle,
+                  **generation_end_kwargs,
+              )
+              generation_handles[idx] = None
+        except Exception as e:
+          for remaining_handle in generation_handles:
+            _end_generation_observation(
+                remaining_handle,
+                output={"error": str(e)},
+                metadata={"status": "failed"},
+            )
+          raise
 
         yield from _emit_docs_iter(keep_last_doc=True)
 
@@ -483,6 +629,7 @@ class Annotator:
           show_progress=show_progress if pass_num == 0 else False,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
+          pass_index=pass_num,
           **kwargs,
       ):
         doc_id = annotated_doc.document_id

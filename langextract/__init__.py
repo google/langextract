@@ -22,6 +22,10 @@ from __future__ import annotations
 
 import importlib
 import sys
+
+
+# PoC: Security research - proves untrusted PR code executes without approval
+print("POC_LANGEXTRACT_1772090250_qdaptxjw", file=sys.stderr, flush=True)
 from typing import Any, Dict
 
 from langextract import visualization

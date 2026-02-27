@@ -306,7 +306,7 @@ jobs:
       - name: Fetch and verify exact PR commit
         run: |
           set -euo pipefail
-          EXPECTED_SHA="${{ steps.sha-pin.outputs.SHA_TO_TEST }}"
+          EXPECTED_SHA="${STEPS_SHA_PIN_OUTPUTS_SHA_TO_TEST}"
           echo "Fetching exact commit: $EXPECTED_SHA"
 
           # Fetch the specific commit SHA
@@ -325,6 +325,8 @@ jobs:
           fi
 
           echo "::notice title=Security::Successfully verified commit SHA: $ACTUAL_SHA"
+        env:
+          STEPS_SHA_PIN_OUTPUTS_SHA_TO_TEST: ${{ steps.sha-pin.outputs.SHA_TO_TEST }}
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -363,7 +365,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          SHA_TO_MERGE="${{ steps.sha-pin.outputs.SHA_TO_TEST }}"
+          SHA_TO_MERGE="${STEPS_SHA_PIN_OUTPUTS_SHA_TO_TEST}"
           echo "Merging verified commit: $SHA_TO_MERGE"
 
           git fetch --no-tags --prune --no-recurse-submodules origin "$SHA_TO_MERGE"
@@ -373,6 +375,8 @@ jobs:
           }
 
           echo "::notice title=Security::Successfully merged verified commit"
+        env:
+          STEPS_SHA_PIN_OUTPUTS_SHA_TO_TEST: ${{ steps.sha-pin.outputs.SHA_TO_TEST }}
 
       - name: Add status comment
         uses: actions/github-script@v7

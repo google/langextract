@@ -1,0 +1,11 @@
+# Code owners for LangExtract
+# Use paths relative to repository root
+
+# Core maintainers
+* @ashrafndyana
+
+# Providers code
+langextract/providers/ @ashrafndyana
+
+# Tests and CI
+tests/ .github/ @ashrafndyana

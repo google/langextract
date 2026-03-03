@@ -68,8 +68,8 @@ def _kwargs_with_environment_defaults(
     model_lower = model_id.lower()
     novita_model_markers = (
         "deepseek/deepseek-v3.2",
-        "minimax-minimax-m2.5",
-        "zai-org-glm-5",
+        "minimax/minimax-m2.5",
+        "zai-org/glm-5",
         "novitalanguagemodel",
     )
 
@@ -111,8 +111,8 @@ def _kwargs_with_environment_defaults(
           marker in model_id.lower()
           for marker in (
               "deepseek/deepseek-v3.2",
-              "minimax-minimax-m2.5",
-              "zai-org-glm-5",
+              "minimax/minimax-m2.5",
+              "zai-org/glm-5",
           )
       )
       and "base_url" not in resolved

@@ -346,8 +346,8 @@ result = lx.extract(
 
 Supported Novita model IDs:
 - `deepseek/deepseek-v3.2`
-- `minimax-minimax-m2.5`
-- `zai-org-glm-5`
+- `minimax/minimax-m2.5`
+- `zai-org/glm-5`
 
 By default, these models use `https://api.novita.ai/openai` with the OpenAI SDK provider.
 

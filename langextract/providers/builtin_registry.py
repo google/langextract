@@ -39,6 +39,11 @@ BUILTIN_PROVIDERS: list[ProviderConfig] = [
         'priority': patterns.GEMINI_PRIORITY,
     },
     {
+        'patterns': patterns.NOVITA_PATTERNS,
+        'target': 'langextract.providers.novita:NovitaLanguageModel',
+        'priority': patterns.NOVITA_PRIORITY,
+    },
+    {
         'patterns': patterns.OLLAMA_PATTERNS,
         'target': 'langextract.providers.ollama:OllamaLanguageModel',
         'priority': patterns.OLLAMA_PRIORITY,

@@ -31,6 +31,15 @@ OPENAI_PATTERNS = (
 )
 OPENAI_PRIORITY = 10
 
+# Novita provider patterns
+NOVITA_PATTERNS = (
+    r'^NovitaLanguageModel$',
+    r'^deepseek/deepseek-v3\.2$',
+    r'^minimax-minimax-m2\.5$',
+    r'^zai-org-glm-5$',
+)
+NOVITA_PRIORITY = 20
+
 # Ollama provider patterns
 OLLAMA_PATTERNS = (
     # Standard Ollama naming patterns

@@ -244,6 +244,7 @@ echo '.env' >> .gitignore
 In your Python code:
 ```python
 import langextract as lx
+import os
 
 result = lx.extract(
     text_or_documents=input_text,
@@ -306,6 +307,8 @@ See the detailed guide in [Provider System Documentation](langextract/providers/
 LangExtract supports OpenAI models (requires optional dependency: `pip install langextract[openai]`):
 
 ```python
+import os
+
 import langextract as lx
 
 result = lx.extract(
@@ -320,6 +323,33 @@ result = lx.extract(
 ```
 
 Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
+
+## Using Novita Models
+
+LangExtract supports Novita's OpenAI-compatible endpoint for selected models:
+
+```python
+import os
+
+import langextract as lx
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="deepseek/deepseek-v3.2",
+    api_key=os.environ.get("NOVITA_API_KEY") or os.environ.get("OPENAI_API_KEY"),
+    fence_output=False,
+    use_schema_constraints=False
+)
+```
+
+Supported Novita model IDs:
+- `deepseek/deepseek-v3.2`
+- `minimax-minimax-m2.5`
+- `zai-org-glm-5`
+
+By default, these models use `https://api.novita.ai/openai` with the OpenAI SDK provider.
 
 ## Using Local LLMs with Ollama
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:

@@ -66,13 +66,27 @@ def _kwargs_with_environment_defaults(
 
   if "api_key" not in resolved and not resolved.get("vertexai", False):
     model_lower = model_id.lower()
+    novita_model_markers = (
+        "deepseek/deepseek-v3.2",
+        "minimax-minimax-m2.5",
+        "zai-org-glm-5",
+        "novitalanguagemodel",
+    )
+
     env_vars_by_provider = {
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
         "gpt": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
+        "novita": ("NOVITA_API_KEY", "OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
     }
 
     for provider_prefix, env_vars in env_vars_by_provider.items():
-      if provider_prefix in model_lower:
+      matches_provider = provider_prefix in model_lower
+      if provider_prefix == "novita" and not matches_provider:
+        matches_provider = any(
+            marker in model_lower for marker in novita_model_markers
+        )
+
+      if matches_provider:
         found_keys = []
         for env_var in env_vars:
           key_val = os.getenv(env_var)
@@ -91,6 +105,19 @@ def _kwargs_with_environment_defaults(
                 stacklevel=3,
             )
         break
+
+  if (
+      any(
+          marker in model_id.lower()
+          for marker in (
+              "deepseek/deepseek-v3.2",
+              "minimax-minimax-m2.5",
+              "zai-org-glm-5",
+          )
+      )
+      and "base_url" not in resolved
+  ):
+    resolved["base_url"] = "https://api.novita.ai/openai"
 
   if "ollama" in model_id.lower() and "base_url" not in resolved:
     resolved["base_url"] = os.getenv(

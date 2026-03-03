@@ -321,6 +321,29 @@ result = lx.extract(
 
 Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
 
+### Using Novita's OpenAI-compatible endpoint
+
+Novita can be used through the built-in OpenAI provider by setting `base_url` to `https://api.novita.ai/openai`.
+
+```python
+import os
+import langextract as lx
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="deepseek/deepseek-r1",  # Example Novita-served model
+    provider="OpenAILanguageModel",   # Explicit provider for non-gpt model IDs
+    api_key=os.environ.get("NOVITA_API_KEY"),  # optional if env var is set
+    base_url="https://api.novita.ai/openai",
+    fence_output=True,
+    use_schema_constraints=False,
+)
+```
+
+If `base_url` is set to Novita and `api_key` is omitted, LangExtract will automatically use `NOVITA_API_KEY` from the environment.
+
 ## Using Local LLMs with Ollama
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:
 

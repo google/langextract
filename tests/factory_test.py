@@ -120,6 +120,24 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
     self.assertEqual(model.api_key, "env-openai-key")
 
   @mock.patch.dict(
+      os.environ,
+      {
+          "NOVITA_API_KEY": "env-novita-key",
+          "OPENAI_API_KEY": "env-openai-key",
+      },
+  )
+  def test_novita_base_url_prefers_novita_api_key_from_environment(self):
+    """Factory should use NOVITA_API_KEY for Novita OpenAI-compatible endpoints."""
+    config = factory.ModelConfig(
+        model_id="deepseek/deepseek-r1",
+        provider="FakeOpenAIProvider",
+        provider_kwargs={"base_url": "https://api.novita.ai/openai"},
+    )
+
+    model = factory.create_model(config)
+    self.assertEqual(model.api_key, "env-novita-key")
+
+  @mock.patch.dict(
       os.environ, {"LANGEXTRACT_API_KEY": "env-langextract-key"}, clear=True
   )
   def test_falls_back_to_langextract_api_key_when_provider_key_missing(self):

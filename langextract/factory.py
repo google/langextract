@@ -66,31 +66,42 @@ def _kwargs_with_environment_defaults(
 
   if "api_key" not in resolved and not resolved.get("vertexai", False):
     model_lower = model_id.lower()
+    base_url = (resolved.get("base_url") or "").lower()
     env_vars_by_provider = {
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
         "gpt": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
     }
 
-    for provider_prefix, env_vars in env_vars_by_provider.items():
-      if provider_prefix in model_lower:
-        found_keys = []
-        for env_var in env_vars:
-          key_val = os.getenv(env_var)
-          if key_val:
-            found_keys.append((env_var, key_val))
+    def _set_api_key_from_env(*env_vars: str) -> bool:
+      found_keys = []
+      for env_var in env_vars:
+        key_val = os.getenv(env_var)
+        if key_val:
+          found_keys.append((env_var, key_val))
 
-        if found_keys:
-          resolved["api_key"] = found_keys[0][1]
+      if not found_keys:
+        return False
 
-          if len(found_keys) > 1:
-            keys_list = ", ".join(k[0] for k in found_keys)
-            warnings.warn(
-                f"Multiple API keys detected in environment: {keys_list}. "
-                f"Using {found_keys[0][0]} and ignoring others.",
-                UserWarning,
-                stacklevel=3,
-            )
-        break
+      resolved["api_key"] = found_keys[0][1]
+      if len(found_keys) > 1:
+        keys_list = ", ".join(k[0] for k in found_keys)
+        warnings.warn(
+            f"Multiple API keys detected in environment: {keys_list}. "
+            f"Using {found_keys[0][0]} and ignoring others.",
+            UserWarning,
+            stacklevel=3,
+        )
+      return True
+
+    if "api.novita.ai/openai" in base_url:
+      _set_api_key_from_env(
+          "NOVITA_API_KEY", "OPENAI_API_KEY", "LANGEXTRACT_API_KEY"
+      )
+    else:
+      for provider_prefix, env_vars in env_vars_by_provider.items():
+        if provider_prefix in model_lower:
+          _set_api_key_from_env(*env_vars)
+          break
 
   if "ollama" in model_id.lower() and "base_url" not in resolved:
     resolved["base_url"] = os.getenv(

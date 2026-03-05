@@ -587,7 +587,9 @@ class WordAligner:
     best_span: tuple[int, int] | None = None  # (start_idx, window_size)
 
     len_e = len(extraction_tokens)
-    max_window = len(source_tokens)
+    max_window = min(int(len_e / fuzzy_alignment_threshold) + 1, len(source_tokens))
+
+    source_tokens_norm = [_normalize_token(t) for t in source_tokens]
 
     extraction_counts = collections.Counter(extraction_tokens_norm)
     min_overlap = int(len_e * fuzzy_alignment_threshold)
@@ -595,20 +597,22 @@ class WordAligner:
     matcher = difflib.SequenceMatcher(autojunk=False, b=extraction_tokens_norm)
 
     for window_size in range(len_e, max_window + 1):
-      if window_size > len(source_tokens):
+      if best_ratio > 0.0 and window_size > (int(len_e / best_ratio) + 1):
         break
 
       # Initialize for sliding window
-      window_deque = collections.deque(source_tokens[0:window_size])
       window_counts = collections.Counter(
-          [_normalize_token(t) for t in window_deque]
+          source_tokens_norm[0:window_size]
       )
 
       for start_idx in range(len(source_tokens) - window_size + 1):
         # Optimization: check if enough overlapping tokens exist before expensive
         # sequence matching. This is an upper bound on the match count.
-        if (extraction_counts & window_counts).total() >= min_overlap:
-          window_tokens_norm = [_normalize_token(t) for t in window_deque]
+        overlap = sum(
+            min(cnt, window_counts.get(token, 0)) for token, cnt in extraction_counts.items()
+        )
+        if overlap >= min_overlap:
+          window_tokens_norm = source_tokens_norm[start_idx:start_idx + window_size]
           matcher.set_seq1(window_tokens_norm)
           matches = sum(size for _, _, size in matcher.get_matching_blocks())
           if len_e > 0:
@@ -622,16 +626,13 @@ class WordAligner:
         # Slide the window to the right
         if start_idx + window_size < len(source_tokens):
           # Remove the leftmost token from the count
-          old_token = window_deque.popleft()
-          old_token_norm = _normalize_token(old_token)
+          old_token_norm = source_tokens_norm[start_idx]
           window_counts[old_token_norm] -= 1
           if window_counts[old_token_norm] == 0:
             del window_counts[old_token_norm]
 
           # Add the new rightmost token to the deque and count
-          new_token = source_tokens[start_idx + window_size]
-          window_deque.append(new_token)
-          new_token_norm = _normalize_token(new_token)
+          new_token_norm = source_tokens_norm[start_idx + window_size]
           window_counts[new_token_norm] += 1
 
     if best_span and best_ratio >= fuzzy_alignment_threshold:

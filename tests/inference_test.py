@@ -363,6 +363,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
         tools=["tool1", "tool2"],
         stop_sequences=["\n\n"],
         system_instruction="Be helpful",
+        thinking_config={"thinking_level": "minimal"},
         # Unknown parameters to test filtering
         unknown_param="should_be_ignored",
         another_unknown="also_ignored",
@@ -372,6 +373,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
         "tools": ["tool1", "tool2"],
         "stop_sequences": ["\n\n"],
         "system_instruction": "Be helpful",
+        "thinking_config": {"thinking_level": "minimal"},
     }
     self.assertEqual(
         expected_extra_kwargs,
@@ -386,7 +388,12 @@ class TestGeminiLanguageModel(absltest.TestCase):
     call_args = mock_client.models.generate_content.call_args
     config = call_args.kwargs["config"]
 
-    for key in ["tools", "stop_sequences", "system_instruction"]:
+    for key in [
+        "tools",
+        "stop_sequences",
+        "system_instruction",
+        "thinking_config",
+    ]:
       self.assertIn(key, config, f"Expected {key} to be in API config")
       self.assertEqual(
           expected_extra_kwargs[key],
@@ -415,6 +422,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
             prompts,
             candidate_count=2,
             safety_settings={"HARM_CATEGORY_DANGEROUS": "BLOCK_NONE"},
+            thinking_config={"thinking_level": "minimal"},
             unknown_runtime_param="ignored",
         )
     )
@@ -431,6 +439,11 @@ class TestGeminiLanguageModel(absltest.TestCase):
         {"HARM_CATEGORY_DANGEROUS": "BLOCK_NONE"},
         config.get("safety_settings"),
         "safety_settings should be passed through to API",
+    )
+    self.assertEqual(
+        {"thinking_level": "minimal"},
+        config.get("thinking_config"),
+        "thinking_config should be passed through to API",
     )
     self.assertNotIn(
         "unknown_runtime_param", config, "Unknown kwargs should be filtered out"

@@ -156,8 +156,6 @@ def create_model(
 
   model_id = config.model_id
 
-  model_id = config.model_id
-
   kwargs = _kwargs_with_environment_defaults(
       model_id or config.provider or "", config.provider_kwargs
   )
@@ -220,6 +218,7 @@ def _create_model_with_schema(
     A model instance with fence_output configured appropriately.
   """
 
+  # Must run before resolution regardless of config path.
   providers.load_builtins_once()
   providers.load_plugins_once()
 

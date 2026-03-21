@@ -52,7 +52,13 @@ _EXT_JSONL = ".jsonl"
 _KEY_IDX = "idx-"
 _CACHE_PREFIX = "cache"
 _UNSET = object()
-
+def _json_serializer(obj: Any) -> Any:
+  """JSON serializer for objects not serializable by default json code."""
+  if dataclasses.is_dataclass(obj):
+    return dataclasses.asdict(obj)
+  if isinstance(obj, enum.Enum):
+    return obj.value
+  raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 @dataclasses.dataclass(slots=True, frozen=True)
 class BatchConfig:
@@ -386,7 +392,10 @@ class GCSBatchCache:
 
   def _compute_hash(self, key_data: dict) -> str:
     """Compute SHA256 hash of the canonicalized request data."""
-    canonical_json = json.dumps(key_data, sort_keys=True, ensure_ascii=False)
+     # to prevent crash  added default=_json_serializer
+    canonical_json = json.dumps(
+        key_data, sort_keys=True, ensure_ascii=False, default=_json_serializer
+    )
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
   def _get_single(self, key_hash: str) -> str | None:

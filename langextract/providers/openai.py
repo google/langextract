@@ -122,11 +122,18 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     """
     result = config.copy()
 
-    if 'reasoning_effort' in result:
-      effort = result.pop('reasoning_effort')
-      reasoning = result.get('reasoning', {}) or {}
-      reasoning.setdefault('effort', effort)
-      result['reasoning'] = reasoning
+    # Check if this is a GPT-5 model that supports reasoning_effort
+    is_gpt5_model = self.model_id.lower().startswith(('gpt-5', 'gpt5'))
+
+    if 'reasoning_effort' in result and is_gpt5_model:
+        # For GPT-5 models, pass reasoning_effort as-is
+        # Remove any existing reasoning dict to avoid conflicts
+        if 'reasoning' in result:
+            del result['reasoning']
+
+    elif 'reasoning_effort' in result and not is_gpt5_model:
+        # For non-GPT-5 models, remove reasoning_effort (not supported)
+        result.pop('reasoning_effort')
 
     return result
 
@@ -176,7 +183,9 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
           'logprobs',
           'top_logprobs',
           'reasoning',
+          'reasoning_effort',  # Add this to pass it through
           'response_format',
+          'verbosity',  # Add verbosity for GPT-5 models
       ]:
         if (v := normalized_config.get(key)) is not None:
           api_params[key] = v
@@ -227,6 +236,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
         'reasoning_effort',
         'reasoning',
         'response_format',
+        'verbosity',  # Add verbosity for GPT-5 models
     ]:
       if key in merged_kwargs:
         config[key] = merged_kwargs[key]

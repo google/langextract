@@ -185,6 +185,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     call_args = mock_post.call_args
     json_payload = call_args.kwargs["json"]
 
+    self.assertEqual(json_payload["keep_alive"], 600)
     self.assertEqual(json_payload["options"]["keep_alive"], 600)
     self.assertEqual(json_payload["options"]["num_thread"], 8)
     # timeout is passed to requests.post, not in the JSON payload
@@ -238,6 +239,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     call_args = mock_post.call_args
     json_payload = call_args.kwargs["json"]
 
+    self.assertEqual(json_payload["keep_alive"], 300)
     self.assertEqual(json_payload["options"]["temperature"], 0.1)
     self.assertEqual(json_payload["options"]["keep_alive"], 300)
     self.assertEqual(json_payload["options"]["num_ctx"], 2048)

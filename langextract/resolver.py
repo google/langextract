@@ -264,9 +264,7 @@ class Resolver(AbstractResolver):
 
     except exceptions.FormatError as e:
       if suppress_parse_errors:
-        logging.exception(
-            "Failed to parse input_text: %s, error: %s", input_text, e
-        )
+        logging.warning("Skipping chunk: parse error: %s", e)
         return []
       raise ResolverParsingError(str(e)) from e
 

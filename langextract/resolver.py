@@ -30,6 +30,8 @@ import operator
 from typing import Final
 
 from absl import logging
+from rapidfuzz import fuzz as rapidfuzz_fuzz
+from rapidfuzz.distance import Indel as rapidfuzz_indel
 
 from langextract.core import data
 from langextract.core import exceptions
@@ -454,7 +456,8 @@ class Resolver(AbstractResolver):
           extraction_index = group.get(index_key, None)
           if extraction_index is None:
             logging.debug(
-                "No index value for %s. Skipping extraction.", extraction_class
+                "No index value for %s. Skipping extraction.",
+                extraction_class,
             )
             continue
         else:
@@ -542,14 +545,20 @@ class WordAligner:
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
   ) -> data.Extraction | None:
-    """Fuzzy-align an extraction using difflib.SequenceMatcher on tokens.
+    """Fuzzy-align an extraction against source tokens.
 
-    The algorithm scans every candidate window in `source_tokens` and selects
-    the window with the highest SequenceMatcher `ratio`. It uses an efficient
-    token-count intersection as a fast pre-check to discard windows that cannot
-    meet the alignment threshold. A match is accepted when the ratio is ≥
-    `fuzzy_alignment_threshold`. This only runs on unmatched extractions, which
-    is usually a small subset of the total extractions.
+    Uses a two-phase strategy for speed:
+
+    1. **Fast path** — ``rapidfuzz.fuzz.partial_ratio_alignment`` (C++ backend)
+       identifies the approximate match region at the character level.  A small
+       token-level refinement pass selects the tightest window.  This handles
+       the common case of mostly-contiguous matches in O(n) time.
+    2. **Fallback** — If the character-level search fails (e.g. matched tokens
+       are scattered across the source), a token-level sliding-window scan runs.
+       It uses ``collections.Counter`` intersection as a fast pre-check and
+       ``difflib.SequenceMatcher`` only on candidates that pass.  This is the
+       same logic as the original algorithm but only executes when the fast path
+       misses — which is rare in practice.
 
     Args:
       extraction: The extraction to align.
@@ -557,7 +566,7 @@ class WordAligner:
       tokenized_text: The tokenized source text.
       token_offset: The token offset of the current chunk.
       char_offset: The character offset of the current chunk.
-      fuzzy_alignment_threshold: The minimum ratio for a fuzzy match.
+      fuzzy_alignment_threshold: The minimum ratio for a fuzzy match (0-1).
       tokenizer_impl: Optional tokenizer instance.
 
     Returns:
@@ -569,93 +578,198 @@ class WordAligner:
             extraction.extraction_text, tokenizer_inst=tokenizer_impl
         )
     )
-    # Work with lightly stemmed tokens so pluralisation doesn't block alignment
     extraction_tokens_norm = [_normalize_token(t) for t in extraction_tokens]
 
     if not extraction_tokens:
       return None
 
+    len_e = len(extraction_tokens)
+
     logging.debug(
         "Fuzzy aligning %r (%d tokens)",
         extraction.extraction_text,
-        len(extraction_tokens),
+        len_e,
     )
 
-    best_ratio = 0.0
-    best_span: tuple[int, int] | None = None  # (start_idx, window_size)
+    source_tokens_norm = [_normalize_token(t) for t in source_tokens]
 
-    len_e = len(extraction_tokens)
-    max_window = len(source_tokens)
+    # ── Phase 1: RapidFuzz character-level fast path ───────────────────
+    result = self._rapidfuzz_character_align(
+        extraction_tokens_norm,
+        source_tokens_norm,
+        len_e,
+        fuzzy_alignment_threshold,
+    )
 
-    extraction_counts = collections.Counter(extraction_tokens_norm)
-    min_overlap = int(len_e * fuzzy_alignment_threshold)
-
-    matcher = difflib.SequenceMatcher(autojunk=False, b=extraction_tokens_norm)
-
-    for window_size in range(len_e, max_window + 1):
-      if window_size > len(source_tokens):
-        break
-
-      # Initialize for sliding window
-      window_deque = collections.deque(source_tokens[0:window_size])
-      window_counts = collections.Counter(
-          [_normalize_token(t) for t in window_deque]
+    if result is None:
+      # ── Phase 2: Token-level sliding window fallback ─────────────────
+      result = self._token_sliding_window_align(
+          extraction_tokens_norm,
+          source_tokens_norm,
+          len_e,
+          fuzzy_alignment_threshold,
       )
 
-      for start_idx in range(len(source_tokens) - window_size + 1):
-        # Optimization: check if enough overlapping tokens exist before expensive
-        # sequence matching. This is an upper bound on the match count.
+    if result is None:
+      return None
+
+    start_idx, window_size = result
+
+    try:
+      extraction.token_interval = tokenizer_lib.TokenInterval(
+          start_index=start_idx + token_offset,
+          end_index=start_idx + window_size + token_offset,
+      )
+
+      start_token = tokenized_text.tokens[start_idx]
+      end_token = tokenized_text.tokens[start_idx + window_size - 1]
+      extraction.char_interval = data.CharInterval(
+          start_pos=char_offset + start_token.char_interval.start_pos,
+          end_pos=char_offset + end_token.char_interval.end_pos,
+      )
+
+      extraction.alignment_status = data.AlignmentStatus.MATCH_FUZZY
+      return extraction
+    except IndexError:
+      logging.exception(
+          "Index error while setting intervals during fuzzy alignment."
+      )
+      return None
+
+  def _rapidfuzz_character_align(
+      self,
+      extraction_tokens_norm: list[str],
+      source_tokens_norm: list[str],
+      len_e: int,
+      fuzzy_alignment_threshold: float,
+  ) -> tuple[int, int] | None:
+    """Character-level fast path using RapidFuzz.
+
+    Returns ``(start_token_idx, window_size)`` or ``None``.
+    """
+    extraction_text_norm = " ".join(extraction_tokens_norm)
+    source_text_norm = " ".join(source_tokens_norm)
+
+    # Character → token index mapping.
+    char_to_token: list[int] = []
+    for token_idx, token in enumerate(source_tokens_norm):
+      char_to_token.extend([token_idx] * len(token))
+      if token_idx < len(source_tokens_norm) - 1:
+        char_to_token.append(token_idx + 1)
+
+    # Use a generous cutoff so RapidFuzz proposes a broad candidate region.
+    # NOTE: processor=None because we already pre-normalise tokens via
+    # _normalize_token() (lowercase + light stemming).  RapidFuzz's built-in
+    # utils.default_process only lowercases / strips non-alphanumeric chars,
+    # which would miss our stemming step.
+    score_cutoff = max(fuzzy_alignment_threshold * 100.0 - 20.0, 30.0)
+
+    # NOTE: For needles longer than 64 characters the C++ backend switches
+    # to a longest-common-substring heuristic that may miss the optimal
+    # alignment.  Phase 2 (token sliding window) serves as the safety net
+    # for those rare cases.
+    rf_result = rapidfuzz_fuzz.partial_ratio_alignment(
+        extraction_text_norm,
+        source_text_norm,
+        processor=None,
+        score_cutoff=score_cutoff,
+    )
+
+    if rf_result is None:
+      return None
+
+    char_start = max(0, rf_result.dest_start)
+    char_end = min(len(source_text_norm), rf_result.dest_end)
+
+    if char_start >= len(char_to_token) or char_end <= 0:
+      return None
+
+    rf_start_tok = char_to_token[min(char_start, len(char_to_token) - 1)]
+    rf_end_tok = char_to_token[min(char_end - 1, len(char_to_token) - 1)]
+
+    # Refine: search a small token neighbourhood, smallest windows first.
+    refine_margin = 3
+    search_lo = max(0, rf_start_tok - refine_margin)
+    search_hi = min(len(source_tokens_norm) - 1, rf_end_tok + refine_margin)
+
+    best_ratio = 0.0
+    best_span: tuple[int, int] | None = None
+
+    for window_size in range(len_e, search_hi - search_lo + 2):
+      for s_idx in range(search_lo, search_hi - window_size + 2):
+        e_idx = s_idx + window_size - 1
+        if e_idx > search_hi:
+          break
+        window_tokens_norm = source_tokens_norm[s_idx : e_idx + 1]
+        # Derive LCS length from Indel distance (C++ backend).
+        # Indel distance = len(a) + len(b) - 2*LCS, so
+        # LCS = (len(a) + len(b) - dist) // 2
+        dist = rapidfuzz_indel.distance(
+            window_tokens_norm, extraction_tokens_norm
+        )
+        lcs = (len(window_tokens_norm) + len_e - dist) // 2
+        ratio = lcs / len_e if len_e > 0 else 0.0
+        if ratio > best_ratio:
+          best_ratio = ratio
+          best_span = (s_idx, window_size)
+
+    if best_span and best_ratio >= fuzzy_alignment_threshold:
+      return best_span
+    return None
+
+  @staticmethod
+  def _token_sliding_window_align(
+      extraction_tokens_norm: list[str],
+      source_tokens_norm: list[str],
+      len_e: int,
+      fuzzy_alignment_threshold: float,
+  ) -> tuple[int, int] | None:
+    """Token-level sliding window fallback (handles scattered matches).
+
+    This uses the same Counter-intersection pre-check as the original
+    algorithm but fires only when the RapidFuzz fast path misses.
+
+    Returns ``(start_token_idx, window_size)`` or ``None``.
+    """
+    extraction_counts = collections.Counter(extraction_tokens_norm)
+    min_overlap = int(len_e * fuzzy_alignment_threshold)
+    max_window = len(source_tokens_norm)
+
+    best_ratio = 0.0
+    best_span: tuple[int, int] | None = None
+
+    for window_size in range(len_e, max_window + 1):
+      if window_size > len(source_tokens_norm):
+        break
+
+      window_deque = collections.deque(source_tokens_norm[0:window_size])
+      window_counts = collections.Counter(window_deque)
+
+      for start_idx in range(len(source_tokens_norm) - window_size + 1):
         if (extraction_counts & window_counts).total() >= min_overlap:
-          window_tokens_norm = [_normalize_token(t) for t in window_deque]
-          matcher.set_seq1(window_tokens_norm)
-          matches = sum(size for _, _, size in matcher.get_matching_blocks())
-          if len_e > 0:
-            ratio = matches / len_e
-          else:
-            ratio = 0.0
+          window_tokens_norm = list(window_deque)
+          # Derive LCS length from Indel distance (C++ backend).
+          dist = rapidfuzz_indel.distance(
+              window_tokens_norm, extraction_tokens_norm
+          )
+          lcs = (len(window_tokens_norm) + len_e - dist) // 2
+          ratio = lcs / len_e if len_e > 0 else 0.0
           if ratio > best_ratio:
             best_ratio = ratio
             best_span = (start_idx, window_size)
 
-        # Slide the window to the right
-        if start_idx + window_size < len(source_tokens):
-          # Remove the leftmost token from the count
+        # Slide the window.
+        if start_idx + window_size < len(source_tokens_norm):
           old_token = window_deque.popleft()
-          old_token_norm = _normalize_token(old_token)
-          window_counts[old_token_norm] -= 1
-          if window_counts[old_token_norm] == 0:
-            del window_counts[old_token_norm]
-
-          # Add the new rightmost token to the deque and count
-          new_token = source_tokens[start_idx + window_size]
+          window_counts[old_token] -= 1
+          if window_counts[old_token] == 0:
+            del window_counts[old_token]
+          new_token = source_tokens_norm[start_idx + window_size]
           window_deque.append(new_token)
-          new_token_norm = _normalize_token(new_token)
-          window_counts[new_token_norm] += 1
+          window_counts[new_token] += 1
 
     if best_span and best_ratio >= fuzzy_alignment_threshold:
-      start_idx, window_size = best_span
-
-      try:
-        extraction.token_interval = tokenizer_lib.TokenInterval(
-            start_index=start_idx + token_offset,
-            end_index=start_idx + window_size + token_offset,
-        )
-
-        start_token = tokenized_text.tokens[start_idx]
-        end_token = tokenized_text.tokens[start_idx + window_size - 1]
-        extraction.char_interval = data.CharInterval(
-            start_pos=char_offset + start_token.char_interval.start_pos,
-            end_pos=char_offset + end_token.char_interval.end_pos,
-        )
-
-        extraction.alignment_status = data.AlignmentStatus.MATCH_FUZZY
-        return extraction
-      except IndexError:
-        logging.exception(
-            "Index error while setting intervals during fuzzy alignment."
-        )
-        return None
-
+      return best_span
     return None
 
   def align_extractions(
@@ -664,7 +778,7 @@ class WordAligner:
       source_text: str,
       token_offset: int = 0,
       char_offset: int = 0,
-      delim: str = "\u241F",  # Unicode Symbol for unit separator
+      delim: str = "\u241f",  # Unicode Symbol for unit separator
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       accept_match_lesser: bool = True,

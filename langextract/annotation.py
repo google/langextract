@@ -31,6 +31,7 @@ import time
 from typing import DefaultDict
 
 from absl import logging
+from intervaltree import IntervalTree
 
 from langextract import chunking
 from langextract import progress
@@ -42,6 +43,11 @@ from langextract.core import exceptions
 from langextract.core import format_handler as fh
 from langextract.core import tokenizer as tokenizer_lib
 
+# Threshold for switching from flat O(n²) overlap check to an interval tree.
+# For small extraction counts the flat loop is faster due to lower constant
+# factors; the tree pays off when the merged set grows large.
+_INTERVAL_TREE_THRESHOLD = 200
+
 
 def _merge_non_overlapping_extractions(
     all_extractions: list[Iterable[data.Extraction]],
@@ -51,6 +57,10 @@ def _merge_non_overlapping_extractions(
   When extractions from different passes overlap in their character positions,
   the extraction from the earlier pass is kept (first-pass wins strategy).
   Only non-overlapping extractions from later passes are added to the result.
+
+  For large extraction counts (≥ ``_INTERVAL_TREE_THRESHOLD``), an
+  ``IntervalTree`` is used for O(log n) overlap queries instead of the naïve
+  O(n²) pairwise scan.
 
   Args:
     all_extractions: List of extraction iterables from different sequential
@@ -68,18 +78,57 @@ def _merge_non_overlapping_extractions(
 
   merged_extractions = list(all_extractions[0])
 
+  # Seed the interval tree with first-pass extractions.
+  tree: IntervalTree | None = None
+
+  def _build_tree() -> IntervalTree:
+    """Build (or rebuild) the interval tree from ``merged_extractions``."""
+    t = IntervalTree()
+    for ext in merged_extractions:
+      if ext.char_interval is not None:
+        s, e = ext.char_interval.start_pos, ext.char_interval.end_pos
+        if s is not None and e is not None and s < e:
+          t.addi(s, e)
+    return t
+
   for pass_extractions in all_extractions[1:]:
+    use_tree = len(merged_extractions) >= _INTERVAL_TREE_THRESHOLD
+
+    if use_tree and tree is None:
+      tree = _build_tree()
+
     for extraction in pass_extractions:
       overlaps = False
       if extraction.char_interval is not None:
-        for existing_extraction in merged_extractions:
-          if existing_extraction.char_interval is not None:
-            if _extractions_overlap(extraction, existing_extraction):
-              overlaps = True
-              break
+        s = extraction.char_interval.start_pos
+        e = extraction.char_interval.end_pos
+        if s is not None and e is not None:
+          if use_tree and tree is not None:
+            # O(log n + k) overlap query via interval tree.
+            overlaps = bool(tree.overlaps(s, e))
+          else:
+            # Flat O(n) scan — faster for small merged sets.
+            for existing_extraction in merged_extractions:
+              if existing_extraction.char_interval is not None:
+                if _extractions_overlap(extraction, existing_extraction):
+                  overlaps = True
+                  break
 
       if not overlaps:
         merged_extractions.append(extraction)
+        # Keep the tree in sync when we're using it.
+        if (
+            use_tree
+            and tree is not None
+            and extraction.char_interval is not None
+        ):
+          s = extraction.char_interval.start_pos
+          e = extraction.char_interval.end_pos
+          if s is not None and e is not None and s < e:
+            tree.addi(s, e)
+        # If we just crossed the threshold, build the tree for next iteration.
+        if not use_tree and len(merged_extractions) >= _INTERVAL_TREE_THRESHOLD:
+          tree = _build_tree()
 
   return merged_extractions
 

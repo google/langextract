@@ -54,6 +54,7 @@ import langextract
 from langextract import core
 from langextract import data
 from langextract import visualize
+from langextract.core import exceptions as langextract_exceptions
 import langextract.io as lio
 
 # Load API key from environment
@@ -61,6 +62,15 @@ dotenv.load_dotenv(override=True)
 GEMINI_API_KEY = os.environ.get(
     "GEMINI_API_KEY", os.environ.get("LANGEXTRACT_API_KEY")
 )
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+
+def _is_openai_model(model_id: str) -> bool:
+  """Return True if model_id targets the OpenAI provider."""
+  import re
+
+  openai_prefixes = (r"^gpt-4", r"^gpt4\.", r"^gpt-5", r"^gpt5\.")
+  return any(re.match(p, model_id) for p in openai_prefixes)
 
 
 class BenchmarkRunner:
@@ -196,19 +206,42 @@ class BenchmarkRunner:
       for attempt in range(max_retries):
         try:
           start_time = time.time()
+          # OpenAI models require fence_output + no schema constraints.
+          is_openai = _is_openai_model(model_id)
+          api_key = OPENAI_API_KEY if is_openai else GEMINI_API_KEY
+          extra_kwargs = (
+              {"fence_output": True, "use_schema_constraints": False}
+              if is_openai
+              else {}
+          )
           result = langextract.extract(
               text_or_documents=test_text,
               model_id=model_id,
-              api_key=GEMINI_API_KEY,
+              api_key=api_key,
               prompt_description=extraction_config["prompt"],
               examples=[example],
               max_workers=config.MODELS.default_max_workers,
               temperature=config.MODELS.default_temperature,
               extraction_passes=config.MODELS.default_extraction_passes,
               tokenizer=self.tokenizer,
+              **extra_kwargs,
           )
           elapsed = time.time() - start_time
           break
+        except langextract_exceptions.InferenceRuntimeError as inf_err:
+          err_str = str(inf_err)
+          is_rate_limit = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+          if is_rate_limit and attempt < max_retries - 1:
+            # Parse retry delay from error message if available.
+            import re
+
+            match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_str, re.I)
+            wait = float(match.group(1)) + 2 if match else retry_delay
+            print(f"   Rate limit hit, retrying in {wait:.0f}s...")
+            time.sleep(wait)
+            retry_delay = wait * 1.5
+            continue
+          raise
         except (ConnectionError, TimeoutError):
           if attempt < max_retries - 1:
             print(f"   Retrying in {retry_delay}s...")
@@ -263,9 +296,14 @@ class BenchmarkRunner:
           config.EXTRACTION_RESULT_KEY: result,
       }
 
-    except (urllib.error.URLError, RuntimeError) as e:
-      # Handle expected text download failures.
-      print(f"Failed: {e}")
+    except (
+        urllib.error.URLError,
+        RuntimeError,
+        langextract_exceptions.InferenceRuntimeError,
+    ) as e:
+      # Handle expected text download failures and API errors.
+      short_err = str(e)[:200]
+      print(f"   Failed: {short_err}")
       return {
           "success": False,
           "model": model_id,
@@ -274,7 +312,9 @@ class BenchmarkRunner:
       }
 
   def test_diverse_text_types(
-      self, models: list[str] | None = None
+      self,
+      models: list[str] | None = None,
+      text_types: list[config.TextTypes] | None = None,
   ) -> list[dict[str, Any]]:
     """Test extraction with diverse text types."""
     print("\n" + "=" * config.DISPLAY.separator_width)
@@ -284,6 +324,9 @@ class BenchmarkRunner:
     if models is None:
       models = [config.MODELS.default_model]
 
+    if text_types is None:
+      text_types = list(config.TextTypes)
+
     results = []
     test_count = 0
 
@@ -291,7 +334,7 @@ class BenchmarkRunner:
       print(f"\nTesting {model_id}")
       print("-" * 30)
 
-      for text_type in config.TextTypes:
+      for text_type in text_types:
         print(f"\n  Testing {text_type.value} text...")
         result = self.test_single_extraction(model_id, text_type)
         results.append(result)
@@ -337,7 +380,7 @@ class BenchmarkRunner:
 
           html_content = visualize(str(jsonl_path))
           html_path = viz_dir / f"{viz_name}.html"
-          with open(html_path, "w") as f:
+          with open(html_path, "w", encoding="utf-8") as f:
             f.write(getattr(html_content, "data", html_content))
 
     # Remove extraction result objects before saving JSON
@@ -355,12 +398,16 @@ class BenchmarkRunner:
     else:
       print(f"Warning: Failed to create plot for {json_path.name}")
 
-  def run_diverse_benchmark(self, models: list[str] | None = None):
+  def run_diverse_benchmark(
+      self,
+      models: list[str] | None = None,
+      text_types: list[config.TextTypes] | None = None,
+  ):
     """Run benchmark."""
     self.print_header()
 
     tokenization_results = self.benchmark_tokenization()
-    diverse_results = self.test_diverse_text_types(models)
+    diverse_results = self.test_diverse_text_types(models, text_types)
 
     results = {
         "tokenization": tokenization_results,
@@ -393,6 +440,15 @@ def main():
       "--compare",
       action="store_true",
       help="Generate comparison plots from existing benchmark results",
+  )
+
+  parser.add_argument(
+      "--english-only",
+      action="store_true",
+      help=(
+          "Only test English text type (avoids rate limits on free-tier API"
+          " keys)"
+      ),
   )
 
   args = parser.parse_args()
@@ -428,10 +484,19 @@ def main():
         f"Error: {model_to_test} requires GEMINI_API_KEY or LANGEXTRACT_API_KEY"
     )
     return
+  if _is_openai_model(model_to_test) and not OPENAI_API_KEY:
+    print(
+        f"Error: {model_to_test} requires OPENAI_API_KEY in environment or .env"
+    )
+    return
 
   runner = BenchmarkRunner()
   runner.set_tokenizer(args.tokenizer)
-  runner.run_diverse_benchmark([args.model] if args.model else None)
+  text_types = [config.TextTypes.ENGLISH] if args.english_only else None
+  runner.run_diverse_benchmark(
+      [args.model] if args.model else None,
+      text_types=text_types,
+  )
 
 
 if __name__ == "__main__":

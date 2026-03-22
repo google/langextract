@@ -126,9 +126,9 @@ class AbstractResolver(abc.ABC):
       source_text: str,
       token_offset: int,
       char_offset: int | None = None,
-      enable_fuzzy_alignment: bool = True,
-      fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
-      accept_match_lesser: bool = True,
+      enable_fuzzy_alignment: bool | None = None,
+      fuzzy_alignment_threshold: float | None = None,
+      accept_match_lesser: bool | None = None,
       **kwargs,
   ) -> Iterator[data.Extraction]:
     """Aligns extractions with source text, setting token/char intervals and alignment status.
@@ -216,6 +216,14 @@ class Resolver(AbstractResolver):
       else:
         format_handler = fh.FormatHandler()
 
+    # Consume alignment parameters
+    self.enable_fuzzy_alignment = kwargs.pop("enable_fuzzy_alignment", True)
+    self.fuzzy_alignment_threshold = kwargs.pop(
+        "fuzzy_alignment_threshold", _FUZZY_ALIGNMENT_MIN_THRESHOLD
+    )
+    self.accept_match_lesser = kwargs.pop("accept_match_lesser", True)
+    self.suppress_parse_errors = kwargs.pop("suppress_parse_errors", False)
+
     if kwargs:
       raise TypeError(
           f"got an unexpected keyword argument '{list(kwargs.keys())[0]}'"
@@ -234,7 +242,7 @@ class Resolver(AbstractResolver):
   def resolve(
       self,
       input_text: str,
-      suppress_parse_errors: bool = False,
+      suppress_parse_errors: bool | None = None,
       **kwargs,
   ) -> Sequence[data.Extraction]:
     """Runs resolve function on text with YAML/JSON extraction data.
@@ -253,6 +261,9 @@ class Resolver(AbstractResolver):
     """
     logging.debug("Starting resolver process for input text.")
     logging.debug("Input Text: %s", input_text)
+
+    if suppress_parse_errors is None:
+      suppress_parse_errors = getattr(self, "suppress_parse_errors", False)
 
     try:
       constraint = getattr(self, "_constraint", schema.Constraint())
@@ -280,9 +291,9 @@ class Resolver(AbstractResolver):
       source_text: str,
       token_offset: int,
       char_offset: int | None = None,
-      enable_fuzzy_alignment: bool = True,
-      fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
-      accept_match_lesser: bool = True,
+      enable_fuzzy_alignment: bool | None = None,
+      fuzzy_alignment_threshold: float | None = None,
+      accept_match_lesser: bool | None = None,
       tokenizer_inst: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.Extraction]:
@@ -300,10 +311,11 @@ class Resolver(AbstractResolver):
       token_offset: The starting token index of the chunk.
       char_offset: The starting character index of the chunk.
       enable_fuzzy_alignment: Whether to enable fuzzy alignment fallback.
+        Defaults to instance setting or True.
       fuzzy_alignment_threshold: Minimum overlap ratio required for fuzzy
-        alignment.
+        alignment. Defaults to instance setting or 0.75.
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
-        status).
+        status). Defaults to instance setting or True.
       tokenizer_inst: Optional tokenizer instance.
       **kwargs: Additional parameters.
 
@@ -320,6 +332,17 @@ class Resolver(AbstractResolver):
       return
     else:
       extractions_group = [extractions]
+
+    if enable_fuzzy_alignment is None:
+      enable_fuzzy_alignment = getattr(self, "enable_fuzzy_alignment", True)
+
+    if fuzzy_alignment_threshold is None:
+      fuzzy_alignment_threshold = getattr(
+          self, "fuzzy_alignment_threshold", _FUZZY_ALIGNMENT_MIN_THRESHOLD
+      )
+
+    if accept_match_lesser is None:
+      accept_match_lesser = getattr(self, "accept_match_lesser", True)
 
     aligner = WordAligner()
     aligned_yaml_extractions = aligner.align_extractions(
@@ -690,11 +713,11 @@ class WordAligner:
         character intervals.
       delim: Token used to separate multi-token extractions.
       enable_fuzzy_alignment: Whether to use fuzzy alignment when exact matching
-        fails.
+        fails. Defaults to instance setting or True.
       fuzzy_alignment_threshold: Minimum token overlap ratio for fuzzy alignment
-        (0-1).
+        (0-1). Defaults to instance setting or 0.75.
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
-        status).
+        status). Defaults to instance setting or True.
       tokenizer_impl: Optional tokenizer instance.
 
     Returns:

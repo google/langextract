@@ -390,6 +390,66 @@ class PromptAlignmentValidationTest(parameterized.TestCase):
     self.assertEqual(report.has_failed, expected_has_failed)
     self.assertEqual(report.has_non_exact, expected_has_non_exact)
 
+  def test_empty_extraction_text(self):
+    """Test handling of empty extraction text."""
+    example = data.ExampleData(
+        text="Patient takes medication daily.",
+        extractions=[
+            data.Extraction(
+                extraction_class="Medication",
+                extraction_text="",  # EDGE CASE: Empty text
+                attributes={},
+            )
+        ],
+    )
+
+    # Empty extraction text should raise ValueError
+    with self.assertRaises(ValueError):
+      prompt_validation.validate_prompt_alignment([example])
+
+  def test_unicode_and_special_chars(self):
+    """Test handling of unicode characters and special symbols."""
+    example = data.ExampleData(
+        text="Patient has café-acquired infection & fever (100°F).",
+        extractions=[
+            data.Extraction(
+                extraction_class="Diagnosis",
+                extraction_text="café-acquired infection",
+                attributes={},
+            ),
+            data.Extraction(
+                extraction_class="Symptom",
+                extraction_text="fever (100°F)",
+                attributes={},
+            ),
+        ],
+    )
+
+    report = prompt_validation.validate_prompt_alignment([example])
+
+    # Should handle unicode without crashing
+    self.assertFalse(report.has_failed)
+
+  def test_very_long_extraction_text(self):
+    """Test handling of very long extraction text."""
+    long_text = "A" * 1000  # 1000 character extraction
+    example = data.ExampleData(
+        text="Short text.",
+        extractions=[
+            data.Extraction(
+                extraction_class="Note",
+                extraction_text=long_text,
+                attributes={},
+            )
+        ],
+    )
+
+    report = prompt_validation.validate_prompt_alignment([example])
+
+    # Should gracefully handle long text that doesn't exist
+    self.assertTrue(report.has_failed)
+    self.assertEqual(report.issues[0].alignment_status, None)
+
 
 class ExtractIntegrationTest(absltest.TestCase):
   """Minimal integration test for extract() entry point validation."""

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Base interfaces for language models."""
+
 from __future__ import annotations
 
 import abc
@@ -135,7 +136,7 @@ class BaseLanguageModel(abc.ABC):
     """
 
   def infer_batch(
-      self, prompts: Sequence[str], batch_size: int = 32  # pylint: disable=unused-argument
+      self, prompts: Sequence[str], batch_size: int = 32
   ) -> list[list[types.ScoredOutput]]:
     """Batch inference with configurable batch size.
 
@@ -143,13 +144,20 @@ class BaseLanguageModel(abc.ABC):
 
     Args:
       prompts: List of prompts to process.
-      batch_size: Batch size (currently unused, for future optimization).
+      batch_size: Batch size hint for providers.
+
+        This method passes `batch_size` through to `infer()` as a keyword
+        argument. Providers may interpret it to control true server-side
+        batching (e.g., a batch job size), concurrency, or throttling.
 
     Returns:
       List of lists of ScoredOutput objects.
     """
+    if batch_size <= 0:
+      raise ValueError('batch_size must be > 0')
+
     results = []
-    for output in self.infer(prompts):
+    for output in self.infer(prompts, batch_size=batch_size):
       results.append(list(output))
     return results
 

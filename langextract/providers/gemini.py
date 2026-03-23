@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Gemini provider for LangExtract."""
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
@@ -237,6 +238,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     Yields:
       Lists of ScoredOutputs.
     """
+    kwargs.pop('batch_size', None)
     merged_kwargs = self.merge_kwargs(kwargs)
 
     config = {

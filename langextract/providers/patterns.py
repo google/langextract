@@ -22,12 +22,15 @@ in one place to avoid duplication.
 GEMINI_PATTERNS = (r'^gemini',)
 GEMINI_PRIORITY = 10
 
-# OpenAI provider patterns
+# OpenAI provider patterns (includes MiniMax via OpenAI-compatible API)
 OPENAI_PATTERNS = (
     r'^gpt-4',
     r'^gpt4\.',
     r'^gpt-5',
     r'^gpt5\.',
+    # MiniMax models (OpenAI-compatible API)
+    r'^MiniMax',
+    r'^minimax',
 )
 OPENAI_PRIORITY = 10
 
@@ -62,3 +65,10 @@ OLLAMA_PATTERNS = (
     r'^WizardLM/',
 )
 OLLAMA_PRIORITY = 10
+
+# MiniMax provider patterns (OpenAI-compatible API)
+MINIMAX_PATTERNS = (
+    r'^MiniMax',
+    r'^minimax',
+)
+MINIMAX_PRIORITY = 10

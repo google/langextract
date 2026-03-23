@@ -51,7 +51,7 @@ for entity in result.extractions:
     if entity.char_interval:
         start, end = entity.char_interval.start_pos, entity.char_interval.end_pos
         position_info = f" (pos: {start}-{end})"
-    
+
     print(f"• {entity.extraction_class}: {entity.extraction_text}{position_info}")
 
 # Expected Output:

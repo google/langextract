@@ -123,26 +123,29 @@ def _extract_text_from_response_body(body: Mapping[str, Any]) -> str:
 def _content_to_text(content: Any) -> str:
   """Best-effort conversion of OpenAI SDK file content responses to text."""
   if content is None:
-    return ""
-  if isinstance(content, str):
-    return content
-  if isinstance(content, bytes):
-    return content.decode("utf-8")
+    result = ""
+  elif isinstance(content, str):
+    result = content
+  elif isinstance(content, bytes):
+    result = content.decode("utf-8")
+  else:
+    text = getattr(content, "text", None)
+    if isinstance(text, str):
+      result = text
+    else:
+      read = getattr(content, "read", None)
+      if callable(read):
+        data = read()
+        if isinstance(data, bytes):
+          result = data.decode("utf-8")
+        elif isinstance(data, str):
+          result = data
+        else:
+          result = str(content)
+      else:
+        result = str(content)
 
-  text = getattr(content, "text", None)
-  if isinstance(text, str):
-    return text
-
-  read = getattr(content, "read", None)
-  if callable(read):
-    data = read()
-    if isinstance(data, bytes):
-      return data.decode("utf-8")
-    if isinstance(data, str):
-      return data
-
-  # Fall back to stringification.
-  return str(content)
+  return result
 
 
 def infer_batch(

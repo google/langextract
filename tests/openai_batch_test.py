@@ -14,6 +14,8 @@
 
 """Tests for OpenAI Batch API helper."""
 
+# pylint: disable=too-few-public-methods
+
 from __future__ import annotations
 
 import json
@@ -52,7 +54,7 @@ class _FakeBatches:
     self.created.append(kwargs)
     return py_types.SimpleNamespace(id=f"batch-{len(self.created)}")
 
-  def retrieve(self, batch_id):
+  def retrieve(self, _batch_id):
     if not self._retrieve_queue:
       raise RuntimeError("retrieve queue empty")
     return self._retrieve_queue.pop(0)

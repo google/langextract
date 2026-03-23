@@ -217,6 +217,8 @@ def _create_model_with_schema(
   Returns:
     A model instance with fence_output configured appropriately.
   """
+  providers.load_builtins_once()
+  providers.load_plugins_once()
 
   # Must run before resolution regardless of config path.
   providers.load_builtins_once()

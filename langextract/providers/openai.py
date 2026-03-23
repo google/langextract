@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """OpenAI provider for LangExtract."""
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import schema
 from langextract.core import types as core_types
+from langextract.providers import openai_batch
 from langextract.providers import patterns
 from langextract.providers import router
 
@@ -46,6 +48,9 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
   temperature: float | None = None
   max_workers: int = 10
   _client: Any = dataclasses.field(default=None, repr=False, compare=False)
+  _batch_cfg: openai_batch.BatchConfig = dataclasses.field(
+      default_factory=openai_batch.BatchConfig, repr=False, compare=False
+  )
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
@@ -99,6 +104,10 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     self.temperature = temperature
     self.max_workers = max_workers
 
+    # Extract batch config before storing remaining kwargs.
+    batch_cfg_dict = kwargs.pop('batch', None)
+    self._batch_cfg = openai_batch.BatchConfig.from_dict(batch_cfg_dict)
+
     if not self.api_key:
       raise exceptions.InferenceConfigError('API key not provided.')
 
@@ -113,6 +122,57 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
         constraint=schema.Constraint(constraint_type=schema.ConstraintType.NONE)
     )
     self._extra_kwargs = kwargs or {}
+
+  def _build_chat_completions_body(self, prompt: str, config: dict) -> dict:
+    """Build a /v1/chat/completions request body for a single prompt."""
+    normalized_config = self._normalize_reasoning_params(config)
+
+    system_message = ''
+    if self.format_type == data.FormatType.JSON:
+      system_message = (
+          'You are a helpful assistant that responds in JSON format.'
+      )
+    elif self.format_type == data.FormatType.YAML:
+      system_message = (
+          'You are a helpful assistant that responds in YAML format.'
+      )
+
+    messages = [{'role': 'user', 'content': prompt}]
+    if system_message:
+      messages.insert(0, {'role': 'system', 'content': system_message})
+
+    api_params: dict[str, Any] = {
+        'model': self.model_id,
+        'messages': messages,
+        'n': 1,
+    }
+
+    temp = normalized_config.get('temperature', self.temperature)
+    if temp is not None:
+      api_params['temperature'] = temp
+
+    if self.format_type == data.FormatType.JSON:
+      api_params.setdefault('response_format', {'type': 'json_object'})
+
+    if (v := normalized_config.get('max_output_tokens')) is not None:
+      api_params['max_tokens'] = v
+    if (v := normalized_config.get('top_p')) is not None:
+      api_params['top_p'] = v
+
+    for key in [
+        'frequency_penalty',
+        'presence_penalty',
+        'seed',
+        'stop',
+        'logprobs',
+        'top_logprobs',
+        'reasoning',
+        'response_format',
+    ]:
+      if (v := normalized_config.get(key)) is not None:
+        api_params[key] = v
+
+    return api_params
 
   def _normalize_reasoning_params(self, config: dict) -> dict:
     """Normalize reasoning parameters for API compatibility.
@@ -135,52 +195,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
   ) -> core_types.ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
     try:
-      normalized_config = self._normalize_reasoning_params(config)
-
-      system_message = ''
-      if self.format_type == data.FormatType.JSON:
-        system_message = (
-            'You are a helpful assistant that responds in JSON format.'
-        )
-      elif self.format_type == data.FormatType.YAML:
-        system_message = (
-            'You are a helpful assistant that responds in YAML format.'
-        )
-
-      messages = [{'role': 'user', 'content': prompt}]
-      if system_message:
-        messages.insert(0, {'role': 'system', 'content': system_message})
-
-      api_params = {
-          'model': self.model_id,
-          'messages': messages,
-          'n': 1,
-      }
-
-      temp = normalized_config.get('temperature', self.temperature)
-      if temp is not None:
-        api_params['temperature'] = temp
-
-      if self.format_type == data.FormatType.JSON:
-        api_params.setdefault('response_format', {'type': 'json_object'})
-
-      if (v := normalized_config.get('max_output_tokens')) is not None:
-        api_params['max_tokens'] = v
-      if (v := normalized_config.get('top_p')) is not None:
-        api_params['top_p'] = v
-      for key in [
-          'frequency_penalty',
-          'presence_penalty',
-          'seed',
-          'stop',
-          'logprobs',
-          'top_logprobs',
-          'reasoning',
-          'response_format',
-      ]:
-        if (v := normalized_config.get(key)) is not None:
-          api_params[key] = v
-
+      api_params = self._build_chat_completions_body(prompt, config)
       response = self._client.chat.completions.create(**api_params)
 
       # Extract the response text using the v1.x response format
@@ -205,6 +220,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     Yields:
       Lists of ScoredOutputs.
     """
+    batch_size = kwargs.pop('batch_size', None)
     merged_kwargs = self.merge_kwargs(kwargs)
 
     config = {}
@@ -230,6 +246,33 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     ]:
       if key in merged_kwargs:
         config[key] = merged_kwargs[key]
+
+    # OpenAI Batch API mode (async job + polling) when enabled and threshold met.
+    if (
+        self._batch_cfg.enabled
+        and len(batch_prompts) >= self._batch_cfg.threshold
+    ):
+      try:
+        texts = openai_batch.infer_batch(
+            client=self._client,
+            model_id=self.model_id,
+            prompts=batch_prompts,
+            cfg=self._batch_cfg,
+            request_builder=lambda p: self._build_chat_completions_body(
+                p, config
+            ),
+            batch_size=batch_size,
+        )
+      except exceptions.InferenceError:
+        raise
+      except Exception as e:
+        raise exceptions.InferenceRuntimeError(
+            f'OpenAI Batch API error: {str(e)}', original=e, provider='OpenAI'
+        ) from e
+
+      for text in texts:
+        yield [core_types.ScoredOutput(score=1.0, output=text)]
+      return
 
     # Use parallel processing for batches larger than 1
     if len(batch_prompts) > 1 and self.max_workers > 1:

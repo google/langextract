@@ -185,6 +185,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     call_args = mock_post.call_args
     json_payload = call_args.kwargs["json"]
 
+    self.assertEqual(json_payload["keep_alive"], 600)
     self.assertEqual(json_payload["options"]["keep_alive"], 600)
     self.assertEqual(json_payload["options"]["num_thread"], 8)
     # timeout is passed to requests.post, not in the JSON payload
@@ -238,6 +239,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     call_args = mock_post.call_args
     json_payload = call_args.kwargs["json"]
 
+    self.assertEqual(json_payload["keep_alive"], 300)
     self.assertEqual(json_payload["options"]["temperature"], 0.1)
     self.assertEqual(json_payload["options"]["keep_alive"], 300)
     self.assertEqual(json_payload["options"]["num_ctx"], 2048)
@@ -765,6 +767,29 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(len(messages), 1)
     self.assertEqual(messages[0]["role"], "user")
     self.assertEqual(messages[0]["content"], "test prompt")
+
+  @mock.patch("openai.OpenAI", autospec=True)
+  def test_openai_reasoning_effort_passed_directly(self, mock_openai_class):
+    """reasoning_effort is passed as a top-level API parameter."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    model = openai.OpenAILanguageModel(
+        api_key="test-key",
+        reasoning_effort="low",
+    )
+
+    list(model.infer(["test prompt"]))
+
+    call_args = mock_client.chat.completions.create.call_args
+    self.assertEqual(call_args.kwargs["reasoning_effort"], "low")
+    self.assertNotIn("reasoning", call_args.kwargs)
 
   @mock.patch("google.genai.Client")
   def test_gemini_none_values_filtered(self, mock_client_class):

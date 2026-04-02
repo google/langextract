@@ -53,6 +53,7 @@ def extract(
     debug: bool = False,
     model_url: str | None = None,
     extraction_passes: int = 1,
+    context_window_chars: int | None = None,
     config: typing.Any = None,
     model: typing.Any = None,
     *,
@@ -125,8 +126,11 @@ def extract(
         reduce recall. Default is True. 'fuzzy_alignment_threshold' (float):
         Minimum token overlap ratio for fuzzy match (0.0-1.0). Default is 0.75.
         'accept_match_lesser' (bool): Whether to accept partial exact matches.
-        Default is True. 'suppress_parse_errors' (bool): Whether to suppress
-        parsing errors and continue pipeline. Default is False.
+        Default is True. 'suppress_parse_errors' (bool): Suppresses chunk-level
+        FormatError parsing failures so that one unparseable chunk does not
+        fail the entire document; defaults to True in extract() while the
+        underlying Resolver.resolve() default remains False. Set to False
+        when prototyping to surface prompt issues early.
       language_model_params: Additional parameters for the language model.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract
@@ -140,6 +144,10 @@ def extract(
         for overlaps). WARNING: Each additional pass reprocesses tokens,
         potentially increasing API costs. For example, extraction_passes=3
         reprocesses tokens 3x.
+      context_window_chars: Number of characters from the previous chunk to
+        include as context for the current chunk. This helps with coreference
+        resolution across chunk boundaries (e.g., resolving "She" to a person
+        mentioned in the previous chunk). Defaults to None (disabled).
       config: Model configuration to use for extraction. Takes precedence over
         model_id, api_key, and language_model_type parameters. When both model
         and config are provided, model takes precedence.
@@ -304,6 +312,7 @@ def extract(
     val = remaining_params.pop(key, None)
     if val is not None:
       alignment_kwargs[key] = val
+  alignment_kwargs.setdefault("suppress_parse_errors", True)
 
   effective_params = {"format_handler": format_handler, **remaining_params}
 
@@ -335,6 +344,7 @@ def extract(
         additional_context=additional_context,
         debug=debug,
         extraction_passes=extraction_passes,
+        context_window_chars=context_window_chars,
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,
@@ -350,6 +360,7 @@ def extract(
         batch_length=batch_length,
         debug=debug,
         extraction_passes=extraction_passes,
+        context_window_chars=context_window_chars,
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,

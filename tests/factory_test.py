@@ -420,6 +420,31 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
       router._entries = original_entries  # pylint: disable=protected-access
       router._entry_keys = original_keys  # pylint: disable=protected-access
 
+  def test_explicit_provider_loads_builtins_before_resolution(self):
+    """Builtins must be loaded even when provider is specified explicitly."""
+    config = factory.ModelConfig(
+        model_id="gemini-pro",
+        provider="FakeGeminiProvider",
+        provider_kwargs={"api_key": "test-key"},
+    )
+
+    model = factory.create_model(config)
+    self.assertIsInstance(model, FakeGeminiProvider)
+    self.assertEqual(model.model_id, "gemini-pro")
+
+  def test_explicit_provider_loads_builtins_with_schema_constraints(self):
+    """Builtins must be loaded in the _create_model_with_schema path too."""
+    config = factory.ModelConfig(
+        model_id="gemini-pro",
+        provider="FakeGeminiProvider",
+        provider_kwargs={"api_key": "test-key"},
+    )
+
+    # This exercises _create_model_with_schema via the fence_output kwarg.
+    model = factory.create_model(config, fence_output=False)
+    self.assertIsInstance(model, FakeGeminiProvider)
+    self.assertEqual(model.model_id, "gemini-pro")
+
 
 if __name__ == "__main__":
   absltest.main()

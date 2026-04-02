@@ -399,5 +399,197 @@ class QAPromptGeneratorTest(parameterized.TestCase):
     self.assertEqual(expected_formatted_example, actual_formatted_example)
 
 
+class PromptBuilderTest(absltest.TestCase):
+  """Tests for PromptBuilder base class."""
+
+  def _create_generator(self):
+    """Creates a simple QAPromptGenerator for testing."""
+    template = prompting.PromptTemplateStructured(
+        description="Extract entities.",
+        examples=[
+            data.ExampleData(
+                text="Sample text.",
+                extractions=[
+                    data.Extraction(
+                        extraction_text="Sample",
+                        extraction_class="entity",
+                    )
+                ],
+            )
+        ],
+    )
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.YAML,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=True,
+    )
+    return prompting.QAPromptGenerator(
+        template=template,
+        format_handler=format_handler,
+    )
+
+  def test_build_prompt_renders_chunk_text(self):
+    """Verifies build_prompt includes chunk text in the rendered prompt."""
+    generator = self._create_generator()
+    builder = prompting.PromptBuilder(generator)
+
+    prompt = builder.build_prompt(
+        chunk_text="Test input text.",
+        document_id="doc1",
+    )
+
+    self.assertIn("Test input text.", prompt)
+    self.assertIn("Extract entities.", prompt)
+
+  def test_build_prompt_includes_additional_context(self):
+    """Verifies build_prompt passes additional_context to renderer."""
+    generator = self._create_generator()
+    builder = prompting.PromptBuilder(generator)
+
+    prompt = builder.build_prompt(
+        chunk_text="Test input.",
+        document_id="doc1",
+        additional_context="Important context here.",
+    )
+
+    self.assertIn("Important context here.", prompt)
+
+
+class ContextAwarePromptBuilderTest(absltest.TestCase):
+  """Tests for ContextAwarePromptBuilder."""
+
+  def _create_generator(self):
+    """Creates a simple QAPromptGenerator for testing."""
+    template = prompting.PromptTemplateStructured(
+        description="Extract entities.",
+        examples=[
+            data.ExampleData(
+                text="Sample text.",
+                extractions=[
+                    data.Extraction(
+                        extraction_text="Sample",
+                        extraction_class="entity",
+                    )
+                ],
+            )
+        ],
+    )
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.YAML,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=True,
+    )
+    return prompting.QAPromptGenerator(
+        template=template,
+        format_handler=format_handler,
+    )
+
+  def test_context_window_chars_property(self):
+    """Verifies the context_window_chars property returns configured value."""
+    generator = self._create_generator()
+
+    builder_none = prompting.ContextAwarePromptBuilder(generator)
+    self.assertIsNone(builder_none.context_window_chars)
+
+    builder_with_value = prompting.ContextAwarePromptBuilder(
+        generator, context_window_chars=100
+    )
+    self.assertEqual(100, builder_with_value.context_window_chars)
+
+  def test_first_chunk_has_no_previous_context(self):
+    """Verifies the first chunk does not include previous context."""
+    generator = self._create_generator()
+    builder = prompting.ContextAwarePromptBuilder(
+        generator, context_window_chars=50
+    )
+    context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
+
+    prompt = builder.build_prompt(
+        chunk_text="First chunk text.",
+        document_id="doc1",
+    )
+
+    self.assertNotIn(context_prefix, prompt)
+    self.assertIn("First chunk text.", prompt)
+
+  def test_second_chunk_includes_previous_context(self):
+    """Verifies the second chunk includes text from the first chunk."""
+    generator = self._create_generator()
+    builder = prompting.ContextAwarePromptBuilder(
+        generator, context_window_chars=20
+    )
+    context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
+
+    builder.build_prompt(chunk_text="First chunk ending.", document_id="doc1")
+    second_prompt = builder.build_prompt(
+        chunk_text="Second chunk text.",
+        document_id="doc1",
+    )
+
+    self.assertIn(context_prefix, second_prompt)
+    self.assertIn("chunk ending.", second_prompt)
+
+  def test_context_disabled_when_none(self):
+    """Verifies no context is added when context_window_chars is None."""
+    generator = self._create_generator()
+    builder = prompting.ContextAwarePromptBuilder(
+        generator, context_window_chars=None
+    )
+    context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
+
+    builder.build_prompt(chunk_text="First chunk.", document_id="doc1")
+    second_prompt = builder.build_prompt(
+        chunk_text="Second chunk.",
+        document_id="doc1",
+    )
+
+    self.assertNotIn(context_prefix, second_prompt)
+
+  def test_context_isolated_per_document(self):
+    """Verifies context tracking is isolated per document_id."""
+    generator = self._create_generator()
+    builder = prompting.ContextAwarePromptBuilder(
+        generator, context_window_chars=50
+    )
+
+    builder.build_prompt(chunk_text="Doc A chunk one.", document_id="docA")
+    builder.build_prompt(chunk_text="Doc B chunk one.", document_id="docB")
+
+    prompt_a2 = builder.build_prompt(
+        chunk_text="Doc A chunk two.",
+        document_id="docA",
+    )
+    prompt_b2 = builder.build_prompt(
+        chunk_text="Doc B chunk two.",
+        document_id="docB",
+    )
+
+    self.assertIn("Doc A chunk one", prompt_a2)
+    self.assertNotIn("Doc B", prompt_a2)
+    self.assertIn("Doc B chunk one", prompt_b2)
+    self.assertNotIn("Doc A", prompt_b2)
+
+  def test_combines_previous_context_with_additional_context(self):
+    """Verifies both previous chunk context and additional_context are included."""
+    generator = self._create_generator()
+    builder = prompting.ContextAwarePromptBuilder(
+        generator, context_window_chars=30
+    )
+    context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
+
+    builder.build_prompt(chunk_text="Previous chunk text.", document_id="doc1")
+    prompt = builder.build_prompt(
+        chunk_text="Current chunk.",
+        document_id="doc1",
+        additional_context="Extra info here.",
+    )
+
+    self.assertIn(context_prefix, prompt)
+    self.assertIn("Previous chunk text.", prompt)
+    self.assertIn("Extra info here.", prompt)
+
+
 if __name__ == "__main__":
   absltest.main()

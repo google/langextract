@@ -174,9 +174,23 @@ def save_annotated_documents(
   else:
     output_dir = pathlib.Path(output_dir)
 
+  output_dir = output_dir.resolve()
   output_dir.mkdir(parents=True, exist_ok=True)
 
-  output_file = output_dir / output_name
+  # Sanitize output_name to prevent path traversal attacks
+  # Only allow the basename, strip any directory components
+  safe_output_name = pathlib.Path(output_name).name
+  if not safe_output_name:
+    raise IOError(f'Invalid output_name: {output_name}')
+
+  output_file = output_dir / safe_output_name
+  output_file = output_file.resolve()
+
+  # Ensure output_file is within output_dir to prevent traversal
+  if not str(output_file).startswith(str(output_dir)):
+    raise IOError(
+        f'Path traversal detected: output_name {output_name} attempts to escape output_dir'
+    )
   has_data = False
   doc_count = 0
 

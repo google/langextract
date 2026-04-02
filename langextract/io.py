@@ -35,6 +35,74 @@ from langextract.core import exceptions
 DEFAULT_TIMEOUT_SECONDS = 30
 
 
+def _is_internal_hostname(hostname: str) -> bool:
+  """Check if hostname is an internal/reserved address.
+
+  Args:
+    hostname: The hostname to check.
+
+  Returns:
+    True if hostname is internal/reserved, False otherwise.
+  """
+  if not hostname:
+    return False
+
+  internal_hostnames = {'localhost', '0.0.0.0', '[::1]', '[::]', '[::ffff:127.0.0.1]'}
+  if hostname.lower() in internal_hostnames:
+    return True
+
+  # Check for IPv4 internal ranges
+  try:
+    ip = ipaddress.ip_address(hostname)
+    # Check for loopback, private, link-local, or multicast
+    return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast
+  except ValueError:
+    pass  # Not an IP, continue to check domain patterns
+
+  # Check for internal domain patterns
+  internal_suffixes = [
+      '.local', '.localhost', '.internal', '.home', '.lan',
+      '.corp', '.intra', '.intranet',
+  ]
+  hostname_lower = hostname.lower()
+  if any(hostname_lower.endswith(suffix) for suffix in internal_suffixes):
+    return True
+
+  # Check for cloud metadata endpoints
+  if hostname == '169.254.169.254':
+    return True
+
+  return False
+
+
+def _validate_url_not_internal(url: str) -> None:
+  """Validate that a URL does not point to internal/reserved addresses.
+
+  Args:
+    url: The URL to validate.
+
+  Raises:
+    InvalidUrlError: If the URL points to an internal address.
+  """
+  try:
+    result = urlparse.urlparse(url)
+    hostname = result.hostname
+
+    if not hostname:
+      raise InvalidUrlError(f'URL has no hostname: {url}')
+
+    if _is_internal_hostname(hostname):
+      raise InvalidUrlError(
+          f'URL {url} points to an internal address ({hostname}) which is not allowed'
+      )
+  except (ValueError, AttributeError) as e:
+    raise InvalidUrlError(f'Invalid URL {url}: {e}') from e
+
+
+class InvalidUrlError(exceptions.LangExtractError):
+  """Error raised when a URL is invalid or not allowed."""
+
+
 class InvalidDatasetError(exceptions.LangExtractError):
   """Error raised when Dataset is empty or invalid."""
 
@@ -277,9 +345,13 @@ def download_text_from_url(
     The text content of the URL.
 
   Raises:
+    InvalidUrlError: If the URL points to an internal address.
     requests.RequestException: If the download fails.
     ValueError: If the content is not text-based.
   """
+  # Block SSRF attacks by validating URL does not point to internal addresses
+  _validate_url_not_internal(url)
+
   try:
     # Make initial request to get headers. Use a `with` block so the
     # streamed Response is closed even if iter_content raises mid-stream.

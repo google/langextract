@@ -21,6 +21,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import socket
 from typing import Any, Iterator
 from urllib import parse as urlparse
 
@@ -51,13 +52,29 @@ def _is_internal_hostname(hostname: str) -> bool:
   if hostname.lower() in internal_hostnames:
     return True
 
-  # Check for IPv4 internal ranges
+  # Check for IPv4 internal ranges by direct IP
   try:
     ip = ipaddress.ip_address(hostname)
     # Check for loopback, private, link-local, or multicast
     return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast
   except ValueError:
     pass  # Not an IP, continue to check domain patterns
+
+  # Check DNS resolution to prevent rebinding attacks (e.g., evil.com -> 127.0.0.1)
+  try:
+    resolved = socket.getaddrinfo(hostname, None)
+    for result in resolved:
+      resolved_ip = result[4][0]
+      ip_obj = ipaddress.ip_address(resolved_ip)
+      if (
+          ip_obj.is_private
+          or ip_obj.is_loopback
+          or ip_obj.is_link_local
+          or ip_obj.is_multicast
+      ):
+        return True
+  except (socket.gaierror, ValueError):
+    pass  # DNS resolution failed or invalid IP, continue
 
   # Check for internal domain patterns
   internal_suffixes = [
@@ -187,7 +204,8 @@ def save_annotated_documents(
   output_file = output_file.resolve()
 
   # Ensure output_file is within output_dir to prevent traversal
-  if not str(output_file).startswith(str(output_dir)):
+  # Use parents check instead of startswith for OS-safe comparison
+  if output_dir not in output_file.parents and output_file != output_dir:
     raise IOError(
         f'Path traversal detected: output_name {output_name} attempts to escape output_dir'
     )

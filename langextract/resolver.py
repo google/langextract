@@ -415,7 +415,25 @@ class Resolver(AbstractResolver):
     index_suffix = self.extraction_index_suffix
     attributes_suffix = self.format_handler.attribute_suffix
 
-    for group_index, group in enumerate(extraction_data):
+    for group_index, raw_group in enumerate(extraction_data):
+      # Normalize keys with trailing punctuation (e.g. "emotion_attributes:"
+      # instead of "emotion_attributes") that some non-Gemini models emit.
+      # Build a normalized dict so that subsequent lookups (for index and
+      # attributes companion keys) also work correctly.
+      group = {}
+      for raw_key, value in raw_group.items():
+        normalized_key = raw_key.rstrip(":")
+        if normalized_key != raw_key:
+          logging.debug(
+              "Normalized key %r -> %r (stripped trailing colon).",
+              raw_key,
+              normalized_key,
+          )
+        # If both "emotion_attributes" and "emotion_attributes:" exist in
+        # the same group, the first one wins (preserves clean key priority).
+        if normalized_key not in group:
+          group[normalized_key] = value
+
       for extraction_class, extraction_value in group.items():
         if index_suffix and extraction_class.endswith(index_suffix):
           if not isinstance(extraction_value, int):

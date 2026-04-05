@@ -117,18 +117,19 @@ def save_annotated_documents(
       output_path=str(output_file), disable=not show_progress
   )
 
-  with open(output_file, 'w', encoding='utf-8') as f:
-    for adoc in annotated_documents:
-      if not adoc.document_id:
-        continue
+  try:
+    with open(output_file, 'w', encoding='utf-8') as f:
+      for adoc in annotated_documents:
+        if not adoc.document_id:
+          continue
 
-      doc_dict = data_lib.annotated_document_to_dict(adoc)
-      f.write(json.dumps(doc_dict, ensure_ascii=False) + '\n')
-      has_data = True
-      doc_count += 1
-      progress_bar.update(1)
-
-  progress_bar.close()
+        doc_dict = data_lib.annotated_document_to_dict(adoc)
+        f.write(json.dumps(doc_dict, ensure_ascii=False) + '\n')
+        has_data = True
+        doc_count += 1
+        progress_bar.update(1)
+  finally:
+    progress_bar.close()
 
   if not has_data:
     raise InvalidDatasetError(f'No documents to save in: {output_file}')
@@ -305,12 +306,13 @@ def download_text_from_url(
           total_size=total_size, url=url
       )
 
-      for chunk in response.iter_content(chunk_size=chunk_size):
-        if chunk:
-          chunks.append(chunk)
-          progress_bar.update(len(chunk))
-
-      progress_bar.close()
+      try:
+        for chunk in response.iter_content(chunk_size=chunk_size):
+          if chunk:
+            chunks.append(chunk)
+            progress_bar.update(len(chunk))
+      finally:
+        progress_bar.close()
     else:
       # Download without progress bar
       for chunk in response.iter_content(chunk_size=chunk_size):

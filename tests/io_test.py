@@ -40,16 +40,21 @@ class _ClosingTracker:
 
 class IoTest(unittest.TestCase):
 
-  def test_save_annotated_documents_closes_progress_bar_on_generator_error(self):
+  def test_save_annotated_documents_closes_progress_bar_on_generator_error(
+      self,
+  ):
     tracker = _ClosingTracker()
 
     def annotated_documents():
-      yield data.AnnotatedDocument(document_id='doc-1', text='hello', extractions=[])
+      yield data.AnnotatedDocument(
+          document_id='doc-1', text='hello', extractions=[]
+      )
       raise RuntimeError('boom')
 
     with tempfile.TemporaryDirectory() as tmpdir:
       with mock.patch(
-          'langextract.io.progress.create_save_progress_bar', return_value=tracker
+          'langextract.io.progress.create_save_progress_bar',
+          return_value=tracker,
       ):
         with self.assertRaisesRegex(RuntimeError, 'boom'):
           io.save_annotated_documents(
@@ -82,7 +87,9 @@ class IoTest(unittest.TestCase):
           'langextract.io.progress.create_download_progress_bar',
           return_value=tracker,
       ):
-        with self.assertRaisesRegex(requests.RequestException, 'connection reset'):
+        with self.assertRaisesRegex(
+            requests.RequestException, 'connection reset'
+        ):
           io.download_text_from_url('https://example.com/file.txt')
 
     self.assertTrue(tracker.closed)

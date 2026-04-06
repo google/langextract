@@ -1868,26 +1868,13 @@ class ResolverTest(parameterized.TestCase):
     with self.assertRaises(resolver_lib.ResolverParsingError):
       self.default_resolver.resolve(test_input, suppress_parse_errors=False)
 
-  @parameterized.named_parameters(
-      dict(
-          testcase_name="non_dict_attributes",
-          test_input=(
-              '```json\n{"extractions":'
-              ' [{"entity": "test", "entity_index": 1,'
-              ' "entity_attributes": "bad"}]}\n```'
-          ),
-      ),
-      dict(
-          testcase_name="malformed_key_trailing_colon",
-          test_input=(
-              '```json\n{"extractions":'
-              ' [{"emotion": "joy", "emotion_index": 1,'
-              ' "emotion_attributes:": {"intensity": "high"}}]}\n```'
-          ),
-      ),
-  )
-  def test_resolve_schema_error_suppressed(self, test_input):
+  def test_resolve_schema_error_suppressed(self):
     """Schema errors are suppressed with warning-only logging."""
+    test_input = (
+        '```json\n{"extractions":'
+        ' [{"entity": "test", "entity_index": 1,'
+        ' "entity_attributes": "bad"}]}\n```'
+    )
     with mock.patch("langextract.resolver.logging") as mock_log:
       actual = self.default_resolver.resolve(
           test_input, suppress_parse_errors=True
@@ -1897,6 +1884,24 @@ class ResolverTest(parameterized.TestCase):
       log_msg = mock_log.warning.call_args[0][0]
       self.assertIn("schema error", log_msg)
       mock_log.error.assert_not_called()
+
+  def test_resolve_normalizes_trailing_colon_keys_when_suppressed(self):
+    """Trailing-colon companion keys are normalized instead of dropped."""
+    test_input = (
+        '```json\n{"extractions":'
+        ' [{"emotion": "joy", "emotion_index": 1,'
+        ' "emotion_attributes:": {"intensity": "high"}}]}\n```'
+    )
+
+    actual = self.default_resolver.resolve(
+        test_input, suppress_parse_errors=True
+    )
+
+    self.assertLen(actual, 1)
+    self.assertEqual(actual[0].extraction_class, "emotion")
+    self.assertEqual(actual[0].extraction_text, "joy")
+    self.assertEqual(actual[0].extraction_index, 1)
+    self.assertEqual(actual[0].attributes, {"intensity": "high"})
 
   def test_resolve_schema_error_raises_without_suppression(self):
     """Malformed attributes raise ResolverParsingError when not suppressed."""

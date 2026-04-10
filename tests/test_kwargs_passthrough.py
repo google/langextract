@@ -28,8 +28,8 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
   """Test OpenAI provider's enhanced kwargs handling."""
 
   @mock.patch('openai.OpenAI')
-  def test_reasoning_effort_alias_normalization(self, mock_openai_class):
-    """Reasoning_effort parameter should be normalized to {reasoning: {effort: ...}}."""
+  def test_reasoning_effort_passed_as_top_level(self, mock_openai_class):
+    """reasoning_effort is passed as a top-level Chat Completions parameter."""
     mock_client = mock.Mock()
     mock_openai_class.return_value = mock_client
 
@@ -42,17 +42,18 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
     model = openai.OpenAILanguageModel(
         model_id='gpt-4o-mini',
         api_key='test-key',
-        reasoning_effort='minimal',
+        reasoning_effort='low',
     )
 
     list(model.infer(['test prompt']))
 
     call_args = mock_client.chat.completions.create.call_args
-    self.assertEqual(call_args.kwargs.get('reasoning'), {'effort': 'minimal'})
+    self.assertEqual(call_args.kwargs.get('reasoning_effort'), 'low')
+    self.assertNotIn('reasoning', call_args.kwargs)
 
   @mock.patch('openai.OpenAI')
-  def test_reasoning_parameter_normalized(self, mock_openai_class):
-    """Runtime reasoning_effort should normalize even without constructor param."""
+  def test_runtime_reasoning_effort_override(self, mock_openai_class):
+    """Runtime reasoning_effort overrides constructor value."""
     mock_client = mock.Mock()
     mock_openai_class.return_value = mock_client
 
@@ -63,14 +64,15 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
     mock_client.chat.completions.create.return_value = mock_response
 
     model = openai.OpenAILanguageModel(
-        model_id='gpt-5-nano',
+        model_id='o4-mini',
         api_key='test-key',
+        reasoning_effort='low',
     )
 
-    list(model.infer(['test prompt'], reasoning_effort='maximal'))
+    list(model.infer(['test prompt'], reasoning_effort='high'))
 
     call_args = mock_client.chat.completions.create.call_args
-    self.assertEqual(call_args.kwargs.get('reasoning'), {'effort': 'maximal'})
+    self.assertEqual(call_args.kwargs.get('reasoning_effort'), 'high')
 
   @mock.patch('openai.OpenAI')
   def test_runtime_kwargs_override_stored(self, mock_openai_class):
@@ -124,8 +126,8 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
     self.assertEqual(call_args.kwargs.get('top_logprobs'), 0)
 
   @mock.patch('openai.OpenAI')
-  def test_both_reasoning_forms_merge(self, mock_openai_class):
-    """Both reasoning and reasoning_effort should merge without clobbering."""
+  def test_reasoning_effort_not_nested(self, mock_openai_class):
+    """reasoning_effort should not be converted to a nested reasoning dict."""
     mock_client = mock.Mock()
     mock_openai_class.return_value = mock_client
 
@@ -136,19 +138,16 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
     mock_client.chat.completions.create.return_value = mock_response
 
     model = openai.OpenAILanguageModel(
-        model_id='gpt-5',
+        model_id='o4-mini',
         api_key='test-key',
-        reasoning={'other_field': 'value'},
-        reasoning_effort='maximal',
+        reasoning_effort='medium',
     )
 
     list(model.infer(['test prompt']))
 
     call_args = mock_client.chat.completions.create.call_args
-    self.assertEqual(
-        call_args.kwargs.get('reasoning'),
-        {'other_field': 'value', 'effort': 'maximal'},
-    )
+    self.assertEqual(call_args.kwargs.get('reasoning_effort'), 'medium')
+    self.assertNotIn('reasoning', call_args.kwargs)
 
   @mock.patch('openai.OpenAI')
   def test_custom_response_format(self, mock_openai_class):
@@ -182,8 +181,8 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
     )
 
   @mock.patch('openai.OpenAI')
-  def test_direct_reasoning_parameter(self, mock_openai_class):
-    """Direct reasoning parameter should pass through without modification."""
+  def test_reasoning_not_in_chat_completions(self, mock_openai_class):
+    """reasoning dict is not forwarded to Chat Completions API."""
     mock_client = mock.Mock()
     mock_openai_class.return_value = mock_client
 
@@ -194,14 +193,14 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
     mock_client.chat.completions.create.return_value = mock_response
 
     model = openai.OpenAILanguageModel(
-        model_id='gpt-5',
+        model_id='o4-mini',
         api_key='test-key',
     )
 
-    list(model.infer(['test prompt'], reasoning={'effort': 'minimal'}))
+    list(model.infer(['test prompt'], reasoning={'effort': 'low'}))
 
     call_args = mock_client.chat.completions.create.call_args
-    self.assertEqual(call_args.kwargs.get('reasoning'), {'effort': 'minimal'})
+    self.assertNotIn('reasoning', call_args.kwargs)
 
 
 class TestOllamaAuthSupport(parameterized.TestCase):

@@ -72,7 +72,8 @@ class Extraction:
     extraction_class: The class of the extraction.
     extraction_text: The text of the extraction.
     char_interval: The character interval of the extraction in the original
-      text.
+      text. None when the extraction text could not be located in the source
+      document.
     alignment_status: The alignment status of the extraction.
     extraction_index: The index of the extraction in the list of extractions.
     group_index: The index of the group the extraction belongs to.

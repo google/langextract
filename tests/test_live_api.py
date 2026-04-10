@@ -1007,3 +1007,31 @@ class TestLiveAPIOpenAI(unittest.TestCase):
       assert any(
           c in extraction_classes for c in [_CLASS_DOSAGE, "dose"]
       ), f"{med_name} group missing dosage"
+
+  @skip_if_no_openai
+  @live_api
+  @retry_on_transient_errors(max_retries=2)
+  def test_reasoning_effort_passthrough(self):
+    """reasoning_effort is accepted by reasoning models."""
+    examples = get_basic_medication_examples()
+    input_text = "Patient took 400 mg PO Ibuprofen q4h for two days."
+
+    config = lx.factory.ModelConfig(
+        model_id="o4-mini",
+        provider="OpenAILanguageModel",
+        provider_kwargs={
+            "api_key": OPENAI_API_KEY,
+            "reasoning_effort": "low",
+        },
+    )
+
+    result = lx.extract(
+        text_or_documents=input_text,
+        prompt_description="Extract medications.",
+        examples=examples,
+        config=config,
+        use_schema_constraints=False,
+    )
+
+    assert result is not None
+    self.assertIsInstance(result, lx.data.AnnotatedDocument)

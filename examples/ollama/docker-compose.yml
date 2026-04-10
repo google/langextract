@@ -21,7 +21,7 @@ services:
       - ollama-data:/root/.ollama  # Cross-platform support
     command: serve
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      test: ["CMD", "ollama", "list"]
       interval: 5s
       timeout: 3s
       retries: 5

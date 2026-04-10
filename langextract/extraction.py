@@ -160,10 +160,11 @@ def extract(
         Minimum token overlap ratio for fuzzy match (0.0-1.0). Default is 0.75.
         'accept_match_lesser' (bool): Whether to accept partial exact matches.
         Default is True. 'suppress_parse_errors' (bool): Suppresses chunk-level
-        FormatError parsing failures so that one unparseable chunk does not
-        fail the entire document; defaults to True in extract() while the
-        underlying Resolver.resolve() default remains False. Set to False
-        when prototyping to surface prompt issues early.
+        parse and schema errors (FormatError, ValueError) so that one
+        unparseable or malformed chunk does not fail the entire document;
+        defaults to True in extract() while the underlying
+        Resolver.resolve() default remains False. Set to False when
+        prototyping to surface prompt issues early.
       language_model_params: Additional parameters for the language model.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract

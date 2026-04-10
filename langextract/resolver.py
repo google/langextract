@@ -241,7 +241,9 @@ class Resolver(AbstractResolver):
 
     Args:
         input_text: The input text to be processed.
-        suppress_parse_errors: Log errors and continue pipeline.
+        suppress_parse_errors: When True, logs a warning and returns []
+          on parse failures (FormatError) or schema/type errors (ValueError)
+          instead of raising.
         **kwargs: Additional keyword arguments.
 
     Returns:
@@ -268,7 +270,13 @@ class Resolver(AbstractResolver):
         return []
       raise ResolverParsingError(str(e)) from e
 
-    processed_extractions = self.extract_ordered_extractions(extraction_data)
+    try:
+      processed_extractions = self.extract_ordered_extractions(extraction_data)
+    except ValueError as e:
+      if suppress_parse_errors:
+        logging.warning("Skipping chunk: schema error: %s", e)
+        return []
+      raise ResolverParsingError(str(e)) from e
 
     logging.debug("Completed the resolver process.")
 
@@ -402,8 +410,8 @@ class Resolver(AbstractResolver):
         extractions have the same index, their group order dictates the sorting
         order.
     Raises:
-        ValueError: If the extraction text is not a string or integer, or if the
-        index is not an integer.
+        ValueError: If an index is not an integer, attributes are not a dict
+        or None, or extraction text is not a string, integer, or float.
     """
     logging.debug("Starting to extract and order extractions from data.")
 
@@ -419,7 +427,7 @@ class Resolver(AbstractResolver):
       for extraction_class, extraction_value in group.items():
         if index_suffix and extraction_class.endswith(index_suffix):
           if not isinstance(extraction_value, int):
-            logging.error(
+            logging.debug(
                 "Index must be an integer. Found: %s",
                 type(extraction_value),
             )
@@ -428,7 +436,7 @@ class Resolver(AbstractResolver):
 
         if attributes_suffix and extraction_class.endswith(attributes_suffix):
           if not isinstance(extraction_value, (dict, type(None))):
-            logging.error(
+            logging.debug(
                 "Attributes must be a dict or None. Found: %s",
                 type(extraction_value),
             )
@@ -438,7 +446,7 @@ class Resolver(AbstractResolver):
           continue
 
         if not isinstance(extraction_value, (str, int, float)):
-          logging.error(
+          logging.debug(
               "Extraction text must be a string, integer, or float. Found: %s",
               type(extraction_value),
           )

@@ -269,7 +269,9 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
             model_url=self._model_url,
             **combined_kwargs,
         )
-        yield [core_types.ScoredOutput(score=1.0, output=response['response'])]
+        # Handle Ollama API changes: newer versions may put content in 'thinking' instead of 'response'
+        output = response.get('response') or response.get('thinking', '')
+        yield [core_types.ScoredOutput(score=1.0, output=output)]
       except Exception as e:
         raise exceptions.InferenceRuntimeError(
             f'Ollama API error: {str(e)}', original=e
@@ -332,7 +334,7 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
 
     Returns:
       A mapping (dictionary-like) containing the server's JSON response. For
-      non-streaming calls, the `"response"` key typically contains the entire
+      non-streaming calls, the `"response"` or `"thinking"` key contains the entire
       generated text.
 
     Raises:

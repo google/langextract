@@ -22,6 +22,8 @@ realistic input sizes. Run from repo root:
   python benchmarks/fuzzy_benchmark.py --sizes planted_contiguous,perf_1k
   python benchmarks/fuzzy_benchmark.py --sizes large --runs 1
   python benchmarks/fuzzy_benchmark.py --tokenizer unicode
+  python benchmarks/fuzzy_benchmark.py --algorithm lcs
+  python benchmarks/fuzzy_benchmark.py --algorithm legacy
 """
 
 from __future__ import annotations
@@ -230,7 +232,13 @@ _DEFAULT_SIZES = (
 )
 
 
-def _get_metadata(tokenizer_name: str, seed: int, threshold: float) -> dict:
+def _get_metadata(
+    tokenizer_name: str,
+    seed: int,
+    threshold: float,
+    algorithm: str,
+    min_density: float,
+) -> dict:
   """Collects run metadata for reproducibility."""
   git_sha = "unknown"
   try:
@@ -251,6 +259,8 @@ def _get_metadata(tokenizer_name: str, seed: int, threshold: float) -> dict:
       "tokenizer": tokenizer_name,
       "seed": seed,
       "fuzzy_alignment_threshold": threshold,
+      "fuzzy_alignment_algorithm": algorithm,
+      "fuzzy_alignment_min_density": min_density,
       "git_sha": git_sha,
   }
 
@@ -261,6 +271,8 @@ def _run_single(
     extraction_text: str,
     tokenizer: tokenizer_lib.Tokenizer,
     threshold: float,
+    algorithm: str,
+    min_density: float,
 ) -> dict:
   """Runs a single fuzzy alignment and returns timing + result."""
   resolver_lib._normalize_token.cache_clear()
@@ -270,15 +282,27 @@ def _run_single(
   extraction = _make_extraction(extraction_text)
 
   start = time.perf_counter()
-  result = aligner._fuzzy_align_extraction(
-      extraction=extraction,
-      source_tokens=source_tokens,
-      tokenized_text=tokenized,
-      token_offset=0,
-      char_offset=0,
-      fuzzy_alignment_threshold=threshold,
-      tokenizer_impl=tokenizer,
-  )
+  if algorithm == "lcs":
+    result = aligner._lcs_fuzzy_align_extraction(
+        extraction=extraction,
+        source_tokens=source_tokens,
+        tokenized_text=tokenized,
+        token_offset=0,
+        char_offset=0,
+        fuzzy_alignment_threshold=threshold,
+        fuzzy_alignment_min_density=min_density,
+        tokenizer_impl=tokenizer,
+    )
+  else:
+    result = aligner._fuzzy_align_extraction(
+        extraction=extraction,
+        source_tokens=source_tokens,
+        tokenized_text=tokenized,
+        token_offset=0,
+        char_offset=0,
+        fuzzy_alignment_threshold=threshold,
+        tokenizer_impl=tokenizer,
+    )
   elapsed = time.perf_counter() - start
 
   matched_substring = None
@@ -339,6 +363,18 @@ def main():
       default=0.75,
       help="Fuzzy alignment threshold (default: 0.75)",
   )
+  parser.add_argument(
+      "--algorithm",
+      choices=["lcs", "legacy"],
+      default="lcs",
+      help="Fuzzy alignment algorithm (default: lcs)",
+  )
+  parser.add_argument(
+      "--min-density",
+      type=float,
+      default=1 / 3,
+      help="Min matched-to-span density for LCS algorithm (default: 1/3)",
+  )
   parser.add_argument("--json-output", help="Write results to JSON file")
   args = parser.parse_args()
 
@@ -351,12 +387,17 @@ def main():
     tokenizer = tokenizer_lib.RegexTokenizer()
 
   aligner = resolver_lib.WordAligner()
-  metadata = _get_metadata(args.tokenizer, 42, args.threshold)
+  metadata = _get_metadata(
+      args.tokenizer, 42, args.threshold, args.algorithm, args.min_density
+  )
 
   results = {"_metadata": metadata}
   print(f"Fuzzy alignment benchmark ({args.runs} runs per case)\n")
+  print(f"  algorithm: {args.algorithm}")
   print(f"  tokenizer: {args.tokenizer}")
   print(f"  threshold: {args.threshold}")
+  if args.algorithm == "lcs":
+    print(f"  min_density: {args.min_density:.3f}")
   print(f"  git: {metadata['git_sha']}\n")
 
   for name in selected:
@@ -383,7 +424,13 @@ def main():
     for i in range(args.runs):
       print(f"    run {i + 1}/{args.runs}...", end="", flush=True)
       result = _run_single(
-          aligner, source, extraction_text, tokenizer, args.threshold
+          aligner,
+          source,
+          extraction_text,
+          tokenizer,
+          args.threshold,
+          args.algorithm,
+          args.min_density,
       )
       timings.append(result["elapsed_ms"])
       last_result = result

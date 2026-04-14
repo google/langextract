@@ -1620,8 +1620,6 @@ class AlignEntitiesTest(parameterized.TestCase):
       ),
       dict(
           testcase_name="fuzzy_alignment_partial_overlap_success",
-          # An extraction where the number of matched tokens divided by total extraction tokens
-          # is >= the threshold (3/4 = 0.75).
           extractions=[[
               data.Extraction(
                   extraction_class="finding",
@@ -1635,11 +1633,10 @@ class AlignEntitiesTest(parameterized.TestCase):
               data.Extraction(
                   extraction_class="finding",
                   extraction_text="mild degenerative disc disease",
-                  # The best window found is "degenerative disc disease"
                   token_interval=tokenizer.TokenInterval(
                       start_index=3, end_index=6
                   ),
-                  char_interval=data.CharInterval(start_pos=20, end_pos=50),
+                  char_interval=data.CharInterval(start_pos=25, end_pos=50),
                   alignment_status=data.AlignmentStatus.MATCH_FUZZY,
               )
           ]],

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import dataclasses
 import typing
 from typing import cast
 import warnings
@@ -118,20 +119,17 @@ def extract(
       resolver_params: Parameters for the `resolver.Resolver`, which parses the
         raw language model output string (e.g., extracting JSON from ```json ...
         ``` blocks) into structured `data.Extraction` objects. This dictionary
-        overrides default settings. Keys include: - 'extraction_index_suffix'
-        (str | None): Suffix for keys indicating extraction order. Default is
-        None (order by appearance). Additional alignment parameters can be
-        included: 'enable_fuzzy_alignment' (bool): Whether to use fuzzy matching
-        if exact matching fails. Disabling this can improve performance but may
-        reduce recall. Default is True. 'fuzzy_alignment_threshold' (float):
-        Minimum token overlap ratio for fuzzy match (0.0-1.0). Default is 0.75.
-        'accept_match_lesser' (bool): Whether to accept partial exact matches.
-        Default is True. 'suppress_parse_errors' (bool): Suppresses chunk-level
-        parse and schema errors (FormatError, ValueError) so that one
-        unparseable or malformed chunk does not fail the entire document;
-        defaults to True in extract() while the underlying
-        Resolver.resolve() default remains False. Set to False when
-        prototyping to surface prompt issues early.
+        overrides default settings. Keys include:
+        'extraction_index_suffix' (str | None): Suffix for extraction
+        ordering keys. Default is None (order by appearance).
+        'suppress_parse_errors' (bool): Suppresses chunk-level parse
+        errors so one malformed chunk does not fail the entire document.
+        Default is True in extract().
+        Alignment tuning keys: 'enable_fuzzy_alignment' (bool, True),
+        'fuzzy_alignment_threshold' (float, 0.75),
+        'fuzzy_alignment_algorithm' (str, "lcs"; "legacy" is deprecated),
+        'fuzzy_alignment_min_density' (float, 1/3),
+        'accept_match_lesser' (bool, True).
       language_model_params: Additional parameters for the language model.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract
@@ -183,10 +181,16 @@ def extract(
     )
 
   if prompt_validation_level is not pv.PromptValidationLevel.OFF:
+    policy_kwargs = {}
+    if resolver_params:
+      for field in dataclasses.fields(pv.AlignmentPolicy):
+        val = resolver_params.get(field.name)
+        if val is not None:
+          policy_kwargs[field.name] = val
     report = pv.validate_prompt_alignment(
         examples=examples,
         aligner=resolver.WordAligner(),
-        policy=pv.AlignmentPolicy(),
+        policy=pv.AlignmentPolicy(**policy_kwargs),
         tokenizer=tokenizer,
     )
     pv.handle_alignment_report(

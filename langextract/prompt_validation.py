@@ -39,6 +39,8 @@ __all__ = [
 
 
 _FUZZY_ALIGNMENT_MIN_THRESHOLD = 0.75
+_FUZZY_ALIGNMENT_MIN_DENSITY = 1 / 3
+_DEFAULT_FUZZY_ALGORITHM = "lcs"
 
 
 class PromptValidationLevel(enum.Enum):
@@ -111,6 +113,9 @@ class AlignmentPolicy:
   enable_fuzzy_alignment: bool = True
   fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD
   accept_match_lesser: bool = True
+  _: dataclasses.KW_ONLY
+  fuzzy_alignment_algorithm: str = _DEFAULT_FUZZY_ALGORITHM
+  fuzzy_alignment_min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY
 
 
 def _preview(s: str, n: int = 120) -> str:
@@ -155,6 +160,8 @@ def validate_prompt_alignment(
         char_offset=0,
         enable_fuzzy_alignment=policy.enable_fuzzy_alignment,
         fuzzy_alignment_threshold=policy.fuzzy_alignment_threshold,
+        fuzzy_alignment_algorithm=policy.fuzzy_alignment_algorithm,
+        fuzzy_alignment_min_density=policy.fuzzy_alignment_min_density,
         accept_match_lesser=policy.accept_match_lesser,
         tokenizer_impl=tokenizer,
     )

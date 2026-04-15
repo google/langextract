@@ -288,6 +288,7 @@ class FormatHandler:
       FormatParseError: When fences required but not found or multiple
         blocks found.
     """
+    strip_text = text.strip()
     if not self.use_fences:
       matches = list(_FENCE_RE.finditer(text))
 
@@ -311,7 +312,7 @@ class FormatHandler:
         if not self.strict_fences and len(matches) == 1:
           return matches[0].group("body").strip()
 
-      return text.strip()
+      return strip_text
 
     matches = list(_FENCE_RE.finditer(text))
 
@@ -352,7 +353,7 @@ class FormatHandler:
           f"No {self.format_type.value} code block found."
       )
 
-    return text.strip()
+    return strip_text
 
   # ---- Backward compatibility methods (to be removed in v2.0.0) ----
 

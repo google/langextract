@@ -299,17 +299,17 @@ class FormatHandler:
         candidates = [
             m
             for m in matches
-            if self._is_valid_language_tag(m.group('lang'), valid_tags)
+            if self._is_valid_language_tag(m.group("lang"), valid_tags)
         ]
 
         if len(candidates) == 1:
-          return candidates[0].group('body').strip()
+          return candidates[0].group("body").strip()
         if len(candidates) > 1:
           raise exceptions.FormatParseError(
-              'Multiple fenced blocks found. Expected exactly one.'
+              "Multiple fenced blocks found. Expected exactly one."
           )
         if not self.strict_fences and len(matches) == 1:
-          return matches[0].group('body').strip()
+          return matches[0].group("body").strip()
 
       return text.strip()
 

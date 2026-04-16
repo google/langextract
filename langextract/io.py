@@ -281,67 +281,68 @@ def download_text_from_url(
     ValueError: If the content is not text-based.
   """
   try:
-    # Make initial request to get headers
-    response = requests.get(url, stream=True, timeout=timeout)
-    response.raise_for_status()
+    # Make initial request to get headers. Use a `with` block so the
+    # streamed Response is closed even if iter_content raises mid-stream.
+    with requests.get(url, stream=True, timeout=timeout) as response:
+      response.raise_for_status()
 
-    # Check content type
-    content_type = response.headers.get('Content-Type', '').lower()
-    if not any(
-        ct in content_type
-        for ct in ['text/', 'application/json', 'application/xml']
-    ):
-      # Try to proceed anyway, but warn
-      print(f"Warning: Content-Type '{content_type}' may not be text-based")
+      # Check content type
+      content_type = response.headers.get('Content-Type', '').lower()
+      if not any(
+          ct in content_type
+          for ct in ['text/', 'application/json', 'application/xml']
+      ):
+        # Try to proceed anyway, but warn
+        print(f"Warning: Content-Type '{content_type}' may not be text-based")
 
-    # Get content length for progress bar
-    total_size = int(response.headers.get('Content-Length', 0))
+      # Get content length for progress bar
+      total_size = int(response.headers.get('Content-Length', 0))
 
-    filename = url.split('/')[-1][:50]
+      filename = url.split('/')[-1][:50]
 
-    # Download content with progress bar
-    chunks = []
-    if show_progress and total_size > 0:
-      progress_bar = progress.create_download_progress_bar(
-          total_size=total_size, url=url
-      )
+      # Download content with progress bar
+      chunks = []
+      if show_progress and total_size > 0:
+        progress_bar = progress.create_download_progress_bar(
+            total_size=total_size, url=url
+        )
 
-      try:
+        try:
+          for chunk in response.iter_content(chunk_size=chunk_size):
+            if chunk:
+              chunks.append(chunk)
+              progress_bar.update(len(chunk))
+        finally:
+          progress_bar.close()
+      else:
+        # Download without progress bar
         for chunk in response.iter_content(chunk_size=chunk_size):
           if chunk:
             chunks.append(chunk)
-            progress_bar.update(len(chunk))
-      finally:
-        progress_bar.close()
-    else:
-      # Download without progress bar
-      for chunk in response.iter_content(chunk_size=chunk_size):
-        if chunk:
-          chunks.append(chunk)
 
-    # Combine chunks and decode
-    content = b''.join(chunks)
+      # Combine chunks and decode
+      content = b''.join(chunks)
 
-    # Try to decode as text
-    encodings = ['utf-8', 'latin-1', 'ascii', 'utf-16']
-    text_content = None
-    for encoding in encodings:
-      try:
-        text_content = content.decode(encoding)
-        break
-      except UnicodeDecodeError:
-        continue
+      # Try to decode as text
+      encodings = ['utf-8', 'latin-1', 'ascii', 'utf-16']
+      text_content = None
+      for encoding in encodings:
+        try:
+          text_content = content.decode(encoding)
+          break
+        except UnicodeDecodeError:
+          continue
 
-    if text_content is None:
-      raise ValueError(f'Could not decode content from {url} as text')
+      if text_content is None:
+        raise ValueError(f'Could not decode content from {url} as text')
 
-    # Show content summary with clean formatting
-    if show_progress:
-      char_count = len(text_content)
-      word_count = len(text_content.split())
-      progress.print_download_complete(char_count, word_count, filename)
+      # Show content summary with clean formatting
+      if show_progress:
+        char_count = len(text_content)
+        word_count = len(text_content.split())
+        progress.print_download_complete(char_count, word_count, filename)
 
-    return text_content
+      return text_content
 
   except requests.RequestException as e:
     raise requests.RequestException(

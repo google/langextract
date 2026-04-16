@@ -68,7 +68,9 @@ class IoTest(unittest.TestCase):
 
   def test_download_text_from_url_closes_progress_bar_on_stream_error(self):
     tracker = _ClosingTracker()
-    response = mock.Mock()
+    response = mock.MagicMock()
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
     response.headers = {
         'Content-Type': 'text/plain',
         'Content-Length': '10',

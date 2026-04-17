@@ -118,6 +118,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
+    if not isinstance(prompt, str):
+      prompt = str(prompt)
     try:
       normalized_config = config.copy()
 

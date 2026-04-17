@@ -44,6 +44,7 @@ from google.api_core import exceptions as google_exceptions
 from google.cloud import storage
 
 from langextract.core import exceptions
+from langextract.prompting import PromptParts
 
 _MIME_TYPE_JSON = "application/json"
 _DEFAULT_LOCATION = "us-central1"
@@ -257,7 +258,7 @@ def _ensure_bucket_lifecycle(
 
 
 def _build_request(
-    prompt: str,
+    prompt: str | PromptParts,
     schema_dict: dict | None,
     gen_config: dict | None,
     system_instruction: str | None = None,
@@ -270,8 +271,12 @@ def _build_request(
   can include its own generationConfig with schema and generation parameters,
   as well as top-level systemInstruction and safetySettings.
 
+  When prompt is a PromptParts with non-empty examples, uses multi-part
+  contents so the large examples string can be shared by reference across
+  requests, avoiding O(N * examples_size) memory.
+
   Args:
-    prompt: The text prompt to send to the model.
+    prompt: The text prompt or structured PromptParts.
     schema_dict: Optional JSON schema for structured output.
     gen_config: Optional generation configuration parameters.
     system_instruction: Optional system instruction text.
@@ -279,12 +284,24 @@ def _build_request(
 
   Returns:
     A dictionary formatted for REST API file-based submission, containing:
-      * contents: The prompt content.
+      * contents: The prompt content (multi-part when PromptParts).
       * systemInstruction: Optional system instructions.
       * safetySettings: Optional safety settings.
       * generationConfig: Optional generation configuration and schema.
   """
-  request = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
+  if isinstance(prompt, PromptParts) and prompt.examples:
+    # Multi-part content: keeps the large examples string as a shared
+    # Python reference across all requests in the batch.  The \n placement
+    # matches the separator that PromptParts.__str__ uses via "\n".join().
+    parts = [
+        {"text": prompt.prefix + "\n"},
+        {"text": prompt.examples},
+        {"text": "\n" + prompt.suffix},
+    ]
+    request = {"contents": [{"role": "user", "parts": parts}]}
+  else:
+    text = str(prompt) if not isinstance(prompt, str) else prompt
+    request = {"contents": [{"role": "user", "parts": [{"text": text}]}]}
 
   if system_instruction:
     request["systemInstruction"] = {"parts": [{"text": system_instruction}]}

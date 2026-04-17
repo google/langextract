@@ -203,6 +203,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
     """Process a single prompt and return a ScoredOutput."""
+    if not isinstance(prompt, str):
+      prompt = str(prompt)
     try:
       # Apply stored kwargs that weren't already set in config
       for key, value in self._extra_kwargs.items():

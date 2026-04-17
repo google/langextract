@@ -799,7 +799,7 @@ def infer_batch(
     for prompt in prompts:
       key_data_list.append({
           "model_id": model_id,
-          "prompt": prompt,
+          "prompt": str(prompt) if not isinstance(prompt, str) else prompt,
           "system_instruction": system_instruction,
           "gen_config": gen_config,
           "safety_settings": safety_settings,
@@ -890,7 +890,7 @@ def infer_batch(
       prompt = prompts[idx]
       key_data = {
           "model_id": model_id,
-          "prompt": prompt,
+          "prompt": str(prompt) if not isinstance(prompt, str) else prompt,
           "system_instruction": system_instruction,
           "gen_config": gen_config,
           "safety_settings": safety_settings,

@@ -32,7 +32,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 2  # Sufficient for rev-list comparison
 
@@ -56,7 +56,7 @@ jobs:
 
       - name: Comment if PR needs update
         if: ${{ steps.check.outputs.commits_behind != '0' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const behind = ${{ steps.check.outputs.commits_behind }};

@@ -439,8 +439,10 @@ class PromptBuilderTest(absltest.TestCase):
         document_id="doc1",
     )
 
-    self.assertIn("Test input text.", prompt)
-    self.assertIn("Extract entities.", prompt)
+    self.assertIsInstance(prompt, prompting.PromptParts)
+    prompt_str = str(prompt)
+    self.assertIn("Test input text.", prompt_str)
+    self.assertIn("Extract entities.", prompt_str)
 
   def test_build_prompt_includes_additional_context(self):
     """Verifies build_prompt passes additional_context to renderer."""
@@ -453,7 +455,18 @@ class PromptBuilderTest(absltest.TestCase):
         additional_context="Important context here.",
     )
 
-    self.assertIn("Important context here.", prompt)
+    prompt_str = str(prompt)
+    self.assertIn("Important context here.", prompt_str)
+
+  def test_build_prompt_shares_examples_reference(self):
+    """Verifies all prompts share the same examples string object."""
+    generator = self._create_generator()
+    builder = prompting.PromptBuilder(generator)
+
+    p1 = builder.build_prompt(chunk_text="Chunk 1.", document_id="doc1")
+    p2 = builder.build_prompt(chunk_text="Chunk 2.", document_id="doc1")
+
+    self.assertIs(p1.examples, p2.examples)
 
 
 class ContextAwarePromptBuilderTest(absltest.TestCase):
@@ -511,8 +524,10 @@ class ContextAwarePromptBuilderTest(absltest.TestCase):
         document_id="doc1",
     )
 
-    self.assertNotIn(context_prefix, prompt)
-    self.assertIn("First chunk text.", prompt)
+    self.assertIsInstance(prompt, prompting.PromptParts)
+    prompt_str = str(prompt)
+    self.assertNotIn(context_prefix, prompt_str)
+    self.assertIn("First chunk text.", prompt_str)
 
   def test_second_chunk_includes_previous_context(self):
     """Verifies the second chunk includes text from the first chunk."""
@@ -523,9 +538,11 @@ class ContextAwarePromptBuilderTest(absltest.TestCase):
     context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
 
     builder.build_prompt(chunk_text="First chunk ending.", document_id="doc1")
-    second_prompt = builder.build_prompt(
-        chunk_text="Second chunk text.",
-        document_id="doc1",
+    second_prompt = str(
+        builder.build_prompt(
+            chunk_text="Second chunk text.",
+            document_id="doc1",
+        )
     )
 
     self.assertIn(context_prefix, second_prompt)
@@ -540,9 +557,11 @@ class ContextAwarePromptBuilderTest(absltest.TestCase):
     context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
 
     builder.build_prompt(chunk_text="First chunk.", document_id="doc1")
-    second_prompt = builder.build_prompt(
-        chunk_text="Second chunk.",
-        document_id="doc1",
+    second_prompt = str(
+        builder.build_prompt(
+            chunk_text="Second chunk.",
+            document_id="doc1",
+        )
     )
 
     self.assertNotIn(context_prefix, second_prompt)
@@ -557,13 +576,17 @@ class ContextAwarePromptBuilderTest(absltest.TestCase):
     builder.build_prompt(chunk_text="Doc A chunk one.", document_id="docA")
     builder.build_prompt(chunk_text="Doc B chunk one.", document_id="docB")
 
-    prompt_a2 = builder.build_prompt(
-        chunk_text="Doc A chunk two.",
-        document_id="docA",
+    prompt_a2 = str(
+        builder.build_prompt(
+            chunk_text="Doc A chunk two.",
+            document_id="docA",
+        )
     )
-    prompt_b2 = builder.build_prompt(
-        chunk_text="Doc B chunk two.",
-        document_id="docB",
+    prompt_b2 = str(
+        builder.build_prompt(
+            chunk_text="Doc B chunk two.",
+            document_id="docB",
+        )
     )
 
     self.assertIn("Doc A chunk one", prompt_a2)
@@ -580,15 +603,29 @@ class ContextAwarePromptBuilderTest(absltest.TestCase):
     context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
 
     builder.build_prompt(chunk_text="Previous chunk text.", document_id="doc1")
-    prompt = builder.build_prompt(
-        chunk_text="Current chunk.",
-        document_id="doc1",
-        additional_context="Extra info here.",
+    prompt = str(
+        builder.build_prompt(
+            chunk_text="Current chunk.",
+            document_id="doc1",
+            additional_context="Extra info here.",
+        )
     )
 
     self.assertIn(context_prefix, prompt)
     self.assertIn("Previous chunk text.", prompt)
     self.assertIn("Extra info here.", prompt)
+
+  def test_context_aware_shares_examples_reference(self):
+    """Verifies context-aware builder shares examples across prompts."""
+    generator = self._create_generator()
+    builder = prompting.ContextAwarePromptBuilder(
+        generator, context_window_chars=50
+    )
+
+    p1 = builder.build_prompt(chunk_text="Chunk 1.", document_id="doc1")
+    p2 = builder.build_prompt(chunk_text="Chunk 2.", document_id="doc1")
+
+    self.assertIs(p1.examples, p2.examples)
 
 
 if __name__ == "__main__":

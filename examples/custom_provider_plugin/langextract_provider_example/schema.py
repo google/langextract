@@ -19,9 +19,10 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 import langextract as lx
+from langextract.core import schema as core_schema
 
 
-class CustomProviderSchema(lx.schema.BaseSchema):
+class CustomProviderSchema(core_schema.BaseSchema):
   """Example custom schema implementation for a provider plugin.
 
   This demonstrates how plugins can provide their own schema implementations
@@ -36,15 +37,16 @@ class CustomProviderSchema(lx.schema.BaseSchema):
   the Gemini backend (which this example provider wraps) for structured output.
   """
 
-  def __init__(self, schema_dict: dict[str, Any], strict_mode: bool = True):
+  def __init__(self, schema_dict: dict[str, Any], raw_output: bool = True):
     """Initialize the custom schema.
 
     Args:
       schema_dict: The generated JSON schema dictionary.
-      strict_mode: Whether the provider guarantees valid output.
+      raw_output: Whether the provider emits raw JSON without fence markers
+        (True when JSON mode is guaranteed; False when output needs fencing).
     """
     self._schema_dict = schema_dict
-    self._strict_mode = strict_mode
+    self._raw_output = raw_output
 
   @classmethod
   def from_examples(
@@ -117,7 +119,7 @@ class CustomProviderSchema(lx.schema.BaseSchema):
           "extraction_class"
       ]["enum"]
 
-    return cls(schema_dict, strict_mode=True)
+    return cls(schema_dict, raw_output=True)
 
   def to_provider_config(self) -> dict[str, Any]:
     """Convert schema to provider-specific configuration.
@@ -142,14 +144,14 @@ class CustomProviderSchema(lx.schema.BaseSchema):
     }
 
   @property
-  def supports_strict_mode(self) -> bool:
-    """Whether this schema guarantees valid structured output.
+  def requires_raw_output(self) -> bool:
+    """Whether the provider emits raw JSON/YAML without fence markers.
 
-    Returns:
-      True if the provider will emit valid JSON without needing
-      Markdown fences for extraction.
+    Required abstract property of `BaseSchema`. Return True when the
+    provider guarantees syntactically valid JSON (so no fence markers
+    are needed), False when output should be wrapped in fences.
     """
-    return self._strict_mode
+    return self._raw_output
 
   @property
   def schema_dict(self) -> dict[str, Any]:

@@ -36,88 +36,131 @@ from langextract.core import exceptions
 DEFAULT_TIMEOUT_SECONDS = 30
 
 
+class InvalidUrlError(exceptions.LangExtractError):
+  """Error raised when a URL is invalid or points to a disallowed address."""
+
+
+# Cloud-provider metadata endpoints that fall outside the standard private
+# / loopback / link-local ranges and must be blocked explicitly.
+_METADATA_HOSTS = frozenset({
+    # AWS / GCP / Azure IMDS (also link-local so covered by is_link_local,
+    # kept here for documentation).
+    '169.254.169.254',
+})
+
+# 100.64.0.0/10 is the RFC 6598 carrier-grade NAT (CGNAT) range; Python's
+# ipaddress module does NOT classify it as private, yet at least one major
+# cloud (Alibaba) exposes its metadata service inside it (100.100.100.200).
+_CGNAT_NETWORK = ipaddress.ip_network('100.64.0.0/10')
+
+_INTERNAL_LITERAL_HOSTNAMES = frozenset({
+    'localhost',
+    '0.0.0.0',
+    '[::1]',
+    '[::]',
+    '[::ffff:127.0.0.1]',
+})
+
+_INTERNAL_SUFFIXES = (
+    '.local',
+    '.localhost',
+    '.internal',
+    '.home',
+    '.lan',
+    '.corp',
+    '.intra',
+    '.intranet',
+)
+
+
+def _ip_is_disallowed(ip: ipaddress._BaseAddress) -> bool:
+  """Return True if `ip` belongs to a range we refuse to fetch from."""
+  return (
+      ip.is_loopback
+      or ip.is_private
+      or ip.is_link_local
+      or ip.is_multicast
+      or ip.is_unspecified
+      or ip.is_reserved
+      or ip in _CGNAT_NETWORK
+  )
+
+
 def _is_internal_hostname(hostname: str) -> bool:
-  """Check if hostname is an internal/reserved address.
+  """Check whether `hostname` resolves to an internal / reserved address.
+
+  This is best-effort. Callers should treat a True return as authoritative
+  ("do not fetch") but a False return as non-authoritative: DNS rebinding
+  remains possible because the HTTP client re-resolves at request time.
+  See `download_text_from_url` for the redirect-hop validation that covers
+  the common bypass path.
 
   Args:
-    hostname: The hostname to check.
+    hostname: The hostname extracted from a URL.
 
   Returns:
-    True if hostname is internal/reserved, False otherwise.
+    True if the hostname is a known-internal literal, resolves to an
+    internal IP, or matches an internal-domain suffix.
   """
   if not hostname:
     return False
 
-  internal_hostnames = {'localhost', '0.0.0.0', '[::1]', '[::]', '[::ffff:127.0.0.1]'}
-  if hostname.lower() in internal_hostnames:
+  hostname_lower = hostname.lower()
+  if hostname_lower in _INTERNAL_LITERAL_HOSTNAMES:
     return True
 
-  # Check for IPv4 internal ranges by direct IP
+  if hostname in _METADATA_HOSTS:
+    return True
+
+  # Literal IP in the hostname.
   try:
     ip = ipaddress.ip_address(hostname)
-    # Check for loopback, private, link-local, or multicast
-    return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast
+    return _ip_is_disallowed(ip)
   except ValueError:
-    pass  # Not an IP, continue to check domain patterns
+    pass  # not a literal IP, fall through to DNS + suffix checks
 
-  # Check DNS resolution to prevent rebinding attacks (e.g., evil.com -> 127.0.0.1)
+  # Partial DNS-rebinding mitigation: if the name resolves (right now) to an
+  # internal address, refuse upfront. A time-of-check/time-of-use race still
+  # exists because `requests` will re-resolve when making the request.
   try:
     resolved = socket.getaddrinfo(hostname, None)
-    for result in resolved:
-      resolved_ip = result[4][0]
-      ip_obj = ipaddress.ip_address(resolved_ip)
-      if (
-          ip_obj.is_private
-          or ip_obj.is_loopback
-          or ip_obj.is_link_local
-          or ip_obj.is_multicast
-      ):
-        return True
   except (socket.gaierror, ValueError):
-    pass  # DNS resolution failed or invalid IP, continue
+    resolved = []
+  for result in resolved:
+    try:
+      ip_obj = ipaddress.ip_address(result[4][0])
+    except ValueError:
+      continue
+    if _ip_is_disallowed(ip_obj):
+      return True
 
-  # Check for internal domain patterns
-  internal_suffixes = [
-      '.local', '.localhost', '.internal', '.home', '.lan',
-      '.corp', '.intra', '.intranet',
-  ]
-  hostname_lower = hostname.lower()
-  if any(hostname_lower.endswith(suffix) for suffix in internal_suffixes):
-    return True
-
-  # Check for cloud metadata endpoints
-  if hostname == '169.254.169.254':
-    return True
-
-  return False
+  return any(hostname_lower.endswith(suffix) for suffix in _INTERNAL_SUFFIXES)
 
 
 def _validate_url_not_internal(url: str) -> None:
-  """Validate that a URL does not point to internal/reserved addresses.
+  """Validate that `url` does not point to an internal / reserved address.
 
   Args:
     url: The URL to validate.
 
   Raises:
-    InvalidUrlError: If the URL points to an internal address.
+    InvalidUrlError: If the URL has no hostname, fails to parse, or points
+      to an address covered by `_is_internal_hostname`.
   """
   try:
     result = urlparse.urlparse(url)
     hostname = result.hostname
-
-    if not hostname:
-      raise InvalidUrlError(f'URL has no hostname: {url}')
-
-    if _is_internal_hostname(hostname):
-      raise InvalidUrlError(
-          f'URL {url} points to an internal address ({hostname}) which is not allowed'
-      )
   except (ValueError, AttributeError) as e:
     raise InvalidUrlError(f'Invalid URL {url}: {e}') from e
 
+  if not hostname:
+    raise InvalidUrlError(f'URL has no hostname: {url}')
 
-class InvalidUrlError(exceptions.LangExtractError):
-  """Error raised when a URL is invalid or not allowed."""
+  if _is_internal_hostname(hostname):
+    raise InvalidUrlError(
+        f'URL {url} points to an internal or reserved address '
+        f'({hostname}); pass allow_internal_urls=True to override.'
+    )
 
 
 class InvalidDatasetError(exceptions.LangExtractError):
@@ -194,20 +237,26 @@ def save_annotated_documents(
   output_dir = output_dir.resolve()
   output_dir.mkdir(parents=True, exist_ok=True)
 
-  # Sanitize output_name to prevent path traversal attacks
-  # Only allow the basename, strip any directory components
-  safe_output_name = pathlib.Path(output_name).name
-  if not safe_output_name:
-    raise IOError(f'Invalid output_name: {output_name}')
+  # Reject directory components in output_name rather than silently stripping
+  # them; the docstring documents output_name as a file name, so passing
+  # "subdir/data.jsonl" is a caller mistake we want to surface.
+  output_name_path = pathlib.PurePath(output_name)
+  if output_name_path.name != output_name or output_name_path.parts[:-1]:
+    raise IOError(
+        'output_name must be a file name with no directory components; '
+        f'got {output_name!r}'
+    )
+  if not output_name_path.name or output_name_path.name in {'.', '..'}:
+    raise IOError(f'Invalid output_name: {output_name!r}')
 
-  output_file = output_dir / safe_output_name
-  output_file = output_file.resolve()
+  output_file = (output_dir / output_name_path.name).resolve()
 
-  # Ensure output_file is within output_dir to prevent traversal
-  # Use parents check instead of startswith for OS-safe comparison
+  # Defense-in-depth: even after rejecting path components, a symlinked leaf
+  # inside output_dir could resolve outside it. Require containment.
   if output_dir not in output_file.parents and output_file != output_dir:
     raise IOError(
-        f'Path traversal detected: output_name {output_name} attempts to escape output_dir'
+        f'Path traversal detected: resolved output {output_file} is outside '
+        f'output_dir {output_dir}'
     )
   has_data = False
   doc_count = 0
@@ -359,35 +408,111 @@ def is_url(text: str) -> bool:
     return False
 
 
+_MAX_REDIRECT_HOPS = 5
+
+
+def _follow_redirects_with_validation(
+    url: str,
+    timeout: int,
+    allow_internal_urls: bool,
+) -> requests.Response:
+  """Issue a streaming GET, following redirects manually with validation.
+
+  Each redirect hop is validated against `_is_internal_hostname` so that a
+  public URL cannot serve `302 Location: http://169.254.169.254/` and be
+  transparently followed into the metadata service.
+
+  The caller is responsible for closing the returned Response.
+
+  Args:
+    url: The starting URL (already validated by the caller if
+      `allow_internal_urls` is False).
+    timeout: Per-request timeout in seconds.
+    allow_internal_urls: If True, redirect targets are not re-validated.
+
+  Returns:
+    The final, non-3xx Response. The caller owns the stream and must close.
+
+  Raises:
+    InvalidUrlError: If a redirect target is internal, or the chain
+      exceeds `_MAX_REDIRECT_HOPS`.
+    requests.RequestException: For transport failures, or a 3xx response
+      with no Location header.
+  """
+  current_url = url
+  for _ in range(_MAX_REDIRECT_HOPS + 1):
+    response = requests.get(
+        current_url, stream=True, timeout=timeout, allow_redirects=False
+    )
+    if not 300 <= response.status_code < 400:
+      return response
+    location = response.headers.get('Location')
+    response.close()
+    if not location:
+      raise requests.RequestException(
+          f'Redirect response with no Location header from {current_url}'
+      )
+    current_url = urlparse.urljoin(current_url, location)
+    if not allow_internal_urls:
+      _validate_url_not_internal(current_url)
+  raise InvalidUrlError(
+      f'Too many redirects (>{_MAX_REDIRECT_HOPS}) starting from {url}'
+  )
+
+
 def download_text_from_url(
     url: str,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     show_progress: bool = True,
     chunk_size: int = 8192,
+    *,
+    allow_internal_urls: bool = False,
 ) -> str:
   """Download text content from a URL with optional progress bar.
+
+  By default, URLs pointing to internal, loopback, link-local, private,
+  CGNAT, multicast, or reserved addresses are rejected to prevent SSRF.
+  Pass `allow_internal_urls=True` to opt out when fetching from a
+  known-safe internal endpoint (e.g. development servers).
+
+  Redirects are followed manually so each hop can be re-validated. Without
+  this, `requests` would follow a `302 Location: http://169.254.169.254/`
+  transparently and bypass the origin-URL check. Protection against
+  DNS rebinding is partial: the HTTP client re-resolves the hostname at
+  request time, so an attacker-controlled nameserver with a short TTL can
+  still return an internal IP post-validation. Full mitigation would
+  require pinning the resolved IP into the HTTP adapter.
 
   Args:
     url: The URL to download from.
     timeout: Request timeout in seconds.
     show_progress: Whether to show a progress bar during download.
     chunk_size: Size of chunks to download at a time.
+    allow_internal_urls: If True, skip the internal-address block and do
+      not re-validate redirect hops. Default False (secure by default).
 
   Returns:
     The text content of the URL.
 
   Raises:
-    InvalidUrlError: If the URL points to an internal address.
+    InvalidUrlError: If the URL (or any redirect hop) points to an internal
+      address and `allow_internal_urls` is False, or the redirect chain
+      exceeds the hop limit.
     requests.RequestException: If the download fails.
     ValueError: If the content is not text-based.
   """
-  # Block SSRF attacks by validating URL does not point to internal addresses
-  _validate_url_not_internal(url)
+  if not allow_internal_urls:
+    _validate_url_not_internal(url)
 
   try:
-    # Make initial request to get headers. Use a `with` block so the
-    # streamed Response is closed even if iter_content raises mid-stream.
-    with requests.get(url, stream=True, timeout=timeout) as response:
+    # Follow redirects manually with per-hop validation. `requests` would
+    # otherwise transparently follow a `302 Location: http://internal/...`
+    # response and bypass the origin-URL check above.
+    response = _follow_redirects_with_validation(
+        url, timeout=timeout, allow_internal_urls=allow_internal_urls
+    )
+
+    try:
       response.raise_for_status()
 
       # Check content type
@@ -447,6 +572,8 @@ def download_text_from_url(
         progress.print_download_complete(char_count, word_count, filename)
 
       return text_content
+    finally:
+      response.close()
 
   except requests.RequestException as e:
     raise requests.RequestException(

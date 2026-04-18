@@ -59,6 +59,7 @@ def extract(
     model: typing.Any = None,
     *,
     fetch_urls: bool = True,
+    allow_internal_urls: bool = False,
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
@@ -156,6 +157,10 @@ def extract(
         URL string. When True (default), strings starting with http:// or
         https:// are fetched. When False, all strings are treated as literal
         text to analyze. This is a keyword-only parameter.
+      allow_internal_urls: When True, allows fetching from internal, loopback,
+        private, CGNAT, link-local, multicast, or reserved addresses. Defaults
+        to False (secure by default, blocks SSRF-style fetches). Set True only
+        when intentionally fetching from a trusted internal endpoint.
       prompt_validation_level: Controls pre-flight alignment checks on few-shot
         examples. OFF skips validation, WARNING logs issues but continues, ERROR
         raises on failures. Defaults to WARNING.
@@ -221,7 +226,9 @@ def extract(
       and isinstance(text_or_documents, str)
       and io.is_url(text_or_documents)
   ):
-    text_or_documents = io.download_text_from_url(text_or_documents)
+    text_or_documents = io.download_text_from_url(
+        text_or_documents, allow_internal_urls=allow_internal_urls
+    )
 
   prompt_template = prompting.PromptTemplateStructured(
       description=prompt_description

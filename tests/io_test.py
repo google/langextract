@@ -71,6 +71,7 @@ class IoTest(unittest.TestCase):
     response = mock.MagicMock()
     response.__enter__.return_value = response
     response.__exit__.return_value = False
+    response.status_code = 200
     response.headers = {
         'Content-Type': 'text/plain',
         'Content-Length': '10',
@@ -84,6 +85,8 @@ class IoTest(unittest.TestCase):
 
     response.iter_content.side_effect = broken_iter_content
 
+    # allow_internal_urls=True so the test doesn't depend on DNS resolution
+    # for example.com in the test environment.
     with mock.patch('langextract.io.requests.get', return_value=response):
       with mock.patch(
           'langextract.io.progress.create_download_progress_bar',
@@ -92,10 +95,164 @@ class IoTest(unittest.TestCase):
         with self.assertRaisesRegex(
             requests.RequestException, 'connection reset'
         ):
-          io.download_text_from_url('https://example.com/file.txt')
+          io.download_text_from_url(
+              'https://example.com/file.txt', allow_internal_urls=True
+          )
 
     self.assertTrue(tracker.closed)
     self.assertEqual(tracker.updates, [5])
+
+
+class SsrfValidationTest(unittest.TestCase):
+  """_is_internal_hostname / _validate_url_not_internal coverage."""
+
+  def _assert_internal(self, hostname: str):
+    self.assertTrue(
+        io._is_internal_hostname(hostname),
+        msg=f'{hostname!r} should be flagged internal',
+    )
+
+  def _assert_not_internal(self, hostname: str):
+    self.assertFalse(
+        io._is_internal_hostname(hostname),
+        msg=f'{hostname!r} should NOT be flagged internal',
+    )
+
+  def test_literal_internal_hostnames(self):
+    for host in ['localhost', '127.0.0.1', '0.0.0.0', '[::1]']:
+      self._assert_internal(host)
+
+  def test_private_ipv4_ranges(self):
+    for host in ['10.0.0.1', '172.16.0.1', '192.168.1.1']:
+      self._assert_internal(host)
+
+  def test_link_local_and_metadata(self):
+    # AWS / GCP / Azure IMDS lives in link-local.
+    self._assert_internal('169.254.169.254')
+
+  def test_cgnat_range_is_blocked(self):
+    # RFC 6598 CGNAT range; Alibaba exposes metadata here.
+    self._assert_internal('100.64.0.1')
+    self._assert_internal('100.100.100.200')
+
+  def test_ipv6_private_is_blocked(self):
+    # ULA.
+    self._assert_internal('fd00::1')
+
+  def test_suffix_based_internal_names(self):
+    for host in ['server.corp', 'host.internal', 'printer.local']:
+      self._assert_internal(host)
+
+  def test_public_hostnames_pass(self):
+    # These MUST NOT be flagged; 8.8.8.8 is a public DNS server.
+    self._assert_not_internal('8.8.8.8')
+    # 100.63.x.x and 100.128.x.x are just outside CGNAT and are public.
+    self._assert_not_internal('100.63.255.255')
+    self._assert_not_internal('100.128.0.1')
+
+  def test_validate_url_rejects_internal(self):
+    with self.assertRaises(io.InvalidUrlError):
+      io._validate_url_not_internal('http://169.254.169.254/latest/meta-data/')
+    with self.assertRaises(io.InvalidUrlError):
+      io._validate_url_not_internal('http://100.100.100.200/')
+    with self.assertRaises(io.InvalidUrlError):
+      io._validate_url_not_internal('http://localhost:8080/')
+
+
+class DownloadRedirectValidationTest(unittest.TestCase):
+  """Redirect hops must be validated to close the SSRF bypass."""
+
+  def _mock_response(self, *, status_code, headers=None, body=b''):
+    response = mock.MagicMock()
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
+    response.status_code = status_code
+    response.headers = headers or {}
+    response.raise_for_status.return_value = None
+    response.iter_content.return_value = iter([body])
+    return response
+
+  def test_redirect_to_internal_blocked(self):
+    # Public URL 302s to AWS IMDS; redirect hop must be validated.
+    redirect = self._mock_response(
+        status_code=302,
+        headers={'Location': 'http://169.254.169.254/latest/meta-data/'},
+    )
+
+    with mock.patch(
+        'langextract.io.requests.get', return_value=redirect
+    ) as get:
+      with self.assertRaises(io.InvalidUrlError):
+        # allow_internal_urls=True on origin would skip origin check but we
+        # want to show the redirect-hop check even works when origin passes.
+        # We pass a safe public-looking origin and let the mock return a 302.
+        io.download_text_from_url('https://public.example.com/redir')
+      # Origin GET was issued once; loop raised on the internal Location.
+      self.assertGreaterEqual(get.call_count, 1)
+
+  def test_allow_internal_urls_skips_all_validation(self):
+    ok = self._mock_response(
+        status_code=200,
+        headers={'Content-Type': 'text/plain', 'Content-Length': '5'},
+        body=b'hello',
+    )
+    with mock.patch('langextract.io.requests.get', return_value=ok):
+      # localhost origin + allow_internal_urls should be permitted.
+      result = io.download_text_from_url(
+          'http://localhost:8080/file', allow_internal_urls=True
+      )
+    self.assertEqual(result, 'hello')
+
+
+class SaveAnnotatedDocumentsPathTest(unittest.TestCase):
+  """output_name must reject directory components (no silent strip)."""
+
+  def _single_doc(self):
+    return iter([
+        data.AnnotatedDocument(
+            document_id='doc-1', text='hello', extractions=[]
+        )
+    ])
+
+  def test_rejects_traversal(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      with self.assertRaises(IOError):
+        io.save_annotated_documents(
+            self._single_doc(),
+            output_dir=pathlib.Path(tmpdir),
+            output_name='../escape.jsonl',
+            show_progress=False,
+        )
+
+  def test_rejects_subdirectory_component(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      with self.assertRaises(IOError):
+        io.save_annotated_documents(
+            self._single_doc(),
+            output_dir=pathlib.Path(tmpdir),
+            output_name='subdir/data.jsonl',
+            show_progress=False,
+        )
+
+  def test_rejects_absolute_output_name(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      with self.assertRaises(IOError):
+        io.save_annotated_documents(
+            self._single_doc(),
+            output_dir=pathlib.Path(tmpdir),
+            output_name='/etc/data.jsonl',
+            show_progress=False,
+        )
+
+  def test_plain_filename_accepted(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      io.save_annotated_documents(
+          self._single_doc(),
+          output_dir=pathlib.Path(tmpdir),
+          output_name='data.jsonl',
+          show_progress=False,
+      )
+      self.assertTrue((pathlib.Path(tmpdir) / 'data.jsonl').exists())
 
 
 if __name__ == '__main__':

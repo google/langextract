@@ -22,6 +22,7 @@ from unittest import mock
 import requests
 
 from langextract import io
+import langextract as lx
 from langextract.core import data
 
 
@@ -134,6 +135,17 @@ class SsrfValidationTest(unittest.TestCase):
     # RFC 6598 CGNAT range; Alibaba exposes metadata here.
     self._assert_internal('100.64.0.1')
     self._assert_internal('100.100.100.200')
+
+  def test_ipv4_mapped_ipv6_into_cgnat_is_blocked(self):
+    # Without ipv4_mapped normalization in _ip_is_disallowed, these would
+    # slip past because `ip in _CGNAT_NETWORK` is False for IPv6Address.
+    self._assert_internal('::ffff:100.64.0.1')
+    self._assert_internal('::ffff:100.100.100.200')
+
+  def test_ipv4_mapped_ipv6_into_private_is_blocked(self):
+    # Sanity: other mapped IPv4 privates still caught via is_private.
+    self._assert_internal('::ffff:10.0.0.1')
+    self._assert_internal('::ffff:127.0.0.1')
 
   def test_ipv6_private_is_blocked(self):
     # ULA.
@@ -253,6 +265,42 @@ class SaveAnnotatedDocumentsPathTest(unittest.TestCase):
           show_progress=False,
       )
       self.assertTrue((pathlib.Path(tmpdir) / 'data.jsonl').exists())
+
+
+class ExtractAllowInternalUrlsSmokeTest(unittest.TestCase):
+  """Lock in that extract() forwards allow_internal_urls to the fetcher."""
+
+  def test_allow_internal_urls_is_forwarded(self):
+    sentinel = RuntimeError('short-circuit from mocked downloader')
+
+    def fake_download(url, **kwargs):
+      # Assert the kwarg we care about was threaded through; then abort so
+      # we don't need a real model / examples for the rest of extract().
+      self.assertTrue(kwargs.get('allow_internal_urls'))
+      raise sentinel
+
+    with mock.patch(
+        'langextract.io.download_text_from_url', side_effect=fake_download
+    ):
+      with self.assertRaises(RuntimeError) as cm:
+        lx.extract(
+            text_or_documents='http://localhost:8080/doc',
+            prompt_description='x',
+            examples=[
+                lx.data.ExampleData(
+                    text='hi',
+                    extractions=[
+                        lx.data.Extraction(
+                            extraction_class='thing', extraction_text='hi'
+                        )
+                    ],
+                )
+            ],
+            model_id='gemini-2.5-flash',
+            api_key='fake',
+            allow_internal_urls=True,
+        )
+    self.assertIs(cm.exception, sentinel)
 
 
 if __name__ == '__main__':

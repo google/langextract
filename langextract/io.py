@@ -75,6 +75,12 @@ _INTERNAL_SUFFIXES = (
 
 def _ip_is_disallowed(ip: ipaddress._BaseAddress) -> bool:
   """Return True if `ip` belongs to a range we refuse to fetch from."""
+  # Normalize IPv4-mapped IPv6 (e.g. ::ffff:100.100.100.200) to the
+  # underlying IPv4 address before running the predicate. Without this,
+  # ``ip in _CGNAT_NETWORK`` is always False for an IPv6Address, which
+  # would let mapped forms of the CGNAT range slip past.
+  if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+    ip = ip.ipv4_mapped
   return (
       ip.is_loopback
       or ip.is_private
@@ -86,7 +92,9 @@ def _ip_is_disallowed(ip: ipaddress._BaseAddress) -> bool:
   )
 
 
-def _is_internal_hostname(hostname: str) -> bool:
+def _is_internal_hostname(  # pylint: disable=too-many-return-statements
+    hostname: str,
+) -> bool:
   """Check whether `hostname` resolves to an internal / reserved address.
 
   This is best-effort. Callers should treat a True return as authoritative
@@ -117,7 +125,12 @@ def _is_internal_hostname(hostname: str) -> bool:
     ip = ipaddress.ip_address(hostname)
     return _ip_is_disallowed(ip)
   except ValueError:
-    pass  # not a literal IP, fall through to DNS + suffix checks
+    pass  # not a literal IP, fall through to suffix + DNS checks
+
+  # Suffix check runs before DNS so that obviously-internal names like
+  # "server.corp" or "printer.local" don't leak to the resolver first.
+  if any(hostname_lower.endswith(suffix) for suffix in _INTERNAL_SUFFIXES):
+    return True
 
   # Partial DNS-rebinding mitigation: if the name resolves (right now) to an
   # internal address, refuse upfront. A time-of-check/time-of-use race still
@@ -134,7 +147,7 @@ def _is_internal_hostname(hostname: str) -> bool:
     if _ip_is_disallowed(ip_obj):
       return True
 
-  return any(hostname_lower.endswith(suffix) for suffix in _INTERNAL_SUFFIXES)
+  return False
 
 
 def _validate_url_not_internal(url: str) -> None:

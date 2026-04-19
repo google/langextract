@@ -340,6 +340,8 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       InferenceRuntimeError: For any other HTTP errors, timeouts, or request
         exceptions.
     """
+    if not isinstance(prompt, str):
+      prompt = str(prompt)
     model = model or self._model
     model_url = model_url or self._model_url
     if structured_output_format is None and self.format_type is not None:

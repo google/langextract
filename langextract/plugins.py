@@ -23,9 +23,10 @@ import functools
 import importlib
 from importlib import metadata
 
-from absl import logging
-
+from langextract._logging import get_logger
 from langextract.core import base_model
+
+logger = get_logger(__name__)
 
 __all__ = ["available_providers", "get_provider_class"]
 
@@ -78,7 +79,7 @@ def _discovered() -> dict[str, str]:
       discovered.setdefault(ep.name, value)
 
   if discovered:
-    logging.debug(
+    logger.debug(
         "Discovered third-party providers: %s", list(discovered.keys())
     )
 
@@ -170,7 +171,7 @@ def _load_class(spec: str) -> type[base_model.BaseLanguageModel]:
           f" {missing}"
       )
 
-    logging.warning(
+    logger.warning(
         "Provider %s does not inherit from BaseLanguageModel but appears"
         " compatible",
         cls,

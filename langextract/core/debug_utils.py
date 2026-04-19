@@ -22,14 +22,9 @@ import reprlib
 import time
 from typing import Any, Callable, Mapping
 
-from absl import logging as absl_logging
+from langextract._logging import configure, get_logger
 
-_LOG = logging.getLogger("langextract.debug")
-
-# Add NullHandler to prevent "No handler found" warnings
-_langextract_logger = logging.getLogger("langextract")
-if not _langextract_logger.handlers:
-  _langextract_logger.addHandler(logging.NullHandler())
+logger = get_logger("debug")
 
 # Sensitive keys to redact
 _REDACT_KEYS = {
@@ -111,7 +106,6 @@ def debug_log_calls(fn: Callable) -> Callable:
 
   @functools.wraps(fn)
   def wrapper(*args, **kwargs):
-    logger = _LOG
     if not logger.isEnabledFor(logging.DEBUG):
       return fn(*args, **kwargs)
 
@@ -149,37 +143,9 @@ def debug_log_calls(fn: Callable) -> Callable:
 
 
 def configure_debug_logging() -> None:
-  """Enable debug logging for the 'langextract' namespace only."""
-  logger = logging.getLogger("langextract")
+  """Enable debug logging for the 'langextract' namespace only.
 
-  # Skip if we already added our handler
-  our_handler_exists = any(
-      isinstance(h, logging.StreamHandler)
-      and getattr(h, "langextract_debug", False)
-      for h in logger.handlers
-  )
-  if our_handler_exists:
-    return
-
-  # Respect host handlers - only set level if they exist
-  non_null_handlers = [
-      h for h in logger.handlers if not isinstance(h, logging.NullHandler)
-  ]
-
-  if non_null_handlers:
-    logger.setLevel(logging.DEBUG)
-  else:
-    logger.setLevel(logging.DEBUG)
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.DEBUG)
-    fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    handler.setFormatter(logging.Formatter(fmt))
-    handler.langextract_debug = True
-    logger.addHandler(handler)
-    logger.propagate = False
-
-  # Best-effort absl configuration
-  try:
-    absl_logging.set_verbosity(absl_logging.DEBUG)
-  except Exception:
-    pass
+  This function is kept for backward compatibility.
+  Prefer using langextract.configure(log_level="DEBUG") instead.
+  """
+  configure(log_level="DEBUG")

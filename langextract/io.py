@@ -27,10 +27,13 @@ from urllib import parse as urlparse
 import pandas as pd
 import requests
 
+from langextract._logging import get_logger
 from langextract import data_lib
 from langextract import progress
 from langextract.core import data
 from langextract.core import exceptions
+
+logger = get_logger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 30
 
@@ -293,7 +296,7 @@ def download_text_from_url(
           for ct in ['text/', 'application/json', 'application/xml']
       ):
         # Try to proceed anyway, but warn
-        print(f"Warning: Content-Type '{content_type}' may not be text-based")
+        logger.warning("Content-Type '%s' may not be text-based", content_type)
 
       # Get content length for progress bar
       total_size = int(response.headers.get('Content-Length', 0))

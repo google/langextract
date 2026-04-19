@@ -21,14 +21,15 @@ import concurrent.futures
 import dataclasses
 from typing import Any, Final, Iterator, Sequence
 
-from absl import logging
-
+from langextract._logging import get_logger
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import schema
 from langextract.core import types as core_types
 from langextract.providers import gemini_batch
+
+logger = get_logger(__name__)
 from langextract.providers import patterns
 from langextract.providers import router
 from langextract.providers import schemas
@@ -166,7 +167,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       )
 
     if self.api_key and self.vertexai:
-      logging.warning(
+      logger.warning(
           'Both API key and Vertex AI configuration provided. '
           'API key will take precedence for authentication.'
       )
@@ -294,7 +295,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           yield [core_types.ScoredOutput(score=1.0, output=text)]
         return
       else:
-        logging.info(
+        logger.info(
             'Gemini batch mode enabled but prompt count (%d) is below the'
             ' threshold (%d); using real-time API. Submit at least %d prompts'
             ' to trigger batch mode.',

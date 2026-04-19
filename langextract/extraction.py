@@ -58,7 +58,7 @@ def extract(
     config: typing.Any = None,
     model: typing.Any = None,
     *,
-    fetch_urls: bool = True,
+    fetch_urls: bool = False,
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
@@ -72,9 +72,10 @@ def extract(
   of additional API calls.
 
   Args:
-      text_or_documents: The source text to extract information from, a URL to
-        download text from (starting with http:// or https:// when fetch_urls
-        is True), or an iterable of Document objects.
+      text_or_documents: The source text to extract information from, or an
+        iterable of Document objects. An http:// or https:// string is fetched
+        only when `fetch_urls=True`; see that parameter for the security
+        caveats.
       prompt_description: Instructions for what to extract from the text.
       examples: List of ExampleData objects to guide the extraction.
       tokenizer: Optional Tokenizer instance to use for chunking and alignment.
@@ -152,10 +153,11 @@ def extract(
         and config are provided, model takes precedence.
       model: Pre-configured language model to use for extraction. Takes
         precedence over all other parameters including config.
-      fetch_urls: Whether to automatically download content when the input is a
-        URL string. When True (default), strings starting with http:// or
-        https:// are fetched. When False, all strings are treated as literal
-        text to analyze. This is a keyword-only parameter.
+      fetch_urls: If True, http(s) strings are fetched via `requests.get`
+        with no sanitization (SSRF risk: internal metadata, loopback,
+        redirects, DNS rebinding, etc.). Default False; all strings are
+        literal text. Only enable when URLs come from a trusted source
+        AND the process runs in a sandbox. Keyword-only.
       prompt_validation_level: Controls pre-flight alignment checks on few-shot
         examples. OFF skips validation, WARNING logs issues but continues, ERROR
         raises on failures. Defaults to WARNING.
@@ -171,7 +173,8 @@ def extract(
   Raises:
       ValueError: If examples is None or empty.
       ValueError: If no API key is provided or found in environment variables.
-      requests.RequestException: If URL download fails.
+      requests.RequestException: If `fetch_urls=True` and the URL download
+        fails.
       pv.PromptAlignmentError: If validation fails in ERROR mode.
   """
   if not examples:

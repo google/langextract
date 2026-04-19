@@ -906,5 +906,48 @@ class AnnotationSuppressParseErrorsTest(absltest.TestCase):
       )
 
 
+class FetchUrlsOptInTest(absltest.TestCase):
+  """URL fetching must be opt-in to keep the library SSRF-safe by default."""
+
+  def setUp(self):
+    super().setUp()
+    self._example = lx.data.ExampleData(
+        text="hi",
+        extractions=[
+            lx.data.Extraction(extraction_class="thing", extraction_text="hi")
+        ],
+    )
+
+  def _extract(self, **overrides):
+    kwargs = dict(
+        text_or_documents="http://example.com/doc",
+        prompt_description="x",
+        examples=[self._example],
+        model_id="gemini-2.5-flash",
+        api_key="fake",
+    )
+    kwargs.update(overrides)
+    return lx.extract(**kwargs)
+
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  @mock.patch("langextract.extraction.io.download_text_from_url", autospec=True)
+  def test_url_is_not_fetched_by_default(self, downloader, create_model):
+    sentinel = RuntimeError("short-circuit after URL decision")
+    create_model.side_effect = sentinel
+    with self.assertRaises(RuntimeError) as cm:
+      self._extract()
+    self.assertIs(cm.exception, sentinel)
+    downloader.assert_not_called()
+
+  @mock.patch("langextract.extraction.io.download_text_from_url", autospec=True)
+  def test_fetch_urls_true_invokes_downloader(self, downloader):
+    sentinel = RuntimeError("download invoked")
+    downloader.side_effect = sentinel
+    with self.assertRaises(RuntimeError) as cm:
+      self._extract(fetch_urls=True)
+    self.assertIs(cm.exception, sentinel)
+    downloader.assert_called_once_with("http://example.com/doc")
+
+
 if __name__ == "__main__":
   absltest.main()

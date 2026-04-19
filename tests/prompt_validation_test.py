@@ -14,6 +14,8 @@
 
 """Tests for prompt validation module."""
 
+import warnings
+
 from absl.testing import absltest
 from absl.testing import parameterized
 
@@ -420,6 +422,113 @@ class ExtractIntegrationTest(absltest.TestCase):
           prompt_validation_level=prompt_validation.PromptValidationLevel.ERROR,
           model_id="fake-model",
       )
+
+
+class AlgorithmPolicyIntegrationTest(absltest.TestCase):
+  """Tests that extract() builds AlignmentPolicy from resolver_params."""
+
+  def test_lcs_accepts_short_source_legacy_rejects(self):
+    """Prompt validation respects fuzzy_alignment_algorithm from resolver_params."""
+    examples = [
+        data.ExampleData(
+            text="alpha beta gamma",
+            extractions=[
+                data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="alphas betas gammas deltas",
+                    attributes={},
+                )
+            ],
+        )
+    ]
+
+    try:
+      extraction.extract(
+          text_or_documents="Test",
+          prompt_description="Extract entities",
+          examples=examples,
+          prompt_validation_level=(
+              prompt_validation.PromptValidationLevel.ERROR
+          ),
+          model_id="fake-model",
+      )
+    except prompt_validation.PromptAlignmentError:
+      self.fail("LCS prompt validation should not raise for this example")
+    except Exception:  # pylint: disable=broad-except
+      pass
+
+    with self.assertRaises(prompt_validation.PromptAlignmentError):
+      extraction.extract(
+          text_or_documents="Test",
+          prompt_description="Extract entities",
+          examples=examples,
+          resolver_params={"fuzzy_alignment_algorithm": "legacy"},
+          prompt_validation_level=(
+              prompt_validation.PromptValidationLevel.ERROR
+          ),
+          model_id="fake-model",
+      )
+
+
+class LegacyDeprecationWarningTest(absltest.TestCase):
+  """Legacy algorithm emits DeprecationWarning from extract()."""
+
+  def _make_examples(self):
+    return [
+        data.ExampleData(
+            text="patient takes aspirin",
+            extractions=[
+                data.Extraction(
+                    extraction_class="med",
+                    extraction_text="aspirin",
+                    attributes={},
+                )
+            ],
+        )
+    ]
+
+  def test_legacy_emits_warning_via_extract(self):
+    """Warning fires when extract() routes through prompt validation."""
+    with warnings.catch_warnings(record=True) as caught:
+      warnings.simplefilter("always")
+      try:
+        extraction.extract(
+            text_or_documents="Test",
+            prompt_description="Extract medications",
+            examples=self._make_examples(),
+            resolver_params={"fuzzy_alignment_algorithm": "legacy"},
+            prompt_validation_level=(
+                prompt_validation.PromptValidationLevel.WARNING
+            ),
+            model_id="fake-model",
+        )
+      except Exception:  # pylint: disable=broad-except
+        pass
+    deprecations = [
+        w for w in caught if issubclass(w.category, DeprecationWarning)
+    ]
+    self.assertGreaterEqual(len(deprecations), 1)
+    self.assertTrue(any("legacy" in str(w.message) for w in deprecations))
+
+  def test_lcs_default_does_not_warn(self):
+    with warnings.catch_warnings(record=True) as caught:
+      warnings.simplefilter("always")
+      try:
+        extraction.extract(
+            text_or_documents="Test",
+            prompt_description="Extract medications",
+            examples=self._make_examples(),
+            prompt_validation_level=(
+                prompt_validation.PromptValidationLevel.WARNING
+            ),
+            model_id="fake-model",
+        )
+      except Exception:  # pylint: disable=broad-except
+        pass
+    deprecations = [
+        w for w in caught if issubclass(w.category, DeprecationWarning)
+    ]
+    self.assertFalse(any("legacy" in str(w.message) for w in deprecations))
 
 
 if __name__ == "__main__":

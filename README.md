@@ -305,7 +305,7 @@ LangExtract supports custom LLM providers via a lightweight plugin system. You c
 
 See the detailed guide in [Provider System Documentation](langextract/providers/README.md) to learn how to:
 
-- Register a provider with `@registry.register(...)`
+- Register a provider with `@router.register(...)` from `langextract.providers`
 - Publish an entry point for discovery
 - Optionally provide a schema with `get_schema_class()` for structured output
 - Integrate with the factory via `create_model(...)`
@@ -317,18 +317,34 @@ LangExtract supports OpenAI models (requires optional dependency: `pip install l
 ```python
 import langextract as lx
 
+# OPENAI_API_KEY in the environment is picked up automatically; pass
+# api_key=... explicitly only if you need to override it.
 result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
     model_id="gpt-4o",  # Automatically selects OpenAI provider
-    api_key=os.environ.get('OPENAI_API_KEY'),
-    fence_output=True,
-    use_schema_constraints=False
 )
 ```
 
-Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
+The OpenAI provider uses JSON mode and auto-determines fence and schema behavior — leave `fence_output` and `use_schema_constraints` unset.
+
+For OpenAI-compatible endpoints or non-GPT model IDs (which skip auto-routing), use `ModelConfig` with an explicit provider:
+
+```python
+from langextract.factory import ModelConfig
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    config=ModelConfig(
+        model_id="my-openai-compatible-model",
+        provider="openai",
+        provider_kwargs={"api_key": "sk-...", "base_url": "https://..."},
+    ),
+)
+```
 
 ## Using Local LLMs with Ollama
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:
@@ -342,10 +358,10 @@ result = lx.extract(
     examples=examples,
     model_id="gemma2:2b",  # Automatically selects Ollama provider
     model_url="http://localhost:11434",
-    fence_output=False,
-    use_schema_constraints=False
 )
 ```
+
+The Ollama provider exposes `FormatModeSchema` for JSON mode. Leave `fence_output` and `use_schema_constraints` unset so the factory auto-configures from the provider's schema.
 
 **Quick setup:** Install Ollama from [ollama.com](https://ollama.com/), run `ollama pull gemma2:2b`, then `ollama serve`.
 

@@ -181,6 +181,45 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
 
   @mock.patch("langextract.annotation.Annotator")
   @mock.patch("langextract.extraction.factory.create_model")
+  def test_language_model_params_forward_retry_knobs(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that provider-specific retry knobs flow through language_model_params."""
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = True
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+    mock_config = mock.MagicMock()
+
+    with mock.patch(
+        "langextract.extraction.factory.ModelConfig", return_value=mock_config
+    ) as mock_model_config:
+      result = lx.extract(
+          text_or_documents="text",
+          prompt_description=self.description,
+          examples=self.examples,
+          model_id="gemini-2.5-flash",
+          api_key="api-key",
+          language_model_params={
+              "max_retries": 5,
+              "retry_delay": 0.25,
+              "max_retry_delay": 4.0,
+          },
+          use_schema_constraints=False,
+      )
+
+    mock_model_config.assert_called_once()
+    _, kwargs = mock_model_config.call_args
+    provider_kwargs = kwargs["provider_kwargs"]
+    self.assertEqual(provider_kwargs["api_key"], "api-key")
+    self.assertEqual(provider_kwargs["max_retries"], 5)
+    self.assertEqual(provider_kwargs["retry_delay"], 0.25)
+    self.assertEqual(provider_kwargs["max_retry_delay"], 4.0)
+    mock_create_model.assert_called_once()
+    self.assertEqual(result, "ok")
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_use_schema_constraints_warns_with_config(
       self, mock_create_model, mock_annotator_cls
   ):

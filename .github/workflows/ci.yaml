@@ -38,6 +38,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.pr_number || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Keep ordinary PR formatting and secure fork formatting on the same
+# pyink/isort versions. The regular format-check job installs lint-imports
+# separately because only that path runs the import-structure check.
+env:
+  FORMATTER_PIP_PACKAGES: pyink==24.3.0 isort==5.13.2
+  IMPORT_LINTER_PIP_PACKAGE: import-linter==2.11
+
 permissions:
   contents: read
 
@@ -64,7 +71,7 @@ jobs:
       - name: Install format tools
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install ${FORMATTER_PIP_PACKAGES} ${IMPORT_LINTER_PIP_PACKAGE}
 
       - name: Check formatting
         id: format-check
@@ -420,7 +427,7 @@ jobs:
       - name: Install format tools
         run: |
           python -m pip install --upgrade pip
-          pip install pyink==24.3.0 isort==5.13.2
+          pip install ${FORMATTER_PIP_PACKAGES}
 
       - name: Validate PR formatting
         run: |

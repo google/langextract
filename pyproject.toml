@@ -59,8 +59,8 @@ dependencies = [
 openai = ["openai>=1.50.0"]
 all = ["openai>=1.50.0"]
 dev = [
-    "pyink~=24.3.0",
-    "isort>=5.13.0",
+    "pyink==24.3.0",
+    "isort==5.13.2",
     "pylint>=3.0.0",
     "pytype>=2024.10.11",
     "tox>=4.0.0",

@@ -13,12 +13,17 @@
 # limitations under the License.
 
 """Gemini provider for LangExtract."""
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
+import numbers
+import random
+import re
+import time
 from typing import Any, Final, Iterator, Sequence
 
 from absl import logging
@@ -36,6 +41,60 @@ from langextract.providers import schemas
 _DEFAULT_MODEL_ID = 'gemini-2.5-flash'
 _DEFAULT_LOCATION = 'us-central1'
 _MIME_TYPE_JSON = 'application/json'
+
+_DEFAULT_MAX_RETRIES = 3
+_DEFAULT_RETRY_DELAY = 1.0
+_DEFAULT_MAX_RETRY_DELAY = 16.0
+
+_RETRYABLE_API_CODES = frozenset({408, 429, 500, 502, 503, 504})
+
+# Phrases are narrow on purpose: bare "quota" or "unavailable" can be permanent
+# (denied quota, region out of service); we only match the transient forms.
+_RETRYABLE_MESSAGE_RE = re.compile(
+    r'503|overloaded|429|rate[ _]limit|quota exceeded|500.*internal'
+    r'|temporarily unavailable|timeout|connection reset',
+    re.IGNORECASE,
+)
+
+
+def _is_non_bool_integral(value: Any) -> bool:
+  """Return True when `value` is an integer-like value, excluding bool."""
+  return isinstance(value, numbers.Integral) and not isinstance(value, bool)
+
+
+def _is_non_bool_real(value: Any) -> bool:
+  """Return True when `value` is a real number, excluding bool."""
+  return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+
+def _has_sdk_retry_options(http_options: Any) -> bool:
+  """Return True if http_options enables SDK-level retries.
+
+  Only reports True when SDK retries would *actually* execute: the google-genai
+  SDK normalizes `HttpRetryOptions.attempts` of 0 or 1 to `stop_after_attempt(1)`,
+  i.e. no retries, so those values do not stack with our provider loop.
+
+  Accepts both HttpOptions (attribute access) and HttpOptionsDict (dict); the
+  dict form validates through pydantic camelCase aliases, so both
+  `retry_options` and `retryOptions` reach the same field.
+  """
+  if http_options is None:
+    return False
+  if isinstance(http_options, dict):
+    retry_options = http_options.get('retry_options')
+    if retry_options is None:
+      retry_options = http_options.get('retryOptions')
+  else:
+    retry_options = getattr(http_options, 'retry_options', None)
+  if retry_options is None:
+    return False
+  if isinstance(retry_options, dict):
+    attempts = retry_options.get('attempts')
+  else:
+    attempts = getattr(retry_options, 'attempts', None)
+  # attempts=None means SDK default (which is >1); 0 or 1 means no retries.
+  return attempts is None or attempts > 1
+
 
 _API_CONFIG_KEYS: Final[set[str]] = {
     'response_mime_type',
@@ -68,6 +127,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
   temperature: float = 0.0
   max_workers: int = 10
   fence_output: bool = False
+  max_retries: int = _DEFAULT_MAX_RETRIES
+  retry_delay: float = _DEFAULT_RETRY_DELAY
+  max_retry_delay: float = _DEFAULT_MAX_RETRY_DELAY
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
@@ -105,6 +167,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       temperature: float = 0.0,
       max_workers: int = 10,
       fence_output: bool = False,
+      *,
+      max_retries: int = _DEFAULT_MAX_RETRIES,
+      retry_delay: float = _DEFAULT_RETRY_DELAY,
+      max_retry_delay: float = _DEFAULT_MAX_RETRY_DELAY,
       **kwargs,
   ) -> None:
     """Initialize the Gemini language model.
@@ -123,6 +189,11 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       max_workers: Maximum number of parallel API calls.
       fence_output: Whether to wrap output in markdown fences (ignored,
         Gemini handles this based on schema).
+      max_retries: Maximum number of retry attempts for transient errors
+        (503, 429, network errors). Set to 0 to disable retries.
+      retry_delay: Initial delay in seconds before first retry.
+        Subsequent delays increase exponentially.
+      max_retry_delay: Maximum delay in seconds between retries.
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
         forwarded to the API (response_schema, response_mime_type, tools,
         safety_settings, stop_sequences, candidate_count, system_instruction).
@@ -149,6 +220,35 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.temperature = temperature
     self.max_workers = max_workers
     self.fence_output = fence_output
+    for name, value, ok in (
+        (
+            'max_retries',
+            max_retries,
+            _is_non_bool_integral(max_retries) and max_retries >= 0,
+        ),
+        (
+            'retry_delay',
+            retry_delay,
+            _is_non_bool_real(retry_delay) and retry_delay >= 0,
+        ),
+        (
+            'max_retry_delay',
+            max_retry_delay,
+            _is_non_bool_real(max_retry_delay) and max_retry_delay > 0,
+        ),
+    ):
+      if not ok:
+        raise exceptions.InferenceConfigError(f'{name} invalid: {value}')
+    self.max_retries = max_retries
+    self.retry_delay = retry_delay
+    self.max_retry_delay = max_retry_delay
+
+    # Avoid stacking with SDK-level retries (HttpOptions.retry_options).
+    if max_retries > 0 and _has_sdk_retry_options(http_options):
+      raise exceptions.InferenceConfigError(
+          'http_options.retry_options and max_retries>0 both configured; '
+          'retries would stack. Set max_retries=0 or clear retry_options.'
+      )
 
     # Extract batch config before we filter kwargs into _extra_kwargs
     batch_cfg_dict = kwargs.pop('batch', None)
@@ -199,31 +299,84 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           'Set format_type=JSON or use_schema_constraints=False.'
       )
 
+  def _is_retryable_error(self, error: Exception) -> bool:
+    """Return True if `error` is a transient failure worth retrying."""
+    try:
+      from google.genai import errors as genai_errors  # pylint: disable=import-outside-toplevel
+
+      if isinstance(error, genai_errors.APIError):
+        return error.code in _RETRYABLE_API_CODES
+    except ImportError:
+      pass
+
+    # httpx transient subclasses only. LocalProtocolError / UnsupportedProtocol
+    # are client/config bugs and not included.
+    try:
+      import httpx  # pylint: disable=import-outside-toplevel
+
+      if isinstance(
+          error,
+          (
+              httpx.TimeoutException,
+              httpx.NetworkError,
+              httpx.RemoteProtocolError,
+              httpx.ProxyError,
+          ),
+      ):
+        return True
+    except ImportError:
+      pass
+
+    # Specifically ConnectionError / TimeoutError. Bare OSError is excluded:
+    # it also covers file/permission errors that won't resolve by retrying.
+    if isinstance(error, (ConnectionError, TimeoutError)):
+      return True
+
+    return bool(_RETRYABLE_MESSAGE_RE.search(str(error)))
+
   def _process_single_prompt(
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
-    """Process a single prompt and return a ScoredOutput."""
-    try:
-      # Apply stored kwargs that weren't already set in config
-      for key, value in self._extra_kwargs.items():
-        if key not in config and value is not None:
-          config[key] = value
+    """Run one Gemini request with per-chunk retries for transient failures."""
+    delay = self.retry_delay
+    for attempt in range(self.max_retries + 1):
+      try:
+        call_config = dict(config)
+        for key, value in self._extra_kwargs.items():
+          if key not in call_config and value is not None:
+            call_config[key] = value
 
-      if self.gemini_schema:
-        self._validate_schema_config()
-        config.setdefault('response_mime_type', 'application/json')
-        config.setdefault('response_schema', self.gemini_schema.schema_dict)
+        if self.gemini_schema:
+          self._validate_schema_config()
+          call_config.setdefault('response_mime_type', 'application/json')
+          call_config.setdefault(
+              'response_schema', self.gemini_schema.schema_dict
+          )
 
-      response = self._client.models.generate_content(
-          model=self.model_id, contents=prompt, config=config
-      )
+        response = self._client.models.generate_content(
+            model=self.model_id, contents=prompt, config=call_config
+        )
+        return core_types.ScoredOutput(score=1.0, output=response.text)
 
-      return core_types.ScoredOutput(score=1.0, output=response.text)
-
-    except Exception as e:
-      raise exceptions.InferenceRuntimeError(
-          f'Gemini API error: {str(e)}', original=e
-      ) from e
+      except Exception as e:
+        if attempt < self.max_retries and self._is_retryable_error(e):
+          # Cap after jitter so the named maximum applies to the real sleep.
+          sleep_for = min(
+              delay * random.uniform(0.5, 1.5), self.max_retry_delay
+          )
+          logging.info(
+              'Retryable error on attempt %d/%d: %s. Retrying in %.1fs...',
+              attempt + 1,
+              self.max_retries + 1,
+              e,
+              sleep_for,
+          )
+          time.sleep(sleep_for)
+          delay = min(delay * 2, self.max_retry_delay)
+          continue
+        raise exceptions.InferenceRuntimeError(
+            f'Gemini API error: {e}', original=e
+        ) from e
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs

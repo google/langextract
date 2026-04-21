@@ -131,7 +131,9 @@ def extract(
         'fuzzy_alignment_algorithm' (str, "lcs"; "legacy" is deprecated),
         'fuzzy_alignment_min_density' (float, 1/3),
         'accept_match_lesser' (bool, True).
-      language_model_params: Additional parameters for the language model.
+      language_model_params: Additional provider-specific constructor kwargs,
+        such as Gemini retry settings ('max_retries', 'retry_delay',
+        'max_retry_delay') or 'http_options'.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract
         namespace. Note: Debug logging remains enabled for the process once activated.

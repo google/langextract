@@ -28,10 +28,13 @@ custom_provider_plugin/
 ### Provider Implementation (`provider.py`)
 
 ```python
-@lx.providers.registry.register(
+from langextract.core import base_model
+from langextract.providers import router
+
+@router.register(
     r'^gemini',  # Pattern for model IDs this provider handles
 )
-class CustomGeminiProvider(lx.inference.BaseLanguageModel):
+class CustomGeminiProvider(base_model.BaseLanguageModel):
     def __init__(self, model_id: str, **kwargs):
         # Initialize your backend client
 
@@ -55,7 +58,9 @@ Providers can optionally implement custom schemas for structured output:
 **Flow:** Examples → `from_examples()` → `to_provider_config()` → Provider kwargs → Inference
 
 ```python
-class CustomProviderSchema(lx.schema.BaseSchema):
+from langextract.core import schema as core_schema
+
+class CustomProviderSchema(core_schema.BaseSchema):
     @classmethod
     def from_examples(cls, examples_data, attribute_suffix="_attributes"):
         # Analyze examples to find patterns
@@ -70,15 +75,15 @@ class CustomProviderSchema(lx.schema.BaseSchema):
         }
 
     @property
-    def supports_strict_mode(self):
-        # True = valid JSON output, no markdown fences needed
+    def requires_raw_output(self):
+        # True = provider emits raw JSON, no markdown fences needed
         return True
 ```
 
 Then in your provider:
 
 ```python
-class CustomProvider(lx.inference.BaseLanguageModel):
+class CustomProvider(base_model.BaseLanguageModel):
     @classmethod
     def get_schema_class(cls):
         return CustomProviderSchema  # Tell LangExtract about your schema
@@ -113,30 +118,32 @@ Since this example registers the same pattern as the default Gemini provider, yo
 ```python
 import langextract as lx
 
-# Create a configured model with explicit provider selection
+# Option A: build a model explicitly and pass it to extract()
 config = lx.factory.ModelConfig(
     model_id="gemini-2.5-flash",
     provider="CustomGeminiProvider",
-    provider_kwargs={"api_key": "your-api-key"}
+    provider_kwargs={"api_key": "your-api-key"},
 )
 model = lx.factory.create_model(config)
 
-# Note: Passing model directly to extract() is coming soon.
-# For now, use the model's infer() method directly or pass parameters individually:
 result = lx.extract(
     text_or_documents="Your text here",
-    model_id="gemini-2.5-flash",
-    api_key="your-api-key",
+    model=model,
     prompt_description="Extract key information",
-    examples=[...]
+    examples=[...],
 )
 
-# Coming soon: Direct model passing
-# result = lx.extract(
-#     text_or_documents="Your text here",
-#     model=model,  # Planned feature
-#     prompt_description="Extract key information"
-# )
+# Option B: let extract() build the model from a ModelConfig
+result = lx.extract(
+    text_or_documents="Your text here",
+    config=lx.factory.ModelConfig(
+        model_id="gemini-2.5-flash",
+        provider="CustomGeminiProvider",
+        provider_kwargs={"api_key": "your-api-key"},
+    ),
+    prompt_description="Extract key information",
+    examples=[...],
+)
 ```
 
 ## Creating Your Own Provider - Step by Step
@@ -160,7 +167,7 @@ Edit `pyproject.toml`:
 ### 3. Modify Provider Implementation
 Edit `provider.py`:
 - Change class name from `CustomGeminiProvider` to `MyProvider`
-- Update `@register()` patterns to match your model IDs
+- Update `@router.register(...)` patterns to match your model IDs
 - Replace Gemini API calls with your backend
 - Add any provider-specific parameters
 
@@ -169,7 +176,7 @@ Edit `schema.py`:
 - Rename to `MyProviderSchema`
 - Customize `from_examples()` for your extraction format
 - Update `to_provider_config()` for your API requirements
-- Set `supports_strict_mode` based on your capabilities
+- Implement `requires_raw_output` (abstract in `BaseSchema`) based on whether your provider emits raw JSON/YAML or fenced output
 
 ### 5. Install and Test
 ```bash
@@ -178,9 +185,9 @@ pip install -e .
 
 # Test your provider
 python -c "
-import langextract as lx
-lx.providers.load_plugins_once()
-print('Provider registered:', any('myprovider' in str(e) for e in lx.providers.registry.list_entries()))
+from langextract.providers import load_plugins_once, router
+load_plugins_once()
+print('Provider registered:', any('myprovider' in str(e) for e in router.list_entries()))
 "
 ```
 

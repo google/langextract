@@ -283,6 +283,7 @@ jobs:
         github.event.pull_request.head.repo.full_name != github.repository
       ) || (
         github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
         github.event.inputs.pr_number != '' &&
         github.event.inputs.pr_head_sha != ''
       )
@@ -316,11 +317,12 @@ jobs:
               shaToTest = context.payload.pull_request.head.sha;
             } else {
               const dispatchInputs = context.payload.inputs ?? {};
-              prNumber = Number.parseInt(dispatchInputs.pr_number, 10);
+              const prNumberInput = (dispatchInputs.pr_number || '').trim();
               shaToTest = (dispatchInputs.pr_head_sha || '').trim();
-              if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              if (!/^[1-9]\d*$/.test(prNumberInput)) {
                 throw new Error(`Invalid pr_number input: ${dispatchInputs.pr_number}`);
               }
+              prNumber = Number.parseInt(prNumberInput, 10);
               if (!/^[0-9a-f]{40}$/i.test(shaToTest)) {
                 throw new Error(`Invalid pr_head_sha input: ${shaToTest}`);
               }
@@ -342,7 +344,17 @@ jobs:
               );
             }
 
-            if (pullRequest.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}`) {
+            const headRepoFullName = pullRequest.head.repo?.full_name;
+            if (!headRepoFullName) {
+              throw new Error(
+                  `PR #${prNumber} head repository is unavailable. ` +
+                  `The fork may have been deleted.`
+              );
+            }
+
+            // Repeat this check here because workflow_dispatch does not carry
+            // the pull_request_target fork filter.
+            if (headRepoFullName === `${context.repo.owner}/${context.repo.repo}`) {
               throw new Error(
                   `PR #${prNumber} is from the base repository; use normal PR checks instead.`
               );
@@ -361,8 +373,10 @@ jobs:
 
       - name: Pin commit SHA for security
         id: sha-pin
+        env:
+          STEPS_PR_METADATA_OUTPUTS_SHA_TO_TEST: ${{ steps.pr-metadata.outputs.sha_to_test }}
         run: |
-          SHA_TO_TEST="${{ steps.pr-metadata.outputs.sha_to_test }}"
+          SHA_TO_TEST="${STEPS_PR_METADATA_OUTPUTS_SHA_TO_TEST}"
           echo "SHA_TO_TEST=${SHA_TO_TEST}" >> $GITHUB_OUTPUT
           echo "::notice title=Security::Pinned commit SHA for testing: ${SHA_TO_TEST}"
 

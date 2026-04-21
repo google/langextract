@@ -16,6 +16,17 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Fork PR number for secure live API testing"
+        required: false
+        type: string
+        default: ""
+      pr_head_sha:
+        description: "Exact fork PR head SHA to test"
+        required: false
+        type: string
+        default: ""
   push:
     branches: ["main"]
   pull_request:
@@ -24,7 +35,7 @@ on:
     types: [labeled]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.inputs.pr_number || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -262,19 +273,29 @@ jobs:
     timeout-minutes: 30
     environment:
       name: live-keys
-    # Triggered when a maintainer adds 'ready-to-merge' label to fork PRs only
+    # Triggered by maintainer label on a fork PR or secure manual dispatch from
+    # main with an exact PR SHA.
     if: |
-      github.event_name == 'pull_request_target' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'ready-to-merge' &&
-      github.event.pull_request.head.repo.full_name != github.repository
+      (
+        github.event_name == 'pull_request_target' &&
+        github.event.action == 'labeled' &&
+        github.event.label.name == 'ready-to-merge' &&
+        github.event.pull_request.head.repo.full_name != github.repository
+      ) || (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        github.event.inputs.pr_number != '' &&
+        github.event.inputs.pr_head_sha != ''
+      )
 
     permissions:
       contents: read
       issues: write
+      pull-requests: read
 
     steps:
-      - name: Check if user is maintainer
+      - name: Resolve secure PR metadata
+        id: pr-metadata
         uses: actions/github-script@v7
         with:
           script: |
@@ -289,10 +310,73 @@ jobs:
               throw new Error(`User ${context.actor} does not have maintainer permissions.`);
             }
 
+            let prNumber;
+            let shaToTest;
+            if (context.eventName === 'pull_request_target') {
+              prNumber = context.payload.pull_request.number;
+              shaToTest = context.payload.pull_request.head.sha;
+            } else {
+              const dispatchInputs = context.payload.inputs ?? {};
+              const prNumberInput = (dispatchInputs.pr_number || '').trim();
+              shaToTest = (dispatchInputs.pr_head_sha || '').trim();
+              if (!/^[1-9]\d*$/.test(prNumberInput)) {
+                throw new Error(`Invalid pr_number input: ${dispatchInputs.pr_number}`);
+              }
+              prNumber = Number.parseInt(prNumberInput, 10);
+              if (!/^[0-9a-f]{40}$/i.test(shaToTest)) {
+                throw new Error(`Invalid pr_head_sha input: ${shaToTest}`);
+              }
+            }
+
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            if (pullRequest.state !== 'open') {
+              throw new Error(`PR #${prNumber} is ${pullRequest.state}, expected open.`);
+            }
+
+            if (pullRequest.base.ref !== 'main') {
+              throw new Error(
+                  `PR #${prNumber} targets ${pullRequest.base.ref}, expected main.`
+              );
+            }
+
+            const headRepoFullName = pullRequest.head.repo?.full_name;
+            if (!headRepoFullName) {
+              throw new Error(
+                  `PR #${prNumber} head repository is unavailable. ` +
+                  `The fork may have been deleted.`
+              );
+            }
+
+            // Repeat this check here because workflow_dispatch does not carry
+            // the pull_request_target fork filter.
+            if (headRepoFullName === `${context.repo.owner}/${context.repo.repo}`) {
+              throw new Error(
+                  `PR #${prNumber} is from the base repository; use normal PR checks instead.`
+              );
+            }
+
+            if (context.eventName === 'workflow_dispatch' &&
+                pullRequest.head.sha !== shaToTest) {
+              throw new Error(
+                  `PR #${prNumber} head moved to ${pullRequest.head.sha}. ` +
+                  `Re-run workflow_dispatch with the latest SHA.`
+              );
+            }
+
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('sha_to_test', shaToTest);
+
       - name: Pin commit SHA for security
         id: sha-pin
+        env:
+          STEPS_PR_METADATA_OUTPUTS_SHA_TO_TEST: ${{ steps.pr-metadata.outputs.sha_to_test }}
         run: |
-          SHA_TO_TEST="${{ github.event.pull_request.head.sha }}"
+          SHA_TO_TEST="${STEPS_PR_METADATA_OUTPUTS_SHA_TO_TEST}"
           echo "SHA_TO_TEST=${SHA_TO_TEST}" >> $GITHUB_OUTPUT
           echo "::notice title=Security::Pinned commit SHA for testing: ${SHA_TO_TEST}"
 
@@ -380,10 +464,12 @@ jobs:
 
       - name: Add status comment
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
           script: |
             github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
+              issue_number: Number(process.env.PR_NUMBER),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: 'Preparing to run live API tests (pending environment approval and API key availability)...'
@@ -409,10 +495,12 @@ jobs:
       - name: Report success
         if: success()
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
           script: |
             github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
+              issue_number: Number(process.env.PR_NUMBER),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: '✅ Live API tests passed! All endpoints are working correctly.'
@@ -421,10 +509,12 @@ jobs:
       - name: Report failure
         if: failure()
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
           script: |
             github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
+              issue_number: Number(process.env.PR_NUMBER),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: '❌ Live API tests failed. Please check the workflow logs for details.'

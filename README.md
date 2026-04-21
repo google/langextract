@@ -4,7 +4,7 @@
   </a>
 </p>
 
-# LangExtract
+# LangExtractt
 
 [![PyPI version](https://img.shields.io/pypi/v/langextract.svg)](https://pypi.org/project/langextract/)
 [![GitHub stars](https://img.shields.io/github/stars/google/langextract.svg?style=social&label=Star)](https://github.com/google/langextract)

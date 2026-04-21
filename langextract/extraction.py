@@ -362,7 +362,23 @@ def extract(
     )
     return result
   else:
-    documents = cast(Iterable[data.Document], text_or_documents)
+    raw_documents = cast(Iterable[data.Document], text_or_documents)
+    if additional_context is not None:
+      documents = []
+      for doc in raw_documents:
+        if doc.additional_context is None:
+          new_doc = data.Document(
+              text=doc.text,
+              document_id=doc._document_id,
+              additional_context=additional_context,
+          )
+          if doc._tokenized_text is not None:
+            new_doc.tokenized_text = doc._tokenized_text
+          documents.append(new_doc)
+        else:
+          documents.append(doc)
+    else:
+      documents = raw_documents
     result = annotator.annotate_documents(
         documents=documents,
         resolver=res,

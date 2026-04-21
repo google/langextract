@@ -420,8 +420,7 @@ jobs:
       - name: Install format tools
         run: |
           python -m pip install --upgrade pip
-          # Install formatter tools with pinned versions
-          pip install pyink==24.3.0 isort==5.13.2 lint-imports==0.3.1
+          pip install pyink==24.3.0 isort==5.13.2
 
       - name: Validate PR formatting
         run: |
@@ -464,6 +463,7 @@ jobs:
 
       - name: Add status comment
         uses: actions/github-script@v7
+        continue-on-error: true
         env:
           PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
@@ -473,6 +473,8 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: 'Preparing to run live API tests (pending environment approval and API key availability)...'
+            }).catch(err => {
+              console.log('Comment posting failed:', err.message);
             });
 
       - name: Run live API tests
@@ -495,6 +497,7 @@ jobs:
       - name: Report success
         if: success()
         uses: actions/github-script@v7
+        continue-on-error: true
         env:
           PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
@@ -504,11 +507,14 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: '✅ Live API tests passed! All endpoints are working correctly.'
+            }).catch(err => {
+              console.log('Comment posting failed:', err.message);
             });
 
       - name: Report failure
         if: failure()
         uses: actions/github-script@v7
+        continue-on-error: true
         env:
           PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
@@ -518,4 +524,6 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: '❌ Live API tests failed. Please check the workflow logs for details.'
+            }).catch(err => {
+              console.log('Comment posting failed:', err.message);
             });

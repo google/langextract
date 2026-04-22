@@ -413,9 +413,20 @@ class GCSBatchCache:
     self._bucket = self._client.bucket(bucket_name)
 
   def _compute_hash(self, key_data: dict) -> str:
-    """Compute SHA256 hash of the canonicalized request data."""
+    """Compute SHA256 hash of the canonicalized request data.
+
+    Non-primitive values (e.g. PromptParts) are converted to str before
+    serialization so the hash matches the format produced when prompts
+    were plain strings.  The conversion is transient — only one
+    stringified copy exists at a time — so it does not affect peak memory.
+    """
+    _PRIMITIVES = (str, int, float, bool, type(None), dict, list)
+    resolved = {
+        k: str(v) if not isinstance(v, _PRIMITIVES) else v
+        for k, v in key_data.items()
+    }
     canonical_json = json.dumps(
-        key_data,
+        resolved,
         sort_keys=True,
         ensure_ascii=False,
         default=_json_default,

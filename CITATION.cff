@@ -24,8 +24,8 @@ keywords:
   - machine-learning
   - python
 license: Apache-2.0
-version: 1.2.1
-date-released: 2026-04-07
+version: 1.3.0
+date-released: 2026-04-28
 
 doi: "10.5281/zenodo.17015089"
 identifiers:

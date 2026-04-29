@@ -13,11 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Publish a new version to Zenodo via REST API.
+"""Publish a new version to Zenodo via the InvenioRDM Records API.
 
-This script reads project metadata from pyproject.toml to avoid duplication.
-For subsequent releases, it creates new versions from the existing Zenodo record,
-inheriting most metadata automatically.
+Zenodo migrated to InvenioRDM in late 2023. The legacy /api/deposit
+endpoints still exist but /actions/newversion now rejects records with
+files attached ("Please remove all files first" on field files.enabled).
+This script uses the modern /api/records flow instead.
+
+Reads project name from pyproject.toml. ZENODO_RECORD_ID may be either
+the concept ID or any version's record ID — Zenodo resolves to the
+latest version.
 """
 
 import glob
@@ -34,10 +39,8 @@ RECORD_ID = os.environ["ZENODO_RECORD_ID"]
 VERSION = os.environ["RELEASE_TAG"].lstrip("v")
 REPO = os.environ["GITHUB_REPOSITORY"]
 SERVER = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
-HEADERS = {
-    "Authorization": f"Bearer {TOKEN}",
-    "Content-Type": "application/json",
-}
+AUTH = {"Authorization": f"Bearer {TOKEN}"}
+JSON_HEADERS = {**AUTH, "Content-Type": "application/json"}
 
 try:
   with open("pyproject.toml", "rb") as f:
@@ -59,109 +62,103 @@ def _check(r: requests.Response, op: str) -> None:
     r.raise_for_status()
 
 
-def _get_existing_draft(record_id: str):
-  """Return an existing unpublished draft for the record, if any."""
-  r = requests.get(
-      f"{API}/deposit/depositions/{record_id}",
-      headers=HEADERS,
-      timeout=30,
-  )
-  _check(r, "GET deposition")
-  data = r.json()
-  links = data.get("links", {})
-  draft_url = links.get("latest_draft")
-  if draft_url:
-    dr = requests.get(draft_url, headers=HEADERS, timeout=30)
-    _check(dr, "GET latest_draft")
-    draft = dr.json()
-    if draft.get("submitted") is False:
-      return draft
-  return None
+def new_version_draft(record_id: str) -> dict:
+  """Create a new version draft via the InvenioRDM Records API.
 
-
-def new_version_from_record(record_id: str):
-  """Create a new draft that inherits metadata from the latest published record.
-
-  If newversion fails because an unsubmitted draft already exists, reuse it.
+  If a draft already exists for the record, the API returns it instead
+  of creating a duplicate.
   """
   r = requests.post(
-      f"{API}/deposit/depositions/{record_id}/actions/newversion",
-      headers=HEADERS,
+      f"{API}/records/{record_id}/versions",
+      headers=JSON_HEADERS,
       timeout=30,
   )
-  if r.status_code == 400:
-    existing = _get_existing_draft(record_id)
-    if existing is not None:
-      print(
-          f"ℹ️  Reusing existing unsubmitted draft id={existing.get('id')}",
-          file=sys.stderr,
-      )
-      return existing
-  _check(r, "newversion")
-  latest_draft_url = r.json()["links"]["latest_draft"]
-  dr = requests.get(latest_draft_url, headers=HEADERS, timeout=30)
-  _check(dr, "GET latest_draft")
-  return dr.json()
+  _check(r, "create new version")
+  return r.json()
 
 
-def upload_file(bucket_url: str, path: str, dest_name: str = None):
-  """Upload a file to the deposition bucket."""
+def upload_file(draft_id: str, path: str, dest_name: str = None) -> None:
+  """Register, upload, and commit a file on a draft (3-step RDM flow)."""
   dest = dest_name or os.path.basename(path)
-  with open(path, "rb") as fp:
-    r = requests.put(
-        f"{bucket_url}/{dest}",
-        data=fp,
-        headers={"Authorization": f"Bearer {TOKEN}"},
-        timeout=60,
+  files_url = f"{API}/records/{draft_id}/draft/files"
+
+  init = requests.post(
+      files_url, headers=JSON_HEADERS, json=[{"key": dest}], timeout=30
+  )
+  if init.status_code == 400 and "already exists" in init.text.lower():
+    # Re-running over an existing draft; remove the stale entry first.
+    del_r = requests.delete(f"{files_url}/{dest}", headers=AUTH, timeout=30)
+    _check(del_r, f"delete stale file {dest}")
+    init = requests.post(
+        files_url, headers=JSON_HEADERS, json=[{"key": dest}], timeout=30
     )
-    _check(r, f"upload {dest}")
+  _check(init, f"register file {dest}")
+
+  with open(path, "rb") as fp:
+    up = requests.put(
+        f"{files_url}/{dest}/content",
+        data=fp,
+        headers={**AUTH, "Content-Type": "application/octet-stream"},
+        timeout=300,
+    )
+  _check(up, f"upload {dest}")
+
+  commit = requests.post(f"{files_url}/{dest}/commit", headers=AUTH, timeout=30)
+  _check(commit, f"commit {dest}")
 
 
-def main():
-  """Main workflow."""
+def update_metadata(draft_id: str) -> None:
+  """Patch only the version-specific fields; the rest is inherited."""
+  r = requests.get(f"{API}/records/{draft_id}/draft", headers=AUTH, timeout=30)
+  _check(r, "GET draft")
+  draft = r.json()
+  metadata = dict(draft.get("metadata", {}))
+  metadata["title"] = f"{PROJECT.replace('-', ' ').title()} v{VERSION}"
+  metadata["version"] = VERSION
+  # InvenioRDM resource type schema differs from the legacy upload_type
+  # enum; "software" is the canonical id.
+  metadata["resource_type"] = {"id": "software"}
+
+  r = requests.put(
+      f"{API}/records/{draft_id}/draft",
+      headers=JSON_HEADERS,
+      json={"metadata": metadata},
+      timeout=30,
+  )
+  _check(r, "PUT metadata")
+
+
+def publish_draft(draft_id: str) -> dict:
+  r = requests.post(
+      f"{API}/records/{draft_id}/draft/actions/publish",
+      headers=JSON_HEADERS,
+      timeout=60,
+  )
+  _check(r, "publish")
+  return r.json()
+
+
+def main() -> int:
   try:
-    draft = new_version_from_record(RECORD_ID)
+    draft = new_version_draft(RECORD_ID)
+    draft_id = draft["id"]
+    print(f"ℹ️  Working on draft id={draft_id}", file=sys.stderr)
 
-    bucket = draft["links"]["bucket"]
-    dep_id = draft["id"]
-
-    # GitHub auto-generates source archives for tags
     tarball = f"/tmp/{PROJECT}-v{VERSION}.tar.gz"
     src_url = f"{SERVER}/{REPO}/archive/refs/tags/v{VERSION}.tar.gz"
     urllib.request.urlretrieve(src_url, tarball)
-    upload_file(bucket, tarball, f"{PROJECT}-{VERSION}.tar.gz")
+    upload_file(draft_id, tarball, f"{PROJECT}-{VERSION}.tar.gz")
 
     for path in glob.glob("dist/*"):
-      upload_file(bucket, path)
+      upload_file(draft_id, path)
 
-    # Update only version-specific metadata; rest is inherited
-    meta = {
-        "metadata": {
-            "title": f"{PROJECT.replace('-', ' ').title()} v{VERSION}",
-            "version": VERSION,
-            "upload_type": "software",
-        }
-    }
-    r = requests.put(
-        f"{API}/deposit/depositions/{dep_id}",
-        headers=HEADERS,
-        json=meta,
-        timeout=30,
+    update_metadata(draft_id)
+    record = publish_draft(draft_id)
+
+    doi = record.get("doi") or record.get("pids", {}).get("doi", {}).get(
+        "identifier"
     )
-    _check(r, "PUT metadata")
-
-    # Publish to mint DOI
-    r = requests.post(
-        f"{API}/deposit/depositions/{dep_id}/actions/publish",
-        headers=HEADERS,
-        timeout=30,
-    )
-    _check(r, "publish")
-    record = r.json()
-
-    doi = record.get("doi")
-    record_id = record.get("record_id")
-
+    record_id = record.get("id")
     print(f"✅ Published to Zenodo: https://doi.org/{doi}")
 
     if "GITHUB_OUTPUT" in os.environ:

@@ -16,6 +16,12 @@ name: Publish to Zenodo
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag to publish (e.g. v1.3.0). Used only when manually re-running.'
+        required: true
+        type: string
 
 concurrency:
   group: zenodo-${{ github.ref }}
@@ -25,7 +31,7 @@ jobs:
   zenodo:
     # Only run on releases from the main repository, not forks
     # Skip pre-releases to avoid creating DOIs for test releases
-    if: ${{ !github.event.release.prerelease && github.repository == 'google/langextract' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.release.prerelease && github.repository == 'google/langextract') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -33,9 +39,14 @@ jobs:
     env:
       ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
       ZENODO_RECORD_ID: ${{ secrets.ZENODO_RECORD_ID }}
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
       GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
+      # Note: we deliberately do not check out the input ref. workflow_dispatch
+      # is meant for diagnostic re-runs of the latest release, and we want the
+      # *fixed* script from main, not whatever script existed at the older tag.
+      # The build below uses main's pyproject.toml; this only works correctly
+      # when main's version still matches the tag being republished.
       - uses: actions/checkout@v6
 
       - name: Set up Python

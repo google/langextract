@@ -49,17 +49,59 @@ except (KeyError, FileNotFoundError) as e:
   sys.exit(1)
 
 
+def _check(r: requests.Response, op: str) -> None:
+  """raise_for_status with the response body included for debugging."""
+  if not r.ok:
+    body = r.text[:2000] if r.text else "<empty>"
+    print(f"❌ Zenodo {op} failed: {r.status_code} {r.reason}", file=sys.stderr)
+    print(f"   URL: {r.request.url}", file=sys.stderr)
+    print(f"   Response body: {body}", file=sys.stderr)
+    r.raise_for_status()
+
+
+def _get_existing_draft(record_id: str):
+  """Return an existing unpublished draft for the record, if any."""
+  r = requests.get(
+      f"{API}/deposit/depositions/{record_id}",
+      headers=HEADERS,
+      timeout=30,
+  )
+  _check(r, "GET deposition")
+  data = r.json()
+  links = data.get("links", {})
+  draft_url = links.get("latest_draft")
+  if draft_url:
+    dr = requests.get(draft_url, headers=HEADERS, timeout=30)
+    _check(dr, "GET latest_draft")
+    draft = dr.json()
+    if draft.get("submitted") is False:
+      return draft
+  return None
+
+
 def new_version_from_record(record_id: str):
-  """Create a new draft that inherits metadata from the latest published record."""
+  """Create a new draft that inherits metadata from the latest published record.
+
+  If newversion fails because an unsubmitted draft already exists, reuse it.
+  """
   r = requests.post(
       f"{API}/deposit/depositions/{record_id}/actions/newversion",
       headers=HEADERS,
       timeout=30,
   )
-  r.raise_for_status()
-  # Zenodo returns a link to the draft, not the draft itself
+  if r.status_code == 400:
+    existing = _get_existing_draft(record_id)
+    if existing is not None:
+      print(
+          f"ℹ️  Reusing existing unsubmitted draft id={existing.get('id')}",
+          file=sys.stderr,
+      )
+      return existing
+  _check(r, "newversion")
   latest_draft_url = r.json()["links"]["latest_draft"]
-  return requests.get(latest_draft_url, headers=HEADERS, timeout=30).json()
+  dr = requests.get(latest_draft_url, headers=HEADERS, timeout=30)
+  _check(dr, "GET latest_draft")
+  return dr.json()
 
 
 def upload_file(bucket_url: str, path: str, dest_name: str = None):
@@ -72,7 +114,7 @@ def upload_file(bucket_url: str, path: str, dest_name: str = None):
         headers={"Authorization": f"Bearer {TOKEN}"},
         timeout=60,
     )
-    r.raise_for_status()
+    _check(r, f"upload {dest}")
 
 
 def main():
@@ -106,7 +148,7 @@ def main():
         json=meta,
         timeout=30,
     )
-    r.raise_for_status()
+    _check(r, "PUT metadata")
 
     # Publish to mint DOI
     r = requests.post(
@@ -114,7 +156,7 @@ def main():
         headers=HEADERS,
         timeout=30,
     )
-    r.raise_for_status()
+    _check(r, "publish")
     record = r.json()
 
     doi = record.get("doi")

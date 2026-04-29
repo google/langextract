@@ -109,9 +109,7 @@ def upload_file(draft_id: str, path: str, dest_name: str = None) -> None:
 
 def update_metadata(draft_id: str) -> None:
   """Patch only the version-specific fields; the rest is inherited."""
-  r = requests.get(
-      f"{API}/records/{draft_id}/draft", headers=AUTH, timeout=30
-  )
+  r = requests.get(f"{API}/records/{draft_id}/draft", headers=AUTH, timeout=30)
   _check(r, "GET draft")
   draft = r.json()
   metadata = dict(draft.get("metadata", {}))
@@ -157,9 +155,8 @@ def main() -> int:
     update_metadata(draft_id)
     record = publish_draft(draft_id)
 
-    doi = (
-        record.get("doi")
-        or record.get("pids", {}).get("doi", {}).get("identifier")
+    doi = record.get("doi") or record.get("pids", {}).get("doi", {}).get(
+        "identifier"
     )
     record_id = record.get("id")
     print(f"✅ Published to Zenodo: https://doi.org/{doi}")

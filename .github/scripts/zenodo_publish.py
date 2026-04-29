@@ -27,6 +27,7 @@ latest version.
 
 import glob
 import os
+import re
 import sys
 import tomllib
 import urllib.request
@@ -40,7 +41,8 @@ VERSION = os.environ["RELEASE_TAG"].lstrip("v")
 REPO = os.environ["GITHUB_REPOSITORY"]
 SERVER = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
-JSON_HEADERS = {**AUTH, "Content-Type": "application/json"}
+ACCEPT_HEADERS = {**AUTH, "Accept": "application/vnd.inveniordm.v1+json"}
+JSON_HEADERS = {**ACCEPT_HEADERS, "Content-Type": "application/json"}
 
 try:
   with open("pyproject.toml", "rb") as f:
@@ -77,6 +79,32 @@ def new_version_draft(record_id: str) -> dict:
   return r.json()
 
 
+def published_metadata(record_id: str) -> dict:
+  """Read required metadata from the latest published version."""
+  r = requests.get(
+      f"{API}/records/{record_id}",
+      headers=ACCEPT_HEADERS,
+      timeout=30,
+  )
+  _check(r, "GET published record")
+  return r.json().get("metadata", {})
+
+
+def release_date() -> str | None:
+  """Return the release date from CITATION.cff, if present."""
+  try:
+    with open("CITATION.cff", encoding="utf-8") as f:
+      match = re.search(
+          r"^date-released:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})$",
+          f.read(),
+          re.MULTILINE,
+      )
+  except FileNotFoundError:
+    return None
+
+  return match.group(1) if match else None
+
+
 def upload_file(draft_id: str, path: str, dest_name: str = None) -> None:
   """Register, upload, and commit a file on a draft (3-step RDM flow)."""
   dest = dest_name or os.path.basename(path)
@@ -108,13 +136,24 @@ def upload_file(draft_id: str, path: str, dest_name: str = None) -> None:
 
 
 def update_metadata(draft_id: str) -> None:
-  """Patch only the version-specific fields; the rest is inherited."""
-  r = requests.get(f"{API}/records/{draft_id}/draft", headers=AUTH, timeout=30)
+  """Patch version-specific fields while preserving required metadata."""
+  r = requests.get(
+      f"{API}/records/{draft_id}/draft",
+      headers=ACCEPT_HEADERS,
+      timeout=30,
+  )
   _check(r, "GET draft")
-  draft = r.json()
-  metadata = dict(draft.get("metadata", {}))
+  draft_metadata = r.json().get("metadata", {})
+  source_metadata = published_metadata(RECORD_ID)
+  metadata = dict(source_metadata)
+  metadata.update(draft_metadata)
+  for field in ("creators", "description", "publication_date"):
+    if not metadata.get(field) and source_metadata.get(field):
+      metadata[field] = source_metadata[field]
   metadata["title"] = f"{PROJECT.replace('-', ' ').title()} v{VERSION}"
   metadata["version"] = VERSION
+  if released := release_date():
+    metadata["publication_date"] = released
   # InvenioRDM resource type schema differs from the legacy upload_type
   # enum; "software" is the canonical id.
   metadata["resource_type"] = {"id": "software"}

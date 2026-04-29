@@ -34,6 +34,39 @@ from langextract.core import format_handler as fh
 from langextract.core import tokenizer as tokenizer_lib
 
 
+def _filter_ungrounded_extractions(
+    extractions: list[data.Extraction] | None,
+) -> list[data.Extraction]:
+  """Filters out extractions that are not grounded in the source text.
+
+  An extraction is considered ungrounded if its char_interval is None or
+  if either start_pos or end_pos is None. This typically indicates that
+  the extraction could not be located in the source document, which may
+  occur when the LLM extracts content from few-shot examples rather than
+  the actual input text.
+
+  Args:
+    extractions: List of extractions to filter.
+
+  Returns:
+    List of extractions with valid char_interval positions.
+  """
+  if not extractions:
+    return []
+
+  grounded = []
+  for extraction in extractions:
+    if extraction.char_interval is None:
+      continue
+    if extraction.char_interval.start_pos is None:
+      continue
+    if extraction.char_interval.end_pos is None:
+      continue
+    grounded.append(extraction)
+
+  return grounded
+
+
 def extract(
     text_or_documents: typing.Any,
     prompt_description: str | None = None,
@@ -54,7 +87,6 @@ def extract(
     debug: bool = False,
     model_url: str | None = None,
     extraction_passes: int = 1,
-    context_window_chars: int | None = None,
     config: typing.Any = None,
     model: typing.Any = None,
     *,
@@ -63,6 +95,7 @@ def extract(
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
     tokenizer: tokenizer_lib.Tokenizer | None = None,
+    require_grounding: bool = False,
 ) -> list[data.AnnotatedDocument] | data.AnnotatedDocument:
   """Extracts structured information from text.
 
@@ -146,10 +179,6 @@ def extract(
         for overlaps). WARNING: Each additional pass reprocesses tokens,
         potentially increasing API costs. For example, extraction_passes=3
         reprocesses tokens 3x.
-      context_window_chars: Number of characters from the previous chunk to
-        include as context for the current chunk. This helps with coreference
-        resolution across chunk boundaries (e.g., resolving "She" to a person
-        mentioned in the previous chunk). Defaults to None (disabled).
       config: Model configuration to use for extraction. Takes precedence over
         model_id, api_key, and language_model_type parameters. When both model
         and config are provided, model takes precedence.
@@ -166,6 +195,12 @@ def extract(
       prompt_validation_strict: When True and prompt_validation_level is ERROR,
         raises on non-exact matches (MATCH_FUZZY, MATCH_LESSER). Defaults to False.
       show_progress: Whether to show progress bar during extraction. Defaults to True.
+      require_grounding: Whether to filter out extractions that cannot be grounded
+        to specific character positions in the source text. When True, only
+        extractions with valid char_interval (non-None start_pos and end_pos)
+        are returned. This helps prevent returning extractions that may have been
+        extracted from few-shot examples rather than the actual input text.
+        Defaults to False for backward compatibility.
 
   Returns:
       An AnnotatedDocument with the extracted information when input is a
@@ -354,26 +389,46 @@ def extract(
         additional_context=additional_context,
         debug=debug,
         extraction_passes=extraction_passes,
-        context_window_chars=context_window_chars,
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,
         **alignment_kwargs,
     )
+
+    # Filter ungrounded extractions if requested
+    if require_grounding:
+      result = data.AnnotatedDocument(
+          document_id=result.document_id,
+          extractions=_filter_ungrounded_extractions(result.extractions),
+          text=result.text,
+      )
+
     return result
   else:
     documents = cast(Iterable[data.Document], text_or_documents)
-    result = annotator.annotate_documents(
+    results = annotator.annotate_documents(
         documents=documents,
         resolver=res,
         max_char_buffer=max_char_buffer,
         batch_length=batch_length,
         debug=debug,
         extraction_passes=extraction_passes,
-        context_window_chars=context_window_chars,
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,
         **alignment_kwargs,
     )
-    return list(result)
+
+    # Filter ungrounded extractions if requested
+    if require_grounding:
+      filtered_results = []
+      for doc in results:
+        filtered_doc = data.AnnotatedDocument(
+            document_id=doc.document_id,
+            extractions=_filter_ungrounded_extractions(doc.extractions),
+            text=doc.text,
+        )
+        filtered_results.append(filtered_doc)
+      return filtered_results
+
+    return list(results)

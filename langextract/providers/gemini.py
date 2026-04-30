@@ -104,6 +104,7 @@ _API_CONFIG_KEYS: Final[set[str]] = {
     'tools',
     'stop_sequences',
     'candidate_count',
+    'thinking_config',
 }
 
 
@@ -196,8 +197,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       max_retry_delay: Maximum delay in seconds between retries.
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
         forwarded to the API (response_schema, response_mime_type, tools,
-        safety_settings, stop_sequences, candidate_count, system_instruction).
-        See https://ai.google.dev/api/generate-content for details.
+        safety_settings, stop_sequences, candidate_count,
+        system_instruction, thinking_config). See
+        https://ai.google.dev/api/generate-content for details.
     """
     try:
       # pylint: disable=import-outside-toplevel

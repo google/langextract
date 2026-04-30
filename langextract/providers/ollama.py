@@ -269,7 +269,13 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
             model_url=self._model_url,
             **combined_kwargs,
         )
-        yield [core_types.ScoredOutput(score=1.0, output=response['response'])]
+        # Ollama may return empty 'response' with content in 'thinking' field
+        output = response.get('response', '') or response.get('thinking', '')
+        if not output:
+          raise exceptions.InferenceRuntimeError(
+              'Ollama returned empty response', original=None
+          )
+        yield [core_types.ScoredOutput(score=1.0, output=output)]
       except Exception as e:
         raise exceptions.InferenceRuntimeError(
             f'Ollama API error: {str(e)}', original=e

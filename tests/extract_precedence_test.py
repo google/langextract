@@ -17,6 +17,7 @@
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 
 from langextract import factory
 import langextract as lx
@@ -273,6 +274,328 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertIn("ignored", str(cm.warning))
     mock_create_model.assert_not_called()
     self.assertEqual(result, "ok")
+
+
+class ExtractAdditionalContextTest(parameterized.TestCase):
+  """Tests for additional_context propagation in the document path of extract()."""
+
+  def setUp(self):
+    super().setUp()
+    self.examples = [
+        data.ExampleData(
+            text="example",
+            extractions=[
+                data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="example",
+                )
+            ],
+        )
+    ]
+    self.description = "description"
+
+  def _setup_mocks(self, mock_create_model, mock_annotator_cls):
+    """Wire the patched create_model and Annotator for a single test."""
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = False
+    mock_create_model.return_value = mock_model
+    mock_annotator = mock_annotator_cls.return_value
+    mock_annotator.annotate_documents.return_value = iter([])
+    return mock_model, mock_annotator
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="global_applied_when_doc_lacks_own",
+          per_doc_ctxs=[None, None],
+          global_ctx="Important disambiguation rule: treat X as a brand name.",
+          expected=[
+              "Important disambiguation rule: treat X as a brand name.",
+              "Important disambiguation rule: treat X as a brand name.",
+          ],
+      ),
+      dict(
+          testcase_name="per_doc_takes_precedence_over_global",
+          per_doc_ctxs=["Document-specific context.", None],
+          global_ctx="Global context.",
+          expected=["Document-specific context.", "Global context."],
+      ),
+      dict(
+          testcase_name="empty_string_per_doc_takes_precedence_over_global",
+          per_doc_ctxs=[""],
+          global_ctx="Global context.",
+          expected=[""],
+      ),
+      dict(
+          testcase_name="empty_string_global_treated_as_non_none",
+          per_doc_ctxs=[None],
+          global_ctx="",
+          expected=[""],
+      ),
+  )
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_additional_context_propagated_to_passed_documents(
+      self,
+      mock_create_model,
+      mock_annotator_cls,
+      per_doc_ctxs,
+      global_ctx,
+      expected,
+  ):
+    mock_model, mock_annotator = self._setup_mocks(
+        mock_create_model, mock_annotator_cls
+    )
+    docs = [
+        data.Document(text=f"doc {i}", additional_context=ctx)
+        for i, ctx in enumerate(per_doc_ctxs)
+    ]
+
+    lx.extract(
+        text_or_documents=docs,
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context=global_ctx,
+        use_schema_constraints=False,
+    )
+
+    passed_docs = list(
+        mock_annotator.annotate_documents.call_args.kwargs["documents"]
+    )
+    actual = [doc.additional_context for doc in passed_docs]
+    self.assertEqual(actual, expected)
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_no_additional_context_leaves_documents_unchanged(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """When additional_context is None, documents are passed through as-is."""
+    mock_model, mock_annotator = self._setup_mocks(
+        mock_create_model, mock_annotator_cls
+    )
+
+    docs = [
+        data.Document(text="doc one"),
+        data.Document(text="doc two"),
+    ]
+    original_docs = list(docs)
+
+    lx.extract(
+        text_or_documents=docs,
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context=None,
+        use_schema_constraints=False,
+    )
+
+    _, kwargs = mock_annotator.annotate_documents.call_args
+    passed_docs = list(kwargs["documents"])
+    self.assertLen(passed_docs, 2)
+    for passed, original in zip(passed_docs, original_docs):
+      self.assertIs(passed, original)
+      self.assertIsNone(passed.additional_context)
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_document_ids_preserved_when_applying_global_context(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Document IDs are not lost when global additional_context is applied."""
+    mock_model, mock_annotator = self._setup_mocks(
+        mock_create_model, mock_annotator_cls
+    )
+
+    docs = [
+        data.Document(text="doc one", document_id="custom-id-1"),
+        data.Document(text="doc two", document_id="custom-id-2"),
+    ]
+
+    lx.extract(
+        text_or_documents=docs,
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context="context",
+        use_schema_constraints=False,
+    )
+
+    _, kwargs = mock_annotator.annotate_documents.call_args
+    passed_docs = list(kwargs["documents"])
+    self.assertLen(passed_docs, 2)
+    self.assertEqual(passed_docs[0].document_id, "custom-id-1")
+    self.assertEqual(passed_docs[1].document_id, "custom-id-2")
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_auto_generated_document_ids_preserved_with_global_context(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Generated IDs still correlate caller Documents with results."""
+    mock_model, mock_annotator = self._setup_mocks(
+        mock_create_model, mock_annotator_cls
+    )
+
+    docs = [
+        data.Document(text="doc one"),
+        data.Document(text="doc two"),
+    ]
+
+    lx.extract(
+        text_or_documents=docs,
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context="context",
+        use_schema_constraints=False,
+    )
+
+    _, kwargs = mock_annotator.annotate_documents.call_args
+    passed_docs = list(kwargs["documents"])
+    self.assertLen(passed_docs, 2)
+    self.assertEqual(passed_docs[0].document_id, docs[0].document_id)
+    self.assertEqual(passed_docs[1].document_id, docs[1].document_id)
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_generator_input_works_with_additional_context(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Generator inputs are fully consumed when additional_context is applied."""
+    mock_model, mock_annotator = self._setup_mocks(
+        mock_create_model, mock_annotator_cls
+    )
+
+    def doc_generator():
+      yield data.Document(text="gen doc one")
+      yield data.Document(text="gen doc two")
+
+    lx.extract(
+        text_or_documents=doc_generator(),
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context="global context",
+        use_schema_constraints=False,
+    )
+
+    _, kwargs = mock_annotator.annotate_documents.call_args
+    passed_docs = list(kwargs["documents"])
+    self.assertLen(passed_docs, 2)
+    for doc in passed_docs:
+      self.assertEqual(doc.additional_context, "global context")
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_caller_documents_keep_context_and_token_cache(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Global context copies do not alter caller context or tokenization."""
+    mock_model, mock_annotator = self._setup_mocks(
+        mock_create_model, mock_annotator_cls
+    )
+
+    docs = [
+        data.Document(text="doc one"),
+        data.Document(text="doc two"),
+    ]
+
+    lx.extract(
+        text_or_documents=docs,
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context="injected context",
+        use_schema_constraints=False,
+    )
+
+    # Wrapping is lazy; force consumption so the copy path actually runs.
+    list(mock_annotator.annotate_documents.call_args.kwargs["documents"])
+
+    for original in docs:
+      self.assertIsNone(original.additional_context)
+      self.assertIsNone(original._tokenized_text)
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_pre_tokenized_text_preserved_when_applying_global_context(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """A Document's pre-tokenized cache survives the global-context copy.
+
+    Re-tokenizing on every copy would silently waste work for callers who
+    already paid for tokenization upstream.
+    """
+    mock_model, mock_annotator = self._setup_mocks(
+        mock_create_model, mock_annotator_cls
+    )
+
+    doc = data.Document(text="patient has diabetes")
+    pre_tokenized = doc.tokenized_text  # triggers tokenization
+
+    lx.extract(
+        text_or_documents=[doc],
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context="global ctx",
+        use_schema_constraints=False,
+    )
+
+    _, kwargs = mock_annotator.annotate_documents.call_args
+    passed_docs = list(kwargs["documents"])
+    self.assertLen(passed_docs, 1)
+    self.assertIs(passed_docs[0].tokenized_text, pre_tokenized)
+    self.assertEqual(passed_docs[0].additional_context, "global ctx")
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_string_and_document_paths_apply_additional_context_identically(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """String and Document inputs deliver the same additional_context.
+
+    Locks parity between lx.extract(text=..., additional_context=X) and
+    lx.extract([Document(text=...)], additional_context=X). The drift
+    between these two paths is exactly what produced #445.
+    """
+    text = "patient has diabetes"
+    ctx = "Disambiguation rule: treat conditions as present unless stated."
+
+    mock_model, mock_annotator = self._setup_mocks(
+        mock_create_model, mock_annotator_cls
+    )
+    mock_annotator.annotate_text.return_value = mock.MagicMock()
+
+    lx.extract(
+        text_or_documents=text,
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context=ctx,
+        use_schema_constraints=False,
+    )
+    string_kwargs = mock_annotator.annotate_text.call_args.kwargs
+
+    lx.extract(
+        text_or_documents=[data.Document(text=text)],
+        prompt_description=self.description,
+        examples=self.examples,
+        model=mock_model,
+        additional_context=ctx,
+        use_schema_constraints=False,
+    )
+    doc_kwargs = mock_annotator.annotate_documents.call_args.kwargs
+
+    self.assertEqual(string_kwargs["additional_context"], ctx)
+    passed_docs = list(doc_kwargs["documents"])
+    self.assertLen(passed_docs, 1)
+    self.assertEqual(passed_docs[0].additional_context, ctx)
+    self.assertEqual(
+        passed_docs[0].additional_context,
+        string_kwargs["additional_context"],
+    )
 
 
 if __name__ == "__main__":

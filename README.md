@@ -9,7 +9,8 @@
 [![PyPI version](https://img.shields.io/pypi/v/langextract.svg)](https://pypi.org/project/langextract/)
 [![GitHub stars](https://img.shields.io/github/stars/google/langextract.svg?style=social&label=Star)](https://github.com/google/langextract)
 ![Tests](https://github.com/google/langextract/actions/workflows/ci.yaml/badge.svg)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17015089.svg)](https://doi.org/10.5281/zenodo.17015089)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.17015089-blue)](https://doi.org/10.5281/zenodo.17015089)
+
 
 ## Table of Contents
 

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Core data types for LangExtract."""
+
 from __future__ import annotations
 
 import dataclasses

@@ -222,7 +222,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     )
 
     with self.assertRaisesRegex(
-        exceptions.InferenceRuntimeError, "thinking trace"
+        exceptions.InferenceRuntimeError, "think=False"
     ):
       list(model.infer(["What is bus in Hungarian?"]))
 
@@ -268,6 +268,28 @@ class TestOllamaLanguageModel(absltest.TestCase):
         model_url="http://localhost:11434",
         think=True,
     )
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_default_think_does_not_mutate_stored_kwargs(
+      self, mock_ollama_query
+  ):
+    """Test default think setting is per request only."""
+    mock_ollama_query.return_value = {
+        "response": '{"test": "value"}',
+        "done": True,
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+        temperature=0.1,
+    )
+    stored_kwargs = model.merge_kwargs()
+
+    list(model.infer(["Test prompt"]))
+
+    self.assertEqual(model.merge_kwargs(), stored_kwargs)
+    self.assertNotIn("think", model.merge_kwargs())
 
   @mock.patch("requests.post")
   def test_ollama_extra_kwargs_passed_to_api(self, mock_post):

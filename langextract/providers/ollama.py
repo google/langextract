@@ -257,6 +257,7 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       Lists of ScoredOutputs.
     """
     combined_kwargs = dict(self.merge_kwargs(kwargs))
+    # LangExtract consumes final structured output, not Ollama reasoning traces.
     combined_kwargs.setdefault('think', False)
 
     for prompt in batch_prompts:
@@ -289,7 +290,8 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
     if response.get('thinking'):
       raise exceptions.InferenceRuntimeError(
           'Ollama returned an empty response with a thinking trace. The '
-          'thinking field contains reasoning, not final output.',
+          'thinking field contains reasoning, not final output. Ensure Ollama '
+          'extraction requests use think=False, which is LangExtract default.',
           provider='Ollama',
       )
     raise exceptions.InferenceRuntimeError(

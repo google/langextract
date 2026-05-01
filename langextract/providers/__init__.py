@@ -19,8 +19,8 @@ Each provider can be imported independently for fine-grained dependency
 management in build systems.
 """
 
-from importlib import metadata
 import importlib
+from importlib import metadata
 import os
 
 from absl import logging

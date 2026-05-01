@@ -19,9 +19,9 @@ It supports both built-in providers and third-party providers via entry points.
 """
 from __future__ import annotations
 
-from importlib import metadata
 import functools
 import importlib
+from importlib import metadata
 
 from absl import logging
 

@@ -30,9 +30,10 @@ from collections.abc import Iterable, Iterator
 import time
 from typing import DefaultDict
 
-from absl import logging
-
+from langextract._logging import get_logger
 from langextract import chunking
+
+logger = get_logger(__name__)
 from langextract import progress
 from langextract import prompting
 from langextract import resolver as resolver_lib
@@ -202,7 +203,7 @@ class Annotator:
         format_handler=format_handler,
     )
 
-    logging.debug(
+    logger.debug(
         "Annotator initialized with format_handler: %s", format_handler
     )
 
@@ -459,7 +460,7 @@ class Annotator:
   ) -> Iterator[data.AnnotatedDocument]:
     """Sequential extraction passes logic for improved recall."""
 
-    logging.info(
+    logger.info(
         "Starting sequential extraction passes for improved recall with %d"
         " passes.",
         extraction_passes,
@@ -475,7 +476,7 @@ class Annotator:
       document_texts[_doc.document_id] = _doc.text or ""
 
     for pass_num in range(extraction_passes):
-      logging.info(
+      logger.info(
           "Starting extraction pass %d of %d", pass_num + 1, extraction_passes
       )
 
@@ -512,7 +513,7 @@ class Annotator:
         total_extractions = sum(
             len(extractions) for extractions in all_pass_extractions
         )
-        logging.info(
+        logger.info(
             "Document %s: Merged %d extractions from %d passes into "
             "%d non-overlapping extractions.",
             doc_id,
@@ -527,7 +528,7 @@ class Annotator:
           text=document_texts.get(doc_id, doc.text or ""),
       )
 
-    logging.info("Sequential extraction passes completed.")
+    logger.info("Sequential extraction passes completed.")
 
   def annotate_text(
       self,

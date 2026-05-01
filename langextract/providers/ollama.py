@@ -256,7 +256,8 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
     Yields:
       Lists of ScoredOutputs.
     """
-    combined_kwargs = self.merge_kwargs(kwargs)
+    combined_kwargs = dict(self.merge_kwargs(kwargs))
+    combined_kwargs.setdefault('think', False)
 
     for prompt in batch_prompts:
       try:
@@ -269,13 +270,33 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
             model_url=self._model_url,
             **combined_kwargs,
         )
-        # Handle Ollama API changes: newer versions may put content in 'thinking' instead of 'response'
-        output = response.get('response') or response.get('thinking', '')
+        output = self._extract_response_text(response)
         yield [core_types.ScoredOutput(score=1.0, output=output)]
+      except exceptions.InferenceError:
+        raise
       except Exception as e:
         raise exceptions.InferenceRuntimeError(
-            f'Ollama API error: {str(e)}', original=e
+            f'Ollama API error: {str(e)}', original=e, provider='Ollama'
         ) from e
+
+  @staticmethod
+  def _extract_response_text(response: Mapping[str, Any]) -> str:
+    """Returns final generated text from an Ollama generate response."""
+    output = response.get('response')
+    if output:
+      return output
+
+    if response.get('thinking'):
+      raise exceptions.InferenceRuntimeError(
+          'Ollama returned an empty response with a thinking trace. The '
+          'thinking field contains reasoning, not final output.',
+          provider='Ollama',
+      )
+    raise exceptions.InferenceRuntimeError(
+        "Ollama response did not include generated text in the 'response' "
+        'field.',
+        provider='Ollama',
+    )
 
   def _ollama_query(
       self,
@@ -292,6 +313,7 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       model_url: str | None = None,
       timeout: int | None = None,
       keep_alive: int | None = None,
+      think: bool | None = None,
       num_threads: int | None = None,
       num_ctx: int | None = None,
       stop: str | list[str] | None = None,
@@ -325,6 +347,8 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       timeout: Timeout (in seconds) for the HTTP request. Defaults to 120.
       keep_alive: How long (in seconds) the model remains loaded after
         generation completes.
+      think: Whether Ollama should return a separate reasoning trace for
+        thinking models.
       num_threads: Number of CPU threads to use. If None, Ollama uses a default
         heuristic.
       num_ctx: Number of context tokens allowed. If None, uses model's default
@@ -334,8 +358,9 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
 
     Returns:
       A mapping (dictionary-like) containing the server's JSON response. For
-      non-streaming calls, the `"response"` or `"thinking"` key contains the entire
-      generated text.
+      non-streaming calls, the `"response"` key contains the final generated
+      text. Thinking models may also return a separate `"thinking"` key with
+      reasoning text.
 
     Raises:
       InferenceConfigError: If the server returns a 404 (model not found).
@@ -408,6 +433,9 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
 
     if structured_output_format is not None:
       payload['format'] = structured_output_format
+
+    if think is not None:
+      payload['think'] = think
 
     if stop is not None:
       payload['stop'] = stop

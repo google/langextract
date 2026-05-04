@@ -152,6 +152,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
         model="gemma2:latest",
         structured_output_format="json",
         model_url="http://localhost:11434",
+        think=False,
     )
     expected_results = [[
         types.ScoredOutput(
@@ -159,6 +160,136 @@ class TestOllamaLanguageModel(absltest.TestCase):
         )
     ]]
     self.assertEqual(results, expected_results)
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_prefers_response_over_thinking(self, mock_ollama_query):
+    """Test Ollama inference ignores reasoning when final output is present."""
+    thinking_response = {
+        "model": "deepseek-r1:latest",
+        "created_at": "2025-01-23T22:37:08.579440841Z",
+        "response": "{'bus' : '**autóbusz**'} \n\n\n  \n",
+        "thinking": "The prompt asks for a Hungarian translation of bus.",
+        "done": True,
+        "done_reason": "stop",
+        "context": [106, 1645, 108],
+        "total_duration": 24038204381,
+        "load_duration": 21551375738,
+        "prompt_eval_count": 15,
+        "prompt_eval_duration": 633000000,
+        "eval_count": 17,
+        "eval_duration": 1848000000,
+    }
+    mock_ollama_query.return_value = thinking_response
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+    )
+    batch_prompts = ["What is bus in Hungarian?"]
+    results = list(model.infer(batch_prompts))
+
+    mock_ollama_query.assert_called_once_with(
+        prompt="What is bus in Hungarian?",
+        model="deepseek-r1:latest",
+        structured_output_format="json",
+        model_url="http://localhost:11434",
+        think=False,
+    )
+    expected_results = [[
+        types.ScoredOutput(
+            score=1.0, output="{'bus' : '**autóbusz**'} \n\n\n  \n"
+        )
+    ]]
+    self.assertEqual(results, expected_results)
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_raises_on_empty_response_with_thinking(
+      self, mock_ollama_query
+  ):
+    """Test Ollama inference does not treat reasoning as final output."""
+    mock_ollama_query.return_value = {
+        "model": "deepseek-r1:latest",
+        "created_at": "2025-01-23T22:37:08.579440841Z",
+        "response": "",
+        "thinking": "The prompt asks for a Hungarian translation of bus.",
+        "done": True,
+        "done_reason": "stop",
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, "think=False"
+    ):
+      list(model.infer(["What is bus in Hungarian?"]))
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_raises_when_response_missing(self, mock_ollama_query):
+    """Test Ollama inference requires final generated text."""
+    mock_ollama_query.return_value = {
+        "model": "deepseek-r1:latest",
+        "created_at": "2025-01-23T22:37:08.579440841Z",
+        "done": True,
+        "done_reason": "stop",
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, "response.*field"
+    ):
+      list(model.infer(["What is bus in Hungarian?"]))
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_preserves_explicit_think(self, mock_ollama_query):
+    """Test user-provided think setting is passed through."""
+    mock_ollama_query.return_value = {
+        "response": '{"test": "value"}',
+        "done": True,
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+    )
+
+    list(model.infer(["Test prompt"], think=True))
+
+    mock_ollama_query.assert_called_once_with(
+        prompt="Test prompt",
+        model="deepseek-r1:latest",
+        structured_output_format="json",
+        model_url="http://localhost:11434",
+        think=True,
+    )
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_default_think_does_not_mutate_stored_kwargs(
+      self, mock_ollama_query
+  ):
+    """Test default think setting is per request only."""
+    mock_ollama_query.return_value = {
+        "response": '{"test": "value"}',
+        "done": True,
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+        temperature=0.1,
+    )
+    stored_kwargs = model.merge_kwargs()
+
+    list(model.infer(["Test prompt"]))
+
+    self.assertEqual(model.merge_kwargs(), stored_kwargs)
+    self.assertNotIn("think", model.merge_kwargs())
 
   @mock.patch("requests.post")
   def test_ollama_extra_kwargs_passed_to_api(self, mock_post):
@@ -186,6 +317,8 @@ class TestOllamaLanguageModel(absltest.TestCase):
     json_payload = call_args.kwargs["json"]
 
     self.assertEqual(json_payload["keep_alive"], 600)
+    self.assertIs(json_payload["think"], False)
+    self.assertNotIn("think", json_payload["options"])
     self.assertEqual(json_payload["options"]["keep_alive"], 600)
     self.assertEqual(json_payload["options"]["num_thread"], 8)
     # timeout is passed to requests.post, not in the JSON payload

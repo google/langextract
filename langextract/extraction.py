@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 import dataclasses
 import typing
-from typing import cast
 import warnings
 
 from langextract import annotation
@@ -68,7 +67,7 @@ def _filter_ungrounded_extractions(
 
 
 def extract(
-    text_or_documents: typing.Any,
+    text_or_documents: str | Iterable[data.Document],
     prompt_description: str | None = None,
     examples: typing.Sequence[typing.Any] | None = None,
     model_id: str = "gemini-2.5-flash",
@@ -164,7 +163,9 @@ def extract(
         'fuzzy_alignment_algorithm' (str, "lcs"; "legacy" is deprecated),
         'fuzzy_alignment_min_density' (float, 1/3),
         'accept_match_lesser' (bool, True).
-      language_model_params: Additional parameters for the language model.
+      language_model_params: Additional provider-specific constructor kwargs,
+        such as Gemini retry settings ('max_retries', 'retry_delay',
+        'max_retry_delay') or 'http_options'.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract
         namespace. Note: Debug logging remains enabled for the process once activated.
@@ -405,6 +406,16 @@ def extract(
   else:
     documents = cast(Iterable[data.Document], text_or_documents)
     results = annotator.annotate_documents(
+    if additional_context is not None:
+      documents = (
+          doc.with_additional_context(additional_context)
+          if doc.additional_context is None
+          else doc
+          for doc in text_or_documents
+      )
+    else:
+      documents = text_or_documents
+    result = annotator.annotate_documents(
         documents=documents,
         resolver=res,
         max_char_buffer=max_char_buffer,

@@ -20,8 +20,12 @@ import warnings
 
 from absl.testing import parameterized
 
+from langextract import factory
+from langextract.core import data
+from langextract.core import exceptions
 from langextract.providers import ollama
 from langextract.providers import openai
+from langextract.providers import schemas
 
 
 class TestOpenAIKwargsPassthrough(unittest.TestCase):
@@ -179,6 +183,177 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
         call_args.kwargs.get('response_format'),
         {'type': 'text', 'schema': 'custom'},
     )
+
+  @mock.patch('openai.OpenAI')
+  def test_schema_response_format_passed_to_chat_completion(
+      self, mock_openai_class
+  ):
+    """OpenAI schema constraints use structured output response_format."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"extractions": []}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    examples = [
+        data.ExampleData(
+            text='Patient has diabetes.',
+            extractions=[
+                data.Extraction(
+                    extraction_text='diabetes',
+                    extraction_class='condition',
+                    attributes={'chronicity': 'chronic'},
+                )
+            ],
+        )
+    ]
+    config = factory.ModelConfig(
+        model_id='gpt-4o-mini', provider_kwargs={'api_key': 'test-key'}
+    )
+    model = factory.create_model(
+        config,
+        examples=examples,
+        use_schema_constraints=True,
+        fence_output=None,
+    )
+
+    list(model.infer(['test prompt']))
+
+    call_args = mock_client.chat.completions.create.call_args
+    response_format = call_args.kwargs.get('response_format')
+    self.assertEqual(response_format['type'], 'json_schema')
+    json_schema = response_format['json_schema']
+    self.assertEqual(json_schema['name'], 'langextract_extractions')
+    self.assertTrue(json_schema['strict'])
+    self.assertIn('schema', json_schema)
+
+  @mock.patch('openai.OpenAI')
+  def test_runtime_response_format_overrides_schema(self, mock_openai_class):
+    """Runtime response_format wins over schema defaults."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"extractions": []}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    examples = [
+        data.ExampleData(
+            text='Patient has diabetes.',
+            extractions=[
+                data.Extraction(
+                    extraction_text='diabetes',
+                    extraction_class='condition',
+                )
+            ],
+        )
+    ]
+    config = factory.ModelConfig(
+        model_id='gpt-4o-mini', provider_kwargs={'api_key': 'test-key'}
+    )
+    model = factory.create_model(
+        config,
+        examples=examples,
+        use_schema_constraints=True,
+        fence_output=None,
+    )
+
+    list(model.infer(['test prompt'], response_format={'type': 'json_object'}))
+
+    call_args = mock_client.chat.completions.create.call_args
+    self.assertEqual(
+        call_args.kwargs.get('response_format'), {'type': 'json_object'}
+    )
+
+  @mock.patch('openai.OpenAI')
+  def test_apply_schema_none_clears_response_format(self, mock_openai_class):
+    """Clearing an OpenAI schema falls back to regular JSON mode."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"extractions": []}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    model = openai.OpenAILanguageModel(
+        model_id='gpt-4o-mini', api_key='test-key'
+    )
+    model.apply_schema(schemas.openai.OpenAISchema.from_examples([]))
+    model.apply_schema(None)
+
+    list(model.infer(['test prompt']))
+
+    call_args = mock_client.chat.completions.create.call_args
+    self.assertEqual(
+        call_args.kwargs.get('response_format'), {'type': 'json_object'}
+    )
+
+  @mock.patch('openai.OpenAI')
+  def test_factory_schema_clear_removes_response_format(
+      self, mock_openai_class
+  ):
+    """Clearing a factory-created schema falls back to regular JSON mode."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"extractions": []}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    examples = [
+        data.ExampleData(
+            text='Patient has diabetes.',
+            extractions=[
+                data.Extraction(
+                    extraction_text='diabetes',
+                    extraction_class='condition',
+                )
+            ],
+        )
+    ]
+    config = factory.ModelConfig(
+        model_id='gpt-4o-mini', provider_kwargs={'api_key': 'test-key'}
+    )
+    model = factory.create_model(
+        config,
+        examples=examples,
+        use_schema_constraints=True,
+        fence_output=None,
+    )
+    model.apply_schema(None)
+
+    list(model.infer(['test prompt']))
+
+    call_args = mock_client.chat.completions.create.call_args
+    self.assertEqual(
+        call_args.kwargs.get('response_format'), {'type': 'json_object'}
+    )
+
+  def test_apply_schema_rejects_yaml_format(self):
+    """OpenAI structured outputs fail fast for YAML format."""
+    with mock.patch('openai.OpenAI'):
+      model = openai.OpenAILanguageModel(
+          model_id='gpt-4o-mini',
+          api_key='test-key',
+          format_type=data.FormatType.YAML,
+      )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError,
+        'OpenAI structured output only supports JSON format',
+    ):
+      model.apply_schema(schemas.openai.OpenAISchema.from_examples([]))
+    self.assertIsNone(model.schema)
+    self.assertIsNone(model.openai_schema)
 
   @mock.patch('openai.OpenAI')
   def test_reasoning_not_in_chat_completions(self, mock_openai_class):

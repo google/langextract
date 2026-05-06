@@ -26,6 +26,7 @@ from absl.testing import parameterized
 
 from langextract.core import base_model
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import format_handler as fh
 from langextract.core import schema
 from langextract.providers import schemas
@@ -279,6 +280,186 @@ class GeminiSchemaTest(parameterized.TestCase):
 
     gemini_schema = schemas.gemini.GeminiSchema.from_examples(examples_data)
     self.assertTrue(gemini_schema.requires_raw_output)
+
+
+class OpenAISchemaTest(parameterized.TestCase):
+  """Tests for OpenAI structured output schema generation."""
+
+  def test_response_format_returns_json_schema_response_format(self):
+    """OpenAI schema exposes Chat Completions structured outputs."""
+    examples_data = [
+        data.ExampleData(
+            text="Patient has diabetes.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="diabetes",
+                    extraction_class="condition",
+                    attributes={"chronicity": "chronic"},
+                )
+            ],
+        )
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    response_format = openai_schema.response_format
+    self.assertEqual(response_format["type"], "json_schema")
+    self.assertEqual(
+        response_format["json_schema"]["name"], "langextract_extractions"
+    )
+    self.assertTrue(response_format["json_schema"]["strict"])
+    self.assertIs(
+        response_format["json_schema"]["schema"], openai_schema.schema_dict
+    )
+
+  def test_to_provider_config_returns_schema_instance(self):
+    """OpenAI provider config passes schema state to the provider."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+
+    provider_config = openai_schema.to_provider_config()
+
+    self.assertIs(provider_config["openai_schema"], openai_schema)
+
+  def test_from_examples_constructs_strict_openai_schema(self):
+    """OpenAI schema uses strict-compatible extraction variants."""
+    examples_data = [
+        data.ExampleData(
+            text="Patient has diabetes.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="diabetes",
+                    extraction_class="condition",
+                    attributes={"chronicity": "chronic"},
+                ),
+                data.Extraction(
+                    extraction_text="metformin",
+                    extraction_class="medication",
+                    attributes={"route": "oral"},
+                ),
+            ],
+        )
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    self.assertEqual(openai_schema.schema_dict["type"], "object")
+    self.assertIs(openai_schema.schema_dict["additionalProperties"], False)
+    self.assertEqual(
+        openai_schema.schema_dict["required"], [data.EXTRACTIONS_KEY]
+    )
+    extraction_items = openai_schema.schema_dict["properties"][
+        data.EXTRACTIONS_KEY
+    ]["items"]
+    self.assertIn("anyOf", extraction_items)
+    self.assertLen(extraction_items["anyOf"], 2)
+    variant_properties = [
+        set(variant["properties"]) for variant in extraction_items["anyOf"]
+    ]
+    self.assertIn({"condition", "condition_attributes"}, variant_properties)
+    self.assertIn({"medication", "medication_attributes"}, variant_properties)
+    for variant in extraction_items["anyOf"]:
+      self.assertIs(variant["additionalProperties"], False)
+      self.assertCountEqual(variant["properties"].keys(), variant["required"])
+      for property_schema in variant["properties"].values():
+        if property_schema.get("anyOf"):
+          attribute_schema = property_schema["anyOf"][0]
+          self.assertFalse(attribute_schema["additionalProperties"])
+          self.assertCountEqual(
+              attribute_schema["properties"].keys(),
+              attribute_schema["required"],
+          )
+
+  def test_from_examples_preserves_list_attribute_schema(self):
+    """OpenAI schema accepts list attributes from examples."""
+    examples_data = [
+        data.ExampleData(
+            text="Patient has diabetes with fatigue.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="diabetes",
+                    extraction_class="condition",
+                    attributes={"symptoms": ["fatigue"]},
+                )
+            ],
+        )
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    variant = openai_schema.schema_dict["properties"][data.EXTRACTIONS_KEY][
+        "items"
+    ]["anyOf"][0]
+    attributes_schema = variant["properties"]["condition_attributes"]["anyOf"][
+        0
+    ]
+    symptoms_schema = attributes_schema["properties"]["symptoms"]
+    self.assertIn(
+        {"type": "array", "items": {"type": "string"}},
+        symptoms_schema["anyOf"],
+    )
+    self.assertIn({"type": "null"}, symptoms_schema["anyOf"])
+
+  def test_from_examples_empty_examples_allow_empty_extraction_objects(self):
+    """OpenAI schema handles empty example sets deterministically."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+
+    extraction_items = openai_schema.schema_dict["properties"][
+        data.EXTRACTIONS_KEY
+    ]["items"]
+    self.assertEqual(
+        extraction_items,
+        {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+    )
+
+  def test_validate_format_rejects_yaml(self):
+    """OpenAI structured outputs are JSON-only."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+    format_handler = fh.FormatHandler(format_type=data.FormatType.YAML)
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError,
+        "OpenAI structured output only supports JSON format",
+    ):
+      openai_schema.validate_format(format_handler)
+
+  def test_requires_raw_output_returns_true(self):
+    """OpenAI structured outputs emit raw JSON without fences."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+
+    self.assertTrue(openai_schema.requires_raw_output)
+
+  def test_validate_format_warns_when_fences_enabled(self):
+    """OpenAI schema warns when raw JSON would be wrapped in fences."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_fences=True,
+    )
+
+    with self.assertWarnsRegex(
+        UserWarning, "OpenAI structured outputs emit native JSON"
+    ):
+      openai_schema.validate_format(format_handler)
+
+  def test_validate_format_warns_with_wrong_wrapper_key(self):
+    """OpenAI schema warns when resolver wrapper settings drift."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_fences=False,
+        wrapper_key="items",
+    )
+
+    with self.assertWarnsRegex(
+        UserWarning,
+        f"response_format schema expects wrapper_key='{data.EXTRACTIONS_KEY}'",
+    ):
+      openai_schema.validate_format(format_handler)
 
 
 class SchemaValidationTest(parameterized.TestCase):

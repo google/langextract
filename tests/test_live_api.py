@@ -915,6 +915,92 @@ class TestLiveAPIOpenAI(unittest.TestCase):
   @skip_if_no_openai
   @live_api
   @retry_on_transient_errors(max_retries=2)
+  def test_medication_extraction_with_schema_constraints(self):
+    """Test OpenAI strict structured outputs for schema constraints."""
+    prompt = textwrap.dedent("""\
+        Extract conditions and medications in the order they appear in the text.
+        Use exact text for extractions. For condition attributes, include status
+        and symptoms as a list when symptoms are available.""")
+    examples = [
+        lx.data.ExampleData(
+            text="Patient has diabetes with fatigue and takes Metformin.",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class=_CLASS_CONDITION,
+                    extraction_text="diabetes",
+                    attributes={
+                        "status": "present",
+                        "symptoms": ["fatigue"],
+                    },
+                ),
+                lx.data.Extraction(
+                    extraction_class=_CLASS_MEDICATION,
+                    extraction_text="Metformin",
+                    attributes={"status": "current"},
+                ),
+            ],
+        )
+    ]
+    input_text = (
+        "Patient has headache with fatigue and chills and took 400 mg PO "
+        "Ibuprofen."
+    )
+
+    result = lx.extract(
+        text_or_documents=input_text,
+        prompt_description=prompt,
+        examples=examples,
+        model_id="gpt-4o-mini",
+        api_key=OPENAI_API_KEY,
+        use_schema_constraints=True,
+        fence_output=False,
+        language_model_params={
+            **OPENAI_MODEL_PARAMS,
+            "max_output_tokens": 512,
+        },
+    )
+
+    self.assertIsInstance(result, lx.data.AnnotatedDocument)
+    self.assertGreater(len(result.extractions), 0)
+    assert_extractions_contain(
+        self,
+        result,
+        {_CLASS_CONDITION, _CLASS_MEDICATION},
+    )
+    disallowed_classes = {
+        _CLASS_DOSAGE,
+        _CLASS_ROUTE,
+        _CLASS_FREQUENCY,
+        _CLASS_DURATION,
+    }
+    disallowed_found = {
+        extraction.extraction_class
+        for extraction in result.extractions
+        if extraction.extraction_class in disallowed_classes
+    }
+    self.assertFalse(
+        disallowed_found,
+        "Schema-constrained run emitted disallowed classes:"
+        f" {result.extractions}",
+    )
+    condition_extractions = [
+        extraction
+        for extraction in result.extractions
+        if extraction.extraction_class == _CLASS_CONDITION
+    ]
+    self.assertTrue(
+        any(
+            isinstance(extraction.attributes, dict)
+            and isinstance(extraction.attributes.get("symptoms"), list)
+            for extraction in condition_extractions
+        ),
+        f"Expected list-valued symptoms attribute. Got: {result.extractions}",
+    )
+    assert_valid_char_intervals(self, result)
+
+  @skip_if_no_openai
+  @live_api
+  @retry_on_transient_errors(max_retries=2)
   def test_explicit_provider_selection(self):
     """Test using explicit provider parameter for disambiguation."""
     # Test with explicit model_id and provider

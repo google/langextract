@@ -252,6 +252,61 @@ class OllamaFormatParameterTest(absltest.TestCase):
         self.assertIsNotNone(result)
         self.assertIsInstance(result, data.AnnotatedDocument)
 
+  def test_extract_with_ollama_passes_think_parameter(self):
+    """Test that lx.extract() passes Ollama think parameter correctly."""
+    with mock.patch("requests.post", autospec=True) as mock_post:
+      mock_response = mock.Mock(spec=["status_code", "json"])
+      mock_response.status_code = 200
+      mock_response.json.return_value = {
+          "response": (
+              '{"extractions": [{"extraction_class": "test", "extraction_text":'
+              ' "example"}]}'
+          )
+      }
+      mock_post.return_value = mock_response
+
+      with mock.patch("langextract.providers.registry.resolve") as mock_resolve:
+        mock_resolve.return_value = ollama.OllamaLanguageModel
+
+        examples = [
+            data.ExampleData(
+                text="Sample text",
+                extractions=[
+                    data.Extraction(
+                        extraction_class="test",
+                        extraction_text="sample",
+                    )
+                ],
+            )
+        ]
+
+        lx.extract(
+            text_or_documents="Test document",
+            prompt_description="Extract test information",
+            examples=examples,
+            model_id="gemma2:2b",
+            model_url="http://localhost:11434",
+            format_type=data.FormatType.JSON,
+            language_model_params={"think": True},
+            use_schema_constraints=True,
+        )
+
+        mock_post.assert_called()
+
+        last_call = mock_post.call_args_list[-1]
+        payload = last_call[1]["json"]
+
+        self.assertIs(
+            payload["think"],
+            True,
+            msg="think should be top-level in the Ollama request",
+        )
+        self.assertNotIn(
+            "think",
+            payload["options"],
+            msg="think should not be passed inside Ollama options",
+        )
+
 
 class OllamaYAMLOverrideTest(absltest.TestCase):
   """Tests for Ollama YAML format override behavior."""

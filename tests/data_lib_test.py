@@ -229,5 +229,55 @@ class IsUrlTest(absltest.TestCase):
     self.assertFalse(io.is_url("ftp://example.com"))
 
 
+class DocumentWithAdditionalContextTest(absltest.TestCase):
+  """Tests for Document.with_additional_context()."""
+
+  def test_returns_new_document_with_overridden_context(self):
+    doc = data.Document(text="hello")
+    new_doc = doc.with_additional_context("ctx")
+    self.assertIsNot(new_doc, doc)
+    self.assertEqual(new_doc.additional_context, "ctx")
+    self.assertEqual(new_doc.text, "hello")
+
+  def test_does_not_mutate_original_context_or_tokenization(self):
+    doc = data.Document(text="hello")
+    doc.with_additional_context("ctx")
+    self.assertIsNone(doc.additional_context)
+    self.assertIsNone(doc._tokenized_text)
+
+  def test_preserves_explicit_document_id(self):
+    doc = data.Document(text="hello", document_id="custom-id")
+    new_doc = doc.with_additional_context("ctx")
+    self.assertEqual(new_doc.document_id, "custom-id")
+
+  def test_generates_shared_document_id_when_unset(self):
+    doc = data.Document(text="hello")
+    self.assertIsNone(doc._document_id)
+
+    new_doc = doc.with_additional_context("ctx")
+
+    self.assertIsNotNone(doc._document_id)
+    self.assertEqual(new_doc.document_id, doc.document_id)
+
+  def test_preserves_cached_tokenization(self):
+    doc = data.Document(text="hello world")
+    cached = doc.tokenized_text
+    new_doc = doc.with_additional_context("ctx")
+    self.assertIs(new_doc.tokenized_text, cached)
+
+  def test_preserves_both_explicit_id_and_cached_tokenization(self):
+    doc = data.Document(text="hello world", document_id="custom-id")
+    cached = doc.tokenized_text
+    new_doc = doc.with_additional_context("ctx")
+    self.assertEqual(new_doc.document_id, "custom-id")
+    self.assertIs(new_doc.tokenized_text, cached)
+
+  def test_accepts_none_context(self):
+    doc = data.Document(text="hello", additional_context="original")
+    new_doc = doc.with_additional_context(None)
+    self.assertIsNone(new_doc.additional_context)
+    self.assertEqual(new_doc.text, "hello")
+
+
 if __name__ == "__main__":
   absltest.main()

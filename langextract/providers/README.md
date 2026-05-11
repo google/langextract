@@ -9,11 +9,11 @@ python scripts/create_provider_plugin.py MyProvider --with-schema
 
 ## Architecture Overview
 
-The provider system uses a **registry pattern** with **automatic discovery**:
+The provider system uses a **router pattern** with **automatic discovery**:
 
-1. **Registry** (`registry.py`): Maps model ID patterns to provider classes
+1. **Router** (`router.py`): Maps model ID patterns to provider classes. A legacy `registry.py` alias still imports — new code should use `router` directly.
 2. **Factory** (`../factory.py`): Creates provider instances based on model IDs
-3. **Providers**: Implement the `BaseLanguageModel` interface
+3. **Providers**: Implement the `BaseLanguageModel` interface (from `langextract.core.base_model`)
 
 ### Provider Resolution Flow
 
@@ -27,7 +27,7 @@ User Code                    LangExtract                      Provider
     |                             |                              |
     |                    factory.create_model()                  |
     |                             |                              |
-    |                    registry.resolve("gemini-2.5-flash")    |
+    |                    router.resolve("gemini-2.5-flash")      |
     |                       Pattern match: ^gemini               |
     |                             ↓                              |
     |                       GeminiLanguageModel                  |
@@ -103,8 +103,10 @@ pip install langextract-yourprovider
 # Use it immediately - no imports needed!
 import langextract as lx
 result = lx.extract(
-    text="...",
-    model_id="yourmodel-latest"  # Automatically finds the provider
+    text_or_documents="...",
+    prompt_description="Extract key information",
+    examples=[...],
+    model_id="yourmodel-latest",  # Automatically finds the provider
 )
 ```
 
@@ -113,7 +115,7 @@ result = lx.extract(
 ```
 1. pip install langextract-yourprovider
    └── Installs package containing:
-       • Provider class with @lx.providers.registry.register decorator
+       • Provider class with @router.register decorator
        • Python entry point pointing to this class
 
 2. import langextract
@@ -122,9 +124,9 @@ result = lx.extract(
 
 3. lx.extract(model_id="yourmodel-latest")
    └── Triggers plugin discovery via entry points
-       └── @lx.providers.registry.register decorator fires
-           └── Provider patterns added to registry
-               └── Registry matches pattern and uses your provider
+       └── @router.register decorator fires
+           └── Provider patterns added to router
+               └── Router matches pattern and uses your provider
 ```
 
 **Important Notes:**
@@ -138,7 +140,7 @@ result = lx.extract(
 When you call `lx.extract(model_id="gemini-2.5-flash", ...)`, here's what happens:
 
 1. **Factory receives model_id**: "gemini-2.5-flash"
-2. **Registry searches patterns**: Each provider registers regex patterns
+2. **Router searches patterns**: Each provider registers regex patterns
 3. **First match wins**: Returns the matching provider class
 4. **Provider instantiated**: With model_id and any kwargs
 5. **Inference runs**: Using the selected provider
@@ -146,15 +148,16 @@ When you call `lx.extract(model_id="gemini-2.5-flash", ...)`, here's what happen
 ### Pattern Registration Example
 
 ```python
-import langextract as lx
+from langextract.core import base_model
+from langextract.providers import router
 
 # Gemini provider registration:
-@lx.providers.registry.register(
+@router.register(
     r'^GeminiLanguageModel$',  # Explicit: model_id="GeminiLanguageModel"
     r'^gemini',                # Prefix: model_id="gemini-2.5-flash"
     r'^palm'                   # Legacy: model_id="palm-2"
 )
-class GeminiLanguageModel(lx.inference.BaseLanguageModel):
+class GeminiLanguageModel(base_model.BaseLanguageModel):
     def __init__(self, model_id: str, api_key: str = None, **kwargs):
         # Initialize Gemini client
         ...
@@ -172,8 +175,10 @@ import langextract as lx
 
 # Automatically selects Gemini provider
 result = lx.extract(
-    text="...",
-    model_id="gemini-2.5-flash"
+    text_or_documents="...",
+    prompt_description="Extract key information",
+    examples=[...],
+    model_id="gemini-2.5-flash",
 )
 ```
 
@@ -184,19 +189,20 @@ Parameters flow from `lx.extract()` to providers through several mechanisms:
 ```python
 # 1. Common parameters handled by lx.extract itself:
 result = lx.extract(
-    text="Your document",
+    text_or_documents="Your document",
     model_id="gemini-2.5-flash",
     prompt_description="Extract key facts",
-    examples=[...],           # Used for few-shot prompting
-    num_workers=4,            # Parallel processing
-    max_chunk_size=3000,      # Document chunking
+    examples=[...],             # Used for few-shot prompting (required)
+    max_workers=4,              # Parallel processing (provider-dependent)
+    max_char_buffer=3000,       # Document chunking
 )
 
 # 2. Provider-specific parameters passed via **kwargs:
 result = lx.extract(
-    text="Your document",
+    text_or_documents="Your document",
     model_id="gemini-2.5-flash",
     prompt_description="Extract entities",
+    examples=[...],
     # These go directly to the Gemini provider:
     temperature=0.7,          # Sampling temperature
     api_key="your-key",      # Override environment variable
@@ -271,14 +277,14 @@ yourprovider = "langextract_yourprovider:YourProviderLanguageModel"
 
 #### ☐ **3. Implement Provider** (`provider.py`)
 - [ ] Import required modules
-- [ ] Add `@lx.providers.registry.register()` decorator with patterns
-- [ ] Inherit from `lx.inference.BaseLanguageModel`
+- [ ] Add `@router.register()` decorator with patterns
+- [ ] Inherit from `base_model.BaseLanguageModel`
 - [ ] Implement `__init__()` method
 - [ ] Implement `infer()` method returning `ScoredOutput` objects
 - [ ] Export class from `__init__.py`
 
 #### ☐ **4. (Optional) Add Schema Support** (`schema.py`)
-- [ ] Create schema class inheriting from `lx.schema.BaseSchema`
+- [ ] Create schema class inheriting from `langextract.core.schema.BaseSchema`
 - [ ] Implement `from_examples()` class method
 - [ ] Implement `to_provider_config()` method
 - [ ] Add `get_schema_class()` to provider
@@ -301,7 +307,7 @@ yourprovider = "langextract_yourprovider:YourProviderLanguageModel"
 - [ ] Test in clean environment
 - [ ] Publish to PyPI with `twine upload dist/*`
 - [ ] Share your provider by opening an issue on [LangExtract GitHub](https://github.com/google/langextract/issues) to get feedback and help others discover it
-- [ ] Consider submitting a PR to add your provider to the community providers list (coming soon)
+- [ ] Consider submitting a PR to add your provider to [COMMUNITY_PROVIDERS.md](../../COMMUNITY_PROVIDERS.md)
 
 ### Option 1: External Plugin (Recommended)
 
@@ -348,10 +354,12 @@ myprovider = "langextract_myprovider:MyProviderLanguageModel"
 ```python
 # langextract_myprovider/__init__.py
 import os
-import langextract as lx
 
-@lx.providers.registry.register(r'^mymodel', r'^custom', priority=10)
-class MyProviderLanguageModel(lx.inference.BaseLanguageModel):
+from langextract.core import base_model, types
+from langextract.providers import router
+
+@router.register(r'^mymodel', r'^custom', priority=10)
+class MyProviderLanguageModel(base_model.BaseLanguageModel):
     def __init__(self, model_id: str, api_key: str = None, **kwargs):
         super().__init__()
         self.model_id = model_id
@@ -363,17 +371,18 @@ class MyProviderLanguageModel(lx.inference.BaseLanguageModel):
         # Implement inference
         for prompt in batch_prompts:
             result = self.client.generate(prompt, **kwargs)
-            yield [lx.inference.ScoredOutput(score=1.0, output=result)]
+            yield [types.ScoredOutput(score=1.0, output=result)]
 ```
 
 **Pattern Registration Explained:**
-- The `@register` decorator patterns (e.g., `r'^mymodel'`, `r'^custom'`) define which model IDs your provider supports
-- When users call `lx.extract(model_id="mymodel-3b")`, the registry matches against these patterns
+- The `@router.register` decorator patterns (e.g., `r'^mymodel'`, `r'^custom'`) define which model IDs your provider supports
+- When users call `lx.extract(model_id="mymodel-3b")`, the router matches against these patterns
 - Your provider will handle any model_id starting with "mymodel" or "custom"
 - Users can explicitly select your provider using its class name:
   ```python
   config = lx.factory.ModelConfig(provider="MyProviderLanguageModel")
   # Or partial match: provider="myprovider" (matches class name)
+  ```
 
 4. Publish your package to PyPI:
 ```bash
@@ -392,10 +401,9 @@ Schemas enable structured output with strict JSON constraints. Here's how to add
 
 ```python
 # langextract_myprovider/schema.py
-import langextract as lx
-from langextract import schema
+from langextract.core import schema
 
-class MyProviderSchema(lx.schema.BaseSchema):
+class MyProviderSchema(schema.BaseSchema):
     def __init__(self, schema_dict: dict):
         self._schema_dict = schema_dict
 
@@ -436,8 +444,8 @@ class MyProviderSchema(lx.schema.BaseSchema):
         }
 
     @property
-    def supports_strict_mode(self) -> bool:
-        """Return True if provider enforces valid JSON output."""
+    def requires_raw_output(self) -> bool:
+        """Return True if provider emits raw JSON without fence markers."""
         return True
 ```
 
@@ -445,7 +453,9 @@ class MyProviderSchema(lx.schema.BaseSchema):
 
 ```python
 # langextract_myprovider/provider.py
-class MyProviderLanguageModel(lx.inference.BaseLanguageModel):
+from langextract.core import base_model, types
+
+class MyProviderLanguageModel(base_model.BaseLanguageModel):
     def __init__(self, model_id: str, **kwargs):
         super().__init__()
         self.model_id = model_id
@@ -478,7 +488,7 @@ class MyProviderLanguageModel(lx.inference.BaseLanguageModel):
                 api_params['response_schema'] = self.response_schema
 
             result = self.client.generate(prompt, **api_params)
-            yield [lx.inference.ScoredOutput(score=1.0, output=result)]
+            yield [types.ScoredOutput(score=1.0, output=result)]
 ```
 
 #### 3. Schema Usage
@@ -503,10 +513,11 @@ This approach should only be used for providers that benefit a large portion of 
 1. Create your provider file:
 ```python
 # langextract/providers/myprovider.py
-import langextract as lx
+from langextract.core import base_model
+from langextract.providers import router
 
-@lx.providers.registry.register(r'^mymodel', r'^custom')
-class MyProviderLanguageModel(lx.inference.BaseLanguageModel):
+@router.register(r'^mymodel', r'^custom')
+class MyProviderLanguageModel(base_model.BaseLanguageModel):
     # Implementation same as above
 ```
 
@@ -544,9 +555,9 @@ The factory automatically resolves API keys from environment:
 
 ### Provider Not Found
 ```python
-ValueError: No provider registered for model_id='unknown-model'
+InferenceConfigError: No provider registered for model_id='unknown-model'
 ```
-**Solution**: Check available patterns with `registry.list_entries()`
+**Solution**: Check available patterns with `langextract.providers.router.list_entries()`
 
 ### Plugin Not Loading
 ```python
@@ -571,7 +582,7 @@ InferenceConfigError: OpenAI provider requires openai package
 **Solutions**:
 1. Ensure provider implements `get_schema_class()`
 2. Check `use_schema_constraints=True` is set
-3. Verify schema's `supports_strict_mode` returns `True`
+3. Verify schema's `requires_raw_output` returns `True`
 4. Test schema creation with `Schema.from_examples(examples)`
 
 ### Pattern Conflicts
@@ -582,5 +593,6 @@ InferenceConfigError: OpenAI provider requires openai package
 ```python
 config = lx.factory.ModelConfig(
     model_id="model-name",
-    provider="YourProviderClass"  # Explicit selection
+    provider="YourProviderClass",  # Explicit selection
 )
+```

@@ -22,6 +22,7 @@ from langextract import factory
 from langextract import schema
 from langextract.core import base_model
 from langextract.core import data
+from langextract.providers import schemas
 
 
 class FactorySchemaIntegrationTest(absltest.TestCase):
@@ -88,6 +89,39 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
       self.assertEqual(call_kwargs["format"], "json")
 
       self.assertFalse(model.requires_fence_output)
+
+  def test_openai_with_schema_returns_false_fence(self):
+    """OpenAI schema constraints use raw JSON by default."""
+    config = factory.ModelConfig(
+        model_id="gpt-4o-mini", provider_kwargs={"api_key": "test_key"}
+    )
+
+    with mock.patch("openai.OpenAI", autospec=True):
+      model = factory._create_model_with_schema(
+          config=config,
+          examples=self.examples,
+          use_schema_constraints=True,
+          fence_output=None,
+      )
+
+      self.assertIsInstance(model.schema, schemas.openai.OpenAISchema)
+      self.assertIs(model.requires_fence_output, False)
+
+  def test_openai_explicit_fence_output_respected(self):
+    """Explicit OpenAI fence_output overrides schema defaults."""
+    config = factory.ModelConfig(
+        model_id="gpt-4o-mini", provider_kwargs={"api_key": "test_key"}
+    )
+
+    with mock.patch("openai.OpenAI", autospec=True):
+      model = factory._create_model_with_schema(
+          config=config,
+          examples=self.examples,
+          use_schema_constraints=True,
+          fence_output=True,
+      )
+
+      self.assertIs(model.requires_fence_output, True)
 
   def test_explicit_fence_output_respected(self):
     """Test that explicit fence_output is not overridden."""

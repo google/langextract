@@ -42,7 +42,7 @@ from langextract.providers import gemini_batch as gb
 
 dotenv.load_dotenv(override=True)
 
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get(
@@ -762,8 +762,6 @@ class TestLiveAPIGemini(unittest.TestCase):
 
     self.assertLess(duration2, 10.0, "Second run took too long for cache hit")
 
-    self.assertLess(duration2, 10.0, "Second run took too long for cache hit")
-
     print("\nVerifying GCS cache content...")
     bucket_name = gb._get_bucket_name(VERTEX_PROJECT, VERTEX_LOCATION)
     print(f"Checking bucket: {bucket_name}")
@@ -911,6 +909,86 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         ),
         f"No PO/oral route found in: {route_texts}",
     )
+
+  @skip_if_no_openai
+  @live_api
+  @retry_on_transient_errors(max_retries=2)
+  def test_medication_extraction_with_schema_constraints(self):
+    """Strict OpenAI outputs enforce the example-derived extraction shape."""
+    prompt = textwrap.dedent("""\
+        Extract conditions and medications in the order they appear in the text.
+        Use exact text for extractions. For condition attributes, include status
+        and symptoms as a list when symptoms are available.""")
+    examples = [
+        lx.data.ExampleData(
+            text="Patient has diabetes with fatigue and takes Metformin.",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class=_CLASS_CONDITION,
+                    extraction_text="diabetes",
+                    attributes={
+                        "status": "present",
+                        "symptoms": ["fatigue"],
+                    },
+                ),
+                lx.data.Extraction(
+                    extraction_class=_CLASS_MEDICATION,
+                    extraction_text="Metformin",
+                    attributes={"status": "current"},
+                ),
+            ],
+        )
+    ]
+    input_text = (
+        "Patient has headache with fatigue and chills and took 400 mg PO "
+        "Ibuprofen."
+    )
+
+    result = lx.extract(
+        text_or_documents=input_text,
+        prompt_description=prompt,
+        examples=examples,
+        model_id="gpt-4o-mini",
+        api_key=OPENAI_API_KEY,
+        use_schema_constraints=True,
+        fence_output=False,
+        language_model_params={
+            **OPENAI_MODEL_PARAMS,
+            "max_output_tokens": 512,
+        },
+    )
+
+    self.assertIsInstance(result, lx.data.AnnotatedDocument)
+    self.assertGreater(len(result.extractions), 0)
+    allowed_classes = {_CLASS_CONDITION, _CLASS_MEDICATION}
+    extraction_classes = {
+        extraction.extraction_class for extraction in result.extractions
+    }
+    self.assertSetEqual(extraction_classes, allowed_classes)
+    allowed_attribute_keys = {
+        _CLASS_CONDITION: {"status", "symptoms"},
+        _CLASS_MEDICATION: {"status"},
+    }
+    for extraction in result.extractions:
+      if isinstance(extraction.attributes, dict):
+        self.assertLessEqual(
+            set(extraction.attributes),
+            allowed_attribute_keys[extraction.extraction_class],
+        )
+    condition_extractions = [
+        extraction
+        for extraction in result.extractions
+        if extraction.extraction_class == _CLASS_CONDITION
+    ]
+    self.assertTrue(
+        any(
+            isinstance(extraction.attributes, dict)
+            and isinstance(extraction.attributes.get("symptoms"), list)
+            for extraction in condition_extractions
+        ),
+        f"Expected list-valued symptoms attribute. Got: {result.extractions}",
+    )
+    assert_valid_char_intervals(self, result)
 
   @skip_if_no_openai
   @live_api

@@ -50,13 +50,13 @@ class ProviderSchemaDiscoveryTest(absltest.TestCase):
         msg="OllamaLanguageModel should return FormatModeSchema class",
     )
 
-  def test_openai_returns_none(self):
-    """Test that OpenAILanguageModel returns None (no schema support yet)."""
-    # OpenAI imports dependencies in __init__, not at module level
+  def test_openai_returns_openai_schema(self):
+    """OpenAILanguageModel advertises OpenAISchema support."""
     schema_class = openai.OpenAILanguageModel.get_schema_class()
-    self.assertIsNone(
+    self.assertIs(
         schema_class,
-        msg="OpenAILanguageModel should return None (no schema support)",
+        schemas.openai.OpenAISchema,
+        msg="OpenAILanguageModel should return OpenAISchema class",
     )
 
 

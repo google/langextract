@@ -322,6 +322,26 @@ result = lx.extract(
 
 The OpenAI provider uses JSON mode and auto-determines fence and schema behavior — leave `fence_output` and `use_schema_constraints` unset.
 
+For large, non-latency-sensitive OpenAI workloads, enable the OpenAI Batch API
+with `language_model_params`. Batch mode is opt-in and falls back to realtime
+calls when the prompt count is below the configured threshold.
+
+```python
+result = lx.extract(
+    text_or_documents=documents,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="gpt-4o-mini",
+    language_model_params={
+        "batch": {
+            "enabled": True,
+            "threshold": 50,
+            "poll_interval": 10,
+        }
+    },
+)
+```
+
 For OpenAI-compatible endpoints or non-GPT model IDs (which skip auto-routing), use `ModelConfig` with an explicit provider:
 
 ```python

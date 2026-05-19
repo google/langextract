@@ -489,7 +489,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
 
     with mock.patch("google.genai.Client", autospec=True):
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           format_type=data.FormatType.YAML,
       )
@@ -528,7 +528,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
       mock_model_instance.return_value.text = '{"extractions": []}'
 
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           response_schema=test_schema.schema_dict,
           response_mime_type="application/json",
@@ -570,7 +570,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
       mock_model_instance.return_value.text = '{"extractions": []}'
 
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           max_workers=5,
           response_schema={"test": "schema"},  # API parameter

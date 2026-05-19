@@ -38,7 +38,7 @@ def _make_response(text: str):
 
 def _build_model(**overrides):
   """Build a GeminiLanguageModel with sensible test defaults."""
-  kwargs = {'model_id': 'gemini-2.5-flash', 'api_key': 'test-api-key'}
+  kwargs = {'model_id': 'gemini-3.5-flash', 'api_key': 'test-api-key'}
   kwargs.update(overrides)
   return gemini.GeminiLanguageModel(**kwargs)
 
@@ -369,7 +369,7 @@ class TestGeminiRetryConfiguration(_MockClientTest):
 
   def test_vertex_ai_with_retry_parameters(self):
     model = gemini.GeminiLanguageModel(
-        model_id='gemini-2.5-flash',
+        model_id='gemini-3.5-flash',
         vertexai=True,
         project='test-project',
         location='us-central1',

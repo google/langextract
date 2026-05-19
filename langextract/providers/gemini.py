@@ -38,7 +38,7 @@ from langextract.providers import patterns
 from langextract.providers import router
 from langextract.providers import schemas
 
-_DEFAULT_MODEL_ID = 'gemini-2.5-flash'
+_DEFAULT_MODEL_ID = 'gemini-3.5-flash'
 _DEFAULT_LOCATION = 'us-central1'
 _MIME_TYPE_JSON = 'application/json'
 

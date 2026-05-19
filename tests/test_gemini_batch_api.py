@@ -100,7 +100,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.get.return_value = create_mock_batch_job()
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="test-project",
         location=gb._DEFAULT_LOCATION,
@@ -135,7 +135,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -160,7 +160,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -203,7 +203,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     }
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -228,7 +228,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
       # Verify _submit_file was called with project and location parameters.
       mock_submit.assert_called_with(
           mock_client,
-          "gemini-2.5-flash",
+          "gemini-3.5-flash",
           [{
               "contents": [
                   {"role": "user", "parts": [{"text": "test prompt"}]}
@@ -255,7 +255,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.create.side_effect = Exception("Batch API error")
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -295,7 +295,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.get.return_value = job
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -377,7 +377,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.get.side_effect = [job0, job1, job2]
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -415,7 +415,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.get.return_value = job
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -643,7 +643,7 @@ class GCSBatchCachingTest(absltest.TestCase):
     test_location = "us-central1"
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project=test_project,
         location=test_location,

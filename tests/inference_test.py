@@ -492,7 +492,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         api_key="test-key",
         # Allow-listed parameters
         tools=["tool1", "tool2"],
@@ -540,7 +540,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         api_key="test-key",
     )
 
@@ -935,7 +935,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         api_key="test-key",
     )
 

@@ -64,7 +64,7 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
               text_or_documents=self.test_text,
               prompt_description="Extract conditions",
               examples=self.examples,
-              model_id="gemini-2.5-flash",
+              model_id="gemini-3.5-flash",
               use_schema_constraints=True,
               fence_output=None,  # Let it compute
           )
@@ -133,7 +133,7 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
                 text_or_documents=self.test_text,
                 prompt_description="Extract conditions",
                 examples=self.examples,
-                model_id="gemini-2.5-flash",
+                model_id="gemini-3.5-flash",
                 api_key="test_key",
                 use_schema_constraints=True,
                 fence_output=True,  # Explicitly set
@@ -167,7 +167,7 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
                 text_or_documents=self.test_text,
                 prompt_description="Extract conditions",
                 examples=self.examples,
-                model_id="gemini-2.5-flash",
+                model_id="gemini-3.5-flash",
                 api_key="test_key",
                 language_model_params={
                     "gemini_schema": "some_schema"
@@ -216,7 +216,7 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
             text_or_documents=self.test_text,
             prompt_description="Extract conditions",
             examples=self.examples,
-            model_id="gemini-2.5-flash",
+            model_id="gemini-3.5-flash",
             api_key="test_key",
             use_schema_constraints=False,  # Disabled
         )

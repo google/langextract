@@ -106,11 +106,11 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
 )
 ```
 
-> **Model Selection**: `gemini-2.5-flash` is the recommended default, offering an excellent balance of speed, cost, and quality. For highly complex tasks requiring deeper reasoning, `gemini-2.5-pro` may provide superior results. For large-scale or production use, a Tier 2 Gemini quota is suggested to increase throughput and avoid rate limits. See the [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits#tier-2) for details.
+> **Model Selection**: `gemini-3.5-flash` is the recommended default, offering strong extraction quality for LangExtract's schema-constrained workflows. For high-volume or cost-sensitive workloads, consider the current stable Flash-Lite model, `gemini-3.1-flash-lite`; for highly complex tasks requiring deeper reasoning, evaluate a current Gemini Pro model from the official model documentation. For large-scale or production use, a paid Gemini tier is suggested to increase throughput and avoid rate limits. See the [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits#usage-tiers) for details.
 >
 > **Model Lifecycle**: Note that Gemini models have a lifecycle with defined retirement dates. Users should consult the [official model version documentation](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions) to stay informed about the latest stable and legacy versions.
 
@@ -147,7 +147,7 @@ result = lx.extract(
     text_or_documents="https://www.gutenberg.org/files/1513/1513-0.txt",
     prompt_description=prompt,
     examples=examples,
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     extraction_passes=3,    # Improves recall through multiple passes
     max_workers=20,         # Parallel processing for speed
     max_char_buffer=1000    # Smaller contexts for better accuracy
@@ -251,7 +251,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description="Extract information...",
     examples=[...],
-    model_id="gemini-2.5-flash"
+    model_id="gemini-3.5-flash"
 )
 ```
 
@@ -264,7 +264,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description="Extract information...",
     examples=[...],
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     api_key="your-api-key-here"  # Only use this for testing/development
 )
 ```
@@ -278,7 +278,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description="Extract information...",
     examples=[...],
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     language_model_params={
         "vertexai": True,
         "project": "your-project-id",

@@ -323,7 +323,7 @@ def _submit_file(
   Args:
     client: google.genai.Client instance configured for Vertex AI
         (must have client.vertexai=True).
-    model_id: Model identifier (e.g., "gemini-2.5-flash").
+    model_id: Model identifier (e.g., "gemini-3.5-flash").
     requests: List of request dictionaries with embedded configuration.
         Each request contains contents and optional generationConfig
         (including schema and generation parameters).
@@ -717,7 +717,7 @@ def infer_batch(
   Args:
     client: google.genai.Client instance configured for Vertex AI
         (must have client.vertexai=True).
-    model_id: Model identifier (e.g., "gemini-2.5-flash").
+    model_id: Model identifier (e.g., "gemini-3.5-flash").
     prompts: Sequence of prompts to process in batch.
     schema_dict: Optional JSON schema for structured output. When provided,
         enables JSON mode with the specified schema constraints.

@@ -43,7 +43,7 @@ from langextract.providers import openai_batch
 
 dotenv.load_dotenv(override=True)
 
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get(

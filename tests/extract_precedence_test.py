@@ -176,7 +176,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
 
     mock_model_config.assert_called_once()
     _, kwargs = mock_model_config.call_args
-    self.assertEqual(kwargs["model_id"], "gemini-2.5-flash")
+    self.assertEqual(kwargs["model_id"], "gemini-3.5-flash")
     mock_create_model.assert_called_once()
     self.assertEqual(result, "ok")
 
@@ -199,7 +199,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
           text_or_documents="text",
           prompt_description=self.description,
           examples=self.examples,
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="api-key",
           language_model_params={
               "max_retries": 5,
@@ -226,7 +226,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
   ):
     """Test that use_schema_constraints emits warning when used with config."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test-key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test-key"}
     )
 
     mock_model = mock.MagicMock()
@@ -248,7 +248,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertIn("applied", str(cm.warning))
     mock_create_model.assert_called_once()
     called_config = mock_create_model.call_args[1]["config"]
-    self.assertEqual(called_config.model_id, "gemini-2.5-flash")
+    self.assertEqual(called_config.model_id, "gemini-3.5-flash")
     self.assertEqual(result, "ok")
 
   @mock.patch("langextract.annotation.Annotator")

@@ -47,7 +47,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
   def test_gemini_with_schema_returns_false_fence(self):
     """Test that Gemini with schema returns fence_output=False."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test_key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test_key"}
     )
 
     with mock.patch(
@@ -126,7 +126,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
   def test_explicit_fence_output_respected(self):
     """Test that explicit fence_output is not overridden."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test_key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test_key"}
     )
 
     with mock.patch(
@@ -168,7 +168,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
   def test_schema_disabled_returns_true_fence(self):
     """Test that disabling schema constraints returns fence_output=True."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test_key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test_key"}
     )
 
     with mock.patch(
@@ -213,7 +213,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
   def test_no_examples_no_schema(self):
     """Test that no examples means no schema is created."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test_key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test_key"}
     )
 
     with mock.patch(

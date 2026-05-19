@@ -790,7 +790,7 @@ class InitTest(parameterized.TestCase):
                   ],
               )
           ],
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           language_model_params={"gemini_schema": "deprecated"},
       )
@@ -923,7 +923,7 @@ class FetchUrlsOptInTest(absltest.TestCase):
         text_or_documents="http://example.com/doc",
         prompt_description="x",
         examples=[self._example],
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         api_key="fake",
     )
     kwargs.update(overrides)

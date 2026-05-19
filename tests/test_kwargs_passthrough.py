@@ -25,6 +25,7 @@ from langextract.core import data
 from langextract.core import exceptions
 from langextract.providers import ollama
 from langextract.providers import openai
+from langextract.providers import openai_batch
 from langextract.providers import schemas
 
 
@@ -50,6 +51,116 @@ def _condition_examples(attributes=None):
           extractions=[data.Extraction(**extraction_kwargs)],
       )
   ]
+
+
+class TestOpenAIBatchKwargsPassthrough(unittest.TestCase):
+  """Test OpenAI provider Batch API kwargs handling."""
+
+  @mock.patch.object(openai_batch, 'infer_batch', autospec=True)
+  @mock.patch('openai.OpenAI', autospec=True)
+  def test_infer_batch_reuses_structured_output_params(
+      self, mock_openai_class, mock_infer_batch
+  ):
+    """OpenAI batch requests use the same schema-aware params as direct calls."""
+    mock_client = _configure_openai_mock(mock_openai_class)
+    mock_infer_batch.return_value = ['{"extractions": []}']
+    openai_schema = schemas.openai.OpenAISchema.from_examples(
+        _condition_examples(attributes={'status': 'present'})
+    )
+
+    model = openai.OpenAILanguageModel(
+        model_id='gpt-4o-mini',
+        api_key='test-key',
+        openai_schema=openai_schema,
+        batch={'enabled': True, 'threshold': 1, 'poll_interval': 1},
+        seed=42,
+    )
+
+    outputs = model.infer_batch(['test prompt'], batch_size=5)
+
+    call_kwargs = mock_infer_batch.call_args.kwargs
+    request_params = call_kwargs['request_builder']('test prompt')
+    self.assertIs(call_kwargs['client'], mock_client)
+    self.assertEqual(call_kwargs['batch_size'], 5)
+    self.assertEqual(
+        request_params['response_format'], openai_schema.response_format
+    )
+    self.assertEqual(request_params['seed'], 42)
+    self.assertEqual(outputs[0][0].output, '{"extractions": []}')
+
+  @mock.patch('openai.OpenAI', autospec=True)
+  def test_infer_batch_rejects_invalid_batch_size(self, mock_openai_class):
+    _configure_openai_mock(mock_openai_class)
+    model = openai.OpenAILanguageModel(
+        model_id='gpt-4o-mini',
+        api_key='test-key',
+        batch={'enabled': True, 'threshold': 1},
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, 'batch_size must be > 0'
+    ):
+      model.infer_batch(['test prompt'], batch_size=0)
+
+  @mock.patch.object(openai_batch, 'infer_batch', autospec=True)
+  @mock.patch('openai.OpenAI', autospec=True)
+  def test_infer_propagates_batch_size_config_error(
+      self, mock_openai_class, mock_infer_batch
+  ):
+    _configure_openai_mock(mock_openai_class)
+    mock_infer_batch.side_effect = exceptions.InferenceConfigError(
+        'batch_size must be > 0'
+    )
+    model = openai.OpenAILanguageModel(
+        model_id='gpt-4o-mini',
+        api_key='test-key',
+        batch={'enabled': True, 'threshold': 1},
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, 'batch_size must be > 0'
+    ):
+      list(model.infer(['test prompt'], batch_size=-1))
+
+  @mock.patch('openai.OpenAI', autospec=True)
+  def test_batch_config_does_not_leak_to_chat_completions(
+      self, mock_openai_class
+  ):
+    """OpenAI batch configuration is provider-local, not an API parameter."""
+    mock_client = _configure_openai_mock(mock_openai_class)
+
+    model = openai.OpenAILanguageModel(
+        model_id='gpt-4o-mini',
+        api_key='test-key',
+        batch={'enabled': False},
+    )
+
+    list(model.infer(['test prompt']))
+
+    self.assertNotIn(
+        'batch', mock_client.chat.completions.create.call_args.kwargs
+    )
+
+  @mock.patch.object(openai_batch, 'infer_batch', autospec=True)
+  @mock.patch('openai.OpenAI', autospec=True)
+  def test_batch_mode_logs_when_below_threshold(
+      self, mock_openai_class, mock_infer_batch
+  ):
+    """OpenAI reports when enabled batch mode falls back to real-time calls."""
+    mock_client = _configure_openai_mock(mock_openai_class)
+
+    model = openai.OpenAILanguageModel(
+        model_id='gpt-4o-mini',
+        api_key='test-key',
+        batch={'enabled': True, 'threshold': 2},
+    )
+
+    with self.assertLogs(level='INFO') as logs:
+      list(model.infer(['test prompt']))
+
+    self.assertIn('below the threshold', '\n'.join(logs.output))
+    mock_infer_batch.assert_not_called()
+    mock_client.chat.completions.create.assert_called()
 
 
 class TestOpenAIKwargsPassthrough(unittest.TestCase):

@@ -39,6 +39,7 @@ from langextract import data
 import langextract as lx
 from langextract.core import tokenizer as tokenizer_lib
 from langextract.providers import gemini_batch as gb
+from langextract.providers import openai_batch
 
 dotenv.load_dotenv(override=True)
 
@@ -845,6 +846,63 @@ class TestCrossChunkContext(unittest.TestCase):
 
 class TestLiveAPIOpenAI(unittest.TestCase):
   """Tests using real OpenAI API."""
+
+  @skip_if_no_openai
+  @live_api
+  @retry_on_transient_errors(max_retries=1)
+  @mock.patch.object(
+      openai_batch, "infer_batch", wraps=openai_batch.infer_batch, autospec=True
+  )
+  def test_batch_extraction_uses_openai_batch_api(self, mock_infer_batch):
+    """OpenAI batch mode runs a real Batch API extraction."""
+    prompt = textwrap.dedent("""\
+        Extract medication information including medication name, dosage, route,
+        frequency, and duration in the order they appear in the text.""")
+    examples = get_basic_medication_examples()
+    documents = [
+        lx.data.Document(
+            document_id="openai_batch_doc1",
+            text="Patient took 400 mg PO Ibuprofen q4h for two days.",
+        ),
+        lx.data.Document(
+            document_id="openai_batch_doc2",
+            text="Administered 2 mg IV Morphine once for acute pain.",
+        ),
+    ]
+    expected_meds = ["Ibuprofen", "Morphine"]
+    language_model_params = {
+        **OPENAI_MODEL_PARAMS,
+        "max_output_tokens": 512,
+        "batch": {
+            "enabled": True,
+            "threshold": 1,
+            "poll_interval": 5,
+            "timeout": 900,
+        },
+    }
+
+    batch_result = lx.extract(
+        text_or_documents=documents,
+        prompt_description=prompt,
+        examples=examples,
+        model_id="gpt-4o-mini",
+        api_key=OPENAI_API_KEY,
+        use_schema_constraints=False,
+        language_model_params=language_model_params,
+    )
+
+    mock_infer_batch.assert_called()
+    call_args = mock_infer_batch.call_args
+    self.assertTrue(call_args.kwargs["cfg"].enabled)
+    self.assertEqual(call_args.kwargs["cfg"].threshold, 1)
+
+    self.assertIsInstance(batch_result, list)
+    self.assertEqual(len(batch_result), len(documents))
+    for result, expected_med in zip(batch_result, expected_meds):
+      self.assertIsInstance(result, lx.data.AnnotatedDocument)
+      medication_texts = extract_by_class(result, _CLASS_MEDICATION)
+      self.assertIn(expected_med, medication_texts)
+      assert_valid_char_intervals(self, result)
 
   @skip_if_no_openai
   @live_api

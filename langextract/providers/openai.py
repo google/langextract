@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
+import logging
 from typing import Any, Iterator, Sequence
 import warnings
 
@@ -27,6 +28,7 @@ from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import schema
 from langextract.core import types as core_types
+from langextract.providers import openai_batch
 from langextract.providers import patterns
 from langextract.providers import router
 from langextract.providers import schemas
@@ -37,7 +39,7 @@ from langextract.providers import schemas
     priority=patterns.OPENAI_PRIORITY,
 )
 @dataclasses.dataclass(init=False)
-class OpenAILanguageModel(base_model.BaseLanguageModel):
+class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-many-instance-attributes
   """Language model inference using OpenAI's API with structured output."""
 
   model_id: str = 'gpt-4o-mini'
@@ -51,6 +53,9 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
   temperature: float | None = None
   max_workers: int = 10
   _client: Any = dataclasses.field(default=None, repr=False, compare=False)
+  _batch_cfg: openai_batch.BatchConfig = dataclasses.field(
+      default_factory=openai_batch.BatchConfig, repr=False, compare=False
+  )
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
@@ -121,8 +126,9 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
       max_workers: Maximum number of parallel API calls.
-      **kwargs: Ignored extra parameters so callers can pass a superset of
-        arguments shared across back-ends without raising TypeError.
+      **kwargs: Additional OpenAI Chat Completions parameters. Pass `batch` as
+        True, a dict, or `openai_batch.BatchConfig` to enable OpenAI Batch API
+        mode.
     """
     try:
       # pylint: disable=import-outside-toplevel
@@ -146,6 +152,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
+    batch_cfg_dict = kwargs.pop('batch', None)
+    self._batch_cfg = openai_batch.BatchConfig.from_dict(batch_cfg_dict)
     self._extra_kwargs = kwargs or {}
 
     if not self.api_key:
@@ -169,71 +177,76 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
           schemas.openai.JSON_SCHEMA_FORMAT_ERROR
       )
 
+  def _build_chat_completions_params(self, prompt: str, config: dict) -> dict:
+    """Build Chat Completions request parameters for one prompt."""
+    normalized_config = config.copy()
+
+    system_message = ''
+    if self.format_type == data.FormatType.JSON:
+      system_message = (
+          'You are a helpful assistant that responds in JSON format.'
+      )
+    elif self.format_type == data.FormatType.YAML:
+      system_message = (
+          'You are a helpful assistant that responds in YAML format.'
+      )
+
+    messages = [{'role': 'user', 'content': prompt}]
+    if system_message:
+      messages.insert(0, {'role': 'system', 'content': system_message})
+
+    api_params: dict[str, Any] = {
+        'model': self.model_id,
+        'messages': messages,
+        'n': 1,
+    }
+
+    temp = normalized_config.get('temperature', self.temperature)
+    if temp is not None:
+      api_params['temperature'] = temp
+
+    runtime_response_format = normalized_config.get('response_format')
+    if self.openai_schema and runtime_response_format is None:
+      self._validate_schema_config()
+      api_params['response_format'] = self.openai_schema.response_format
+    elif runtime_response_format is not None:
+      if self.openai_schema:
+        # Advanced callers may deliberately override response_format at
+        # runtime; warn because that bypasses the configured schema.
+        warnings.warn(
+            'openai_schema is set but a runtime response_format kwarg '
+            'was provided; the schema is bypassed for this call.',
+            UserWarning,
+            stacklevel=3,
+        )
+      api_params['response_format'] = runtime_response_format
+    elif self.format_type == data.FormatType.JSON:
+      api_params['response_format'] = {'type': 'json_object'}
+
+    if (v := normalized_config.get('max_output_tokens')) is not None:
+      api_params['max_tokens'] = v
+    if (v := normalized_config.get('top_p')) is not None:
+      api_params['top_p'] = v
+    for key in [
+        'frequency_penalty',
+        'presence_penalty',
+        'seed',
+        'stop',
+        'logprobs',
+        'top_logprobs',
+        'reasoning_effort',
+    ]:
+      if (v := normalized_config.get(key)) is not None:
+        api_params[key] = v
+
+    return api_params
+
   def _process_single_prompt(
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
     """Sends one prompt while preserving provider-specific error types."""
     try:
-      normalized_config = config.copy()
-
-      system_message = ''
-      if self.format_type == data.FormatType.JSON:
-        system_message = (
-            'You are a helpful assistant that responds in JSON format.'
-        )
-      elif self.format_type == data.FormatType.YAML:
-        system_message = (
-            'You are a helpful assistant that responds in YAML format.'
-        )
-
-      messages = [{'role': 'user', 'content': prompt}]
-      if system_message:
-        messages.insert(0, {'role': 'system', 'content': system_message})
-
-      api_params = {
-          'model': self.model_id,
-          'messages': messages,
-          'n': 1,
-      }
-
-      temp = normalized_config.get('temperature', self.temperature)
-      if temp is not None:
-        api_params['temperature'] = temp
-
-      runtime_response_format = normalized_config.get('response_format')
-      if self.openai_schema and runtime_response_format is None:
-        self._validate_schema_config()
-        api_params['response_format'] = self.openai_schema.response_format
-      elif runtime_response_format is not None:
-        if self.openai_schema:
-          # Advanced callers may deliberately override response_format at
-          # runtime; warn because that bypasses the configured schema.
-          warnings.warn(
-              'openai_schema is set but a runtime response_format kwarg '
-              'was provided; the schema is bypassed for this call.',
-              UserWarning,
-              stacklevel=3,
-          )
-        api_params['response_format'] = runtime_response_format
-      elif self.format_type == data.FormatType.JSON:
-        api_params['response_format'] = {'type': 'json_object'}
-
-      if (v := normalized_config.get('max_output_tokens')) is not None:
-        api_params['max_tokens'] = v
-      if (v := normalized_config.get('top_p')) is not None:
-        api_params['top_p'] = v
-      for key in [
-          'frequency_penalty',
-          'presence_penalty',
-          'seed',
-          'stop',
-          'logprobs',
-          'top_logprobs',
-          'reasoning_effort',
-      ]:
-        if (v := normalized_config.get(key)) is not None:
-          api_params[key] = v
-
+      api_params = self._build_chat_completions_params(prompt, config)
       response = self._client.chat.completions.create(**api_params)
 
       output_text = response.choices[0].message.content
@@ -247,6 +260,27 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
           f'OpenAI API error: {str(e)}', original=e
       ) from e
 
+  def infer_batch(
+      self, prompts: Sequence[str], batch_size: int = 32
+  ) -> list[list[core_types.ScoredOutput]]:
+    """Return materialized inference results for prompts.
+
+    Args:
+      prompts: Prompts to send to the OpenAI provider.
+      batch_size: Maximum requests per OpenAI Batch API job when batch mode
+        runs. Realtime fallback calls ignore this value.
+
+    Returns:
+      Scored outputs aligned with prompts.
+    """
+    if batch_size <= 0:
+      raise exceptions.InferenceConfigError('batch_size must be > 0')
+
+    results = []
+    for output in self.infer(prompts, batch_size=batch_size):
+      results.append(list(output))
+    return results
+
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
   ) -> Iterator[Sequence[core_types.ScoredOutput]]:
@@ -259,6 +293,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
     Yields:
       Lists of ScoredOutputs.
     """
+    batch_size = kwargs.pop('batch_size', None)
     merged_kwargs = self.merge_kwargs(kwargs)
 
     config = {}
@@ -284,7 +319,39 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
       if key in merged_kwargs:
         config[key] = merged_kwargs[key]
 
-    # Use parallel processing for batches larger than 1
+    if self._batch_cfg.enabled:
+      if len(batch_prompts) >= self._batch_cfg.threshold:
+        try:
+          texts = openai_batch.infer_batch(
+              client=self._client,
+              model_id=self.model_id,
+              prompts=batch_prompts,
+              cfg=self._batch_cfg,
+              request_builder=lambda prompt: (
+                  self._build_chat_completions_params(prompt, config)
+              ),
+              batch_size=batch_size,
+          )
+        except exceptions.InferenceError:
+          raise
+        except Exception as e:
+          raise exceptions.InferenceRuntimeError(
+              f'OpenAI Batch API error: {str(e)}',
+              original=e,
+              provider='OpenAI',
+          ) from e
+
+        for text in texts:
+          yield [core_types.ScoredOutput(score=1.0, output=text)]
+        return
+
+      logging.info(
+          'OpenAI batch mode enabled but prompt count (%d) is below the'
+          ' threshold (%d); using real-time API.',
+          len(batch_prompts),
+          self._batch_cfg.threshold,
+      )
+
     if len(batch_prompts) > 1 and self.max_workers > 1:
       with concurrent.futures.ThreadPoolExecutor(
           max_workers=min(self.max_workers, len(batch_prompts))
@@ -317,7 +384,6 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):
             )
           yield [result]
     else:
-      # Sequential processing for single prompt or worker
       for prompt in batch_prompts:
         result = self._process_single_prompt(prompt, config.copy())
         yield [result]  # pylint: disable=duplicate-code

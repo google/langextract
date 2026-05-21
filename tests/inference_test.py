@@ -291,7 +291,113 @@ class TestOllamaLanguageModel(absltest.TestCase):
     self.assertEqual(model.merge_kwargs(), stored_kwargs)
     self.assertNotIn("think", model.merge_kwargs())
 
-  @mock.patch("requests.post")
+  def test_ollama_gpt_oss_model_matching(self):
+    for model_id in ("gpt-oss", "gpt-oss:20b", "GPT-OSS:20B"):
+      with self.subTest(model_id=model_id):
+        self.assertTrue(ollama._is_gpt_oss_model(model_id))
+
+    for model_id in (
+        "gpt-oss-120b",
+        "not-gpt-oss:20b",
+        "openai/gpt-oss:20b",
+        "gpt-oss:",
+    ):
+      with self.subTest(model_id=model_id):
+        self.assertFalse(ollama._is_gpt_oss_model(model_id))
+
+  def test_ollama_chat_empty_content_with_thinking_raises(self):
+    with self.assertRaisesRegex(exceptions.InferenceRuntimeError, "think=True"):
+      ollama.OllamaLanguageModel._extract_chat_response_text(
+          {"message": {"content": "", "thinking": "reasoning"}}
+      )
+
+  def test_ollama_chat_missing_content_raises(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, "message.content"
+    ):
+      ollama.OllamaLanguageModel._extract_chat_response_text({"done": True})
+
+  @mock.patch.object(ollama.requests, "post", autospec=True)
+  def test_ollama_gpt_oss_yaml_uses_generate_path(self, mock_post):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "response": "extractions: []",
+        "done": True,
+    }
+    mock_post.return_value = mock_response
+
+    model = ollama.OllamaLanguageModel(
+        model_id="gpt-oss:20b",
+        model_url="http://localhost:11434",
+        format_type=types.FormatType.YAML,
+    )
+
+    results = list(model.infer(["Test prompt"]))
+
+    mock_post.assert_called_once()
+    call_args = mock_post.call_args
+    payload = call_args.kwargs["json"]
+    self.assertEqual(call_args.args[0], "http://localhost:11434/api/generate")
+    self.assertEqual(payload["format"], "yaml")
+    self.assertNotIn("messages", payload)
+    self.assertEqual(
+        results,
+        [[types.ScoredOutput(score=1.0, output="extractions: []")]],
+    )
+
+  @mock.patch.object(ollama.requests, "post", autospec=True)
+  def test_ollama_gpt_oss_uses_chat_without_native_json(self, mock_post):
+    """GPT-OSS avoids native JSON mode, which conflicts with Harmony format."""
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "message": {"content": '{"extractions": []}'},
+        "done": True,
+    }
+    mock_post.return_value = mock_response
+
+    model = ollama.OllamaLanguageModel(
+        model_id="gpt-oss:20b",
+        model_url="http://localhost:11434",
+    )
+
+    results = list(model.infer(["Test prompt"], temperature=0.0))
+
+    mock_post.assert_called_once()
+    call_args = mock_post.call_args
+    self.assertEqual(call_args.args[0], "http://localhost:11434/api/chat")
+    self.assertDictEqual(
+        call_args.kwargs["json"],
+        {
+            "model": "gpt-oss:20b",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Output a single JSON object matching the requested "
+                        "extraction format. Do not include code fences, prose, "
+                        "or reasoning."
+                    ),
+                },
+                {"role": "user", "content": "Test prompt"},
+            ],
+            "stream": False,
+            "options": {
+                "keep_alive": 300,
+                "temperature": 0.0,
+                "num_ctx": 2048,
+            },
+            "keep_alive": 300,
+            "think": False,
+        },
+    )
+    self.assertEqual(
+        results,
+        [[types.ScoredOutput(score=1.0, output='{"extractions": []}')]],
+    )
+
+  @mock.patch.object(ollama.requests, "post", autospec=True)
   def test_ollama_extra_kwargs_passed_to_api(self, mock_post):
     """Verify extra kwargs like timeout and keep_alive are passed to the API."""
     mock_response = mock.Mock()
@@ -316,6 +422,9 @@ class TestOllamaLanguageModel(absltest.TestCase):
     call_args = mock_post.call_args
     json_payload = call_args.kwargs["json"]
 
+    self.assertEqual(call_args.args[0], "http://localhost:11434/api/generate")
+    self.assertEqual(json_payload["format"], "json")
+    self.assertNotIn("messages", json_payload)
     self.assertEqual(json_payload["keep_alive"], 600)
     self.assertIs(json_payload["think"], False)
     self.assertNotIn("think", json_payload["options"])

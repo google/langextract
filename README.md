@@ -25,6 +25,7 @@
   - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
   - [Medication Extraction](#medication-extraction)
   - [Radiology Report Structuring: RadExtract](#radiology-report-structuring-radextract)
+- [Architecture Documentation](#architecture-documentation)
 - [Community Providers](#community-providers)
 - [Contributing](#contributing)
 - [Testing](#testing)
@@ -204,6 +205,213 @@ pip install -e ".[test]"
 ```bash
 docker build -t langextract .
 docker run --rm -e LANGEXTRACT_API_KEY="your-api-key" langextract python your_script.py
+```
+
+## Configuration & Logging
+
+LangExtract provides a flexible configuration system and unified logging interface.
+
+### Configuring Log Levels
+
+By default, LangExtract logs at `WARNING` level. You can enable more detailed logging:
+
+**Option 1: Using `configure()` (global setting)**
+
+```python
+import langextract as lx
+
+# Enable DEBUG level logging globally
+lx.configure(log_level="DEBUG")
+
+# Or enable INFO level
+lx.configure(log_level="INFO")
+```
+
+**Option 2: Using context manager (temporary setting)**
+
+```python
+import langextract as lx
+
+# Temporarily enable DEBUG logging for a specific code block
+with lx.config(log_level="DEBUG"):
+    result = lx.extract(...)  # Debug logs will be shown here
+
+# Back to default WARNING level outside the context
+```
+
+**Option 3: Using environment variables**
+
+```bash
+# Set log level via environment variable
+export LANGEXTRACT_LOG_LEVEL="DEBUG"
+
+# Other configuration options
+export LANGEXTRACT_REQUEST_TIMEOUT="120.0"
+export LANGEXTRACT_MAX_RETRIES="5"
+export LANGEXTRACT_DEFAULT_MODEL="gemini-2.5-flash"
+export LANGEXTRACT_CACHE_ENABLED="true"
+```
+
+### Available Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `log_level` | str | `"WARNING"` | Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL |
+| `request_timeout` | float | `60.0` | Request timeout in seconds |
+| `max_retries` | int | `3` | Maximum number of retries for failed requests |
+| `default_model` | str | `None` | Default model ID to use |
+| `default_max_tokens` | int | `None` | Default maximum tokens for generation |
+| `cache_enabled` | bool | `True` | Whether to enable caching |
+| `cache_dir` | str | `None` | Directory for cache files |
+| `progress_enabled` | bool | `True` | Whether to show terminal progress bars and completion messages |
+
+### Configuration Priority
+
+Configuration values are applied in the following priority order (highest to lowest):
+
+1. **Explicit parameters** - Passed directly to `configure()` or `config()`
+2. **Environment variables** - `LANGEXTRACT_*` prefixed variables
+3. **Default values** - Built-in defaults
+
+### Advanced Logging Configuration
+
+For production use, you may want to configure file-based logging with rotation,
+or add custom handlers like JSON formatting.
+
+#### Example 1: Rotating File Handler (Log Persistence)
+
+```python
+import logging
+from logging.handlers import RotatingFileHandler
+import langextract as lx
+
+# Enable INFO level logging
+lx.configure(log_level="INFO")
+
+# Get the root langextract logger
+root_logger = logging.getLogger("langextract")
+
+# Create a RotatingFileHandler: max 10MB per file, keep 5 backup files
+file_handler = RotatingFileHandler(
+    "langextract.log",
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,
+    encoding="utf-8",
+)
+
+# Set the format
+formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+file_handler.setFormatter(formatter)
+
+# Add the handler to the root logger
+root_logger.addHandler(file_handler)
+
+# Optional: Also log to console (stderr)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+root_logger.addHandler(console_handler)
+```
+
+#### Example 2: JSON Formatted Logs
+
+For structured logging (e.g., for log aggregation systems like ELK Stack):
+
+```python
+import logging
+import json
+from datetime import datetime
+import langextract as lx
+
+lx.configure(log_level="DEBUG")
+
+class JSONFormatter(logging.Formatter):
+    """Custom JSON formatter for structured logging."""
+    
+    def format(self, record):
+        log_record = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
+        }
+        
+        # Include exception info if present
+        if record.exc_info:
+            log_record["exception"] = self.formatException(record.exc_info)
+        
+        return json.dumps(log_record)
+
+# Get the root logger
+root_logger = logging.getLogger("langextract")
+
+# Create handler with JSON formatter
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+root_logger.addHandler(handler)
+```
+
+#### Example 3: Disabling Progress Display
+
+In non-interactive environments (e.g., production servers, cron jobs),
+you may want to disable the terminal progress bars:
+
+```python
+import langextract as lx
+
+# Disable progress bars and completion messages
+lx.configure(progress_enabled=False, log_level="INFO")
+
+# Now extractions will run without terminal progress display
+# but all log messages will still go through the logging system
+result = lx.extract(...)
+```
+
+Or via environment variable:
+
+```bash
+export LANGEXTRACT_PROGRESS_ENABLED="0"
+```
+
+### Thread Safety Note
+
+The `config()` context manager uses Python's `contextvars` module for
+thread-safe configuration. However, note that:
+
+1. **`contextvars` are NOT automatically inherited by new threads** in Python.
+   If you use `threading.Thread`, the context configuration will not be
+   automatically propagated.
+
+2. **Recommendations for multi-threaded code:**
+   - Use `configure()` for global configuration
+   - Or use `contextvars.copy_context()` to explicitly propagate context
+   - Or pass Config objects directly to functions that need them
+
+Example with explicit context propagation:
+
+```python
+import threading
+import contextvars
+import langextract as lx
+
+def worker():
+    with lx.config(log_level="DEBUG"):
+        # This code will have DEBUG logging
+        pass
+
+# Run in the current context
+with lx.config(log_level="DEBUG"):
+    # Copy the current context
+    ctx = contextvars.copy_context()
+    
+    # Run the worker with the copied context
+    t = threading.Thread(target=lambda: ctx.run(worker))
+    t.start()
+    t.join()
 ```
 
 ## API Key Setup for Cloud Models

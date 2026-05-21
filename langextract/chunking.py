@@ -24,10 +24,12 @@ from collections.abc import Iterable, Iterator, Sequence
 import dataclasses
 import re
 
-from absl import logging
+from langextract._logging import get_logger
 import more_itertools
 
 from langextract.core import data
+
+logger = get_logger(__name__)
 from langextract.core import exceptions
 from langextract.core import tokenizer as tokenizer_lib
 
@@ -196,7 +198,7 @@ def get_token_interval_text(
         f"{token_interval.end_index}."
     )
   return_string = tokenizer_lib.tokens_text(tokenized_text, token_interval)
-  logging.debug(
+  logger.debug(
       "Token util returns string: %s for tokenized_text: %s, token_interval:"
       " %s",
       return_string,

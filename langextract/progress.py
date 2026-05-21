@@ -12,13 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Progress and visualization utilities for LangExtract."""
+"""Progress and visualization utilities for LangExtract.
+
+This module provides progress bars and completion messages for terminal display.
+Note that these utilities use direct print() with ANSI color codes for visual
+appeal in interactive terminals. For production logging (e.g., to files), use
+the unified logging system via langextract._logging.get_logger().
+
+Configuration:
+- progress_enabled: Controls whether progress bars and print_* messages are shown.
+  Can be set via:
+  - langextract.configure(progress_enabled=False)
+  - Environment variable LANGEXTRACT_PROGRESS_ENABLED=0
+  - Default: True
+"""
 from __future__ import annotations
 
+import sys
 from typing import Any
 import urllib.parse
 
 import tqdm
+
+from langextract._logging import get_logger
 
 # ANSI color codes for terminal output
 BLUE = "\033[94m"
@@ -29,6 +45,38 @@ RESET = "\033[0m"
 
 # Google Blue color for progress bars
 GOOGLE_BLUE = "#4285F4"
+
+logger = get_logger(__name__)
+
+
+def _is_progress_enabled() -> bool:
+  """Check if progress display is enabled.
+
+  Returns:
+    True if progress bars and print_* messages should be shown.
+  """
+  try:
+    from langextract._config import get_global_config
+
+    config = get_global_config()
+    return config.progress_enabled
+  except Exception:
+    return True
+
+
+def _strip_ansi(text: str) -> str:
+  """Strip ANSI color codes from text.
+
+  Args:
+    text: Text containing ANSI codes.
+
+  Returns:
+    Text without ANSI codes.
+  """
+  import re
+
+  ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+  return ansi_escape.sub("", text)
 
 
 def create_download_progress_bar(
@@ -61,6 +109,8 @@ def create_download_progress_bar(
   else:
     url_display = url
 
+  disable = not _is_progress_enabled()
+
   return tqdm.tqdm(
       total=total_size,
       unit="B",
@@ -75,6 +125,7 @@ def create_download_progress_bar(
       ),
       colour=GOOGLE_BLUE,
       ncols=ncols,
+      disable=disable,
   )
 
 
@@ -86,18 +137,20 @@ def create_extraction_progress_bar(
   Args:
     iterable: The iterable to wrap with progress bar.
     model_info: Optional model information to display (e.g., "gemini-1.5-pro").
-    disable: Whether to disable the progress bar.
+    disable: Whether to disable the progress bar (overrides config).
 
   Returns:
     A configured tqdm progress bar.
   """
   desc = format_extraction_progress(model_info)
 
+  effective_disable = disable or not _is_progress_enabled()
+
   return tqdm.tqdm(
       iterable,
       desc=desc,
       bar_format="{desc} [{elapsed}]",
-      disable=disable,
+      disable=effective_disable,
       dynamic_ncols=True,
   )
 
@@ -107,21 +160,42 @@ def print_download_complete(
 ) -> None:
   """Print a styled download completion message.
 
+  This function outputs to stdout with ANSI colors for terminal display.
+  It also logs the same information (without ANSI codes) at INFO level.
+
   Args:
     char_count: Number of characters downloaded.
     word_count: Number of words downloaded.
     filename: Name of the downloaded file.
   """
-  print(
+  message = (
       f"{GREEN}✓{RESET} Downloaded {BOLD}{char_count:,}{RESET} characters "
-      f"({BOLD}{word_count:,}{RESET} words) from {BLUE}{filename}{RESET}",
-      flush=True,
+      f"({BOLD}{word_count:,}{RESET} words) from {BLUE}{filename}{RESET}"
   )
+
+  logger.info(
+      "Downloaded %d characters (%d words) from %s",
+      char_count,
+      word_count,
+      filename,
+  )
+
+  if _is_progress_enabled():
+    print(message, flush=True, file=sys.stdout)
 
 
 def print_extraction_complete() -> None:
-  """Print a generic extraction completion message."""
-  print(f"{GREEN}✓{RESET} Extraction processing complete", flush=True)
+  """Print a generic extraction completion message.
+
+  This function outputs to stdout with ANSI colors for terminal display.
+  It also logs the same information (without ANSI codes) at INFO level.
+  """
+  message = f"{GREEN}✓{RESET} Extraction processing complete"
+
+  logger.info("Extraction processing complete")
+
+  if _is_progress_enabled():
+    print(message, flush=True, file=sys.stdout)
 
 
 def print_extraction_summary(
@@ -133,6 +207,9 @@ def print_extraction_summary(
 ) -> None:
   """Print a styled extraction summary with optional performance metrics.
 
+  This function outputs to stdout with ANSI colors for terminal display.
+  It also logs the same information (without ANSI codes) at INFO level.
+
   Args:
     num_extractions: Total number of extractions.
     unique_classes: Number of unique extraction classes.
@@ -140,28 +217,38 @@ def print_extraction_summary(
     chars_processed: Optional number of characters processed.
     num_chunks: Optional number of chunks processed.
   """
-  print(
+  main_message = (
       f"{GREEN}✓{RESET} Extracted {BOLD}{num_extractions}{RESET} entities "
-      f"({BOLD}{unique_classes}{RESET} unique types)",
-      flush=True,
+      f"({BOLD}{unique_classes}{RESET} unique types)"
   )
 
-  if elapsed_time is not None:
-    metrics = []
+  logger.info("Extracted %d entities (%d unique types)", num_extractions, unique_classes)
 
+  metrics: list[str] = []
+  log_metrics: list[str] = []
+
+  if elapsed_time is not None:
     # Time
     metrics.append(f"Time: {BOLD}{elapsed_time:.2f}s{RESET}")
+    log_metrics.append(f"Time: {elapsed_time:.2f}s")
 
     # Speed
     if chars_processed is not None and elapsed_time > 0:
       speed = chars_processed / elapsed_time
       metrics.append(f"Speed: {BOLD}{speed:,.0f}{RESET} chars/sec")
+      log_metrics.append(f"Speed: {speed:,.0f} chars/sec")
 
     if num_chunks is not None:
       metrics.append(f"Chunks: {BOLD}{num_chunks}{RESET}")
+      log_metrics.append(f"Chunks: {num_chunks}")
 
+  if log_metrics:
+    logger.info("Performance: %s", ", ".join(log_metrics))
+
+  if _is_progress_enabled():
+    print(main_message, flush=True, file=sys.stdout)
     for metric in metrics:
-      print(f"  {CYAN}•{RESET} {metric}", flush=True)
+      print(f"  {CYAN}•{RESET} {metric}", flush=True, file=sys.stdout)
 
 
 def create_save_progress_bar(
@@ -177,12 +264,14 @@ def create_save_progress_bar(
     A configured tqdm progress bar.
   """
   filename = output_path.split("/")[-1]
+  effective_disable = disable or not _is_progress_enabled()
+
   return tqdm.tqdm(
       desc=(
           f"{BLUE}{BOLD}LangExtract{RESET}: Saving to {GREEN}{filename}{RESET}"
       ),
       unit=" docs",
-      disable=disable,
+      disable=effective_disable,
   )
 
 
@@ -200,6 +289,8 @@ def create_load_progress_bar(
     A configured tqdm progress bar.
   """
   filename = file_path.split("/")[-1]
+  effective_disable = disable or not _is_progress_enabled()
+
   if total_size:
     return tqdm.tqdm(
         total=total_size,
@@ -208,7 +299,7 @@ def create_load_progress_bar(
         ),
         unit="B",
         unit_scale=True,
-        disable=disable,
+        disable=effective_disable,
     )
   else:
     return tqdm.tqdm(
@@ -216,38 +307,52 @@ def create_load_progress_bar(
             f"{BLUE}{BOLD}LangExtract{RESET}: Loading {GREEN}{filename}{RESET}"
         ),
         unit=" docs",
-        disable=disable,
+        disable=effective_disable,
     )
 
 
 def print_save_complete(num_docs: int, file_path: str) -> None:
   """Print a save completion message.
 
+  This function outputs to stdout with ANSI colors for terminal display.
+  It also logs the same information (without ANSI codes) at INFO level.
+
   Args:
     num_docs: Number of documents saved.
     file_path: Path to the saved file.
   """
   filename = file_path.split("/")[-1]
-  print(
+  message = (
       f"{GREEN}✓{RESET} Saved {BOLD}{num_docs}{RESET} documents to"
-      f" {GREEN}{filename}{RESET}",
-      flush=True,
+      f" {GREEN}{filename}{RESET}"
   )
+
+  logger.info("Saved %d documents to %s", num_docs, filename)
+
+  if _is_progress_enabled():
+    print(message, flush=True, file=sys.stdout)
 
 
 def print_load_complete(num_docs: int, file_path: str) -> None:
   """Print a load completion message.
+
+  This function outputs to stdout with ANSI colors for terminal display.
+  It also logs the same information (without ANSI codes) at INFO level.
 
   Args:
     num_docs: Number of documents loaded.
     file_path: Path to the loaded file.
   """
   filename = file_path.split("/")[-1]
-  print(
+  message = (
       f"{GREEN}✓{RESET} Loaded {BOLD}{num_docs}{RESET} documents from"
-      f" {GREEN}{filename}{RESET}",
-      flush=True,
+      f" {GREEN}{filename}{RESET}"
   )
+
+  logger.info("Loaded %d documents from %s", num_docs, filename)
+
+  if _is_progress_enabled():
+    print(message, flush=True, file=sys.stdout)
 
 
 def get_model_info(language_model: Any) -> str | None:
@@ -313,13 +418,11 @@ def format_extraction_progress(
   Returns:
     Formatted description string.
   """
-  # Base description
   if model_info:
     desc = f"{BLUE}{BOLD}LangExtract{RESET}: model={GREEN}{model_info}{RESET}"
   else:
     desc = f"{BLUE}{BOLD}LangExtract{RESET}: Processing"
 
-  # Add stats if provided
   if current_chars is not None and processed_chars is not None:
     current_str = f"{GREEN}{current_chars:,}{RESET}"
     processed_str = f"{GREEN}{processed_chars:,}{RESET}"
@@ -340,14 +443,16 @@ def create_pass_progress_bar(
   Returns:
     A configured tqdm progress bar.
   """
+  effective_disable = disable or not _is_progress_enabled()
   desc = f"{BLUE}{BOLD}LangExtract{RESET}: Extraction passes"
+
   return tqdm.tqdm(
       total=total_passes,
       desc=desc,
       bar_format=(
           "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}]"
       ),
-      disable=disable,
+      disable=effective_disable,
       colour=GOOGLE_BLUE,
       ncols=100,
   )

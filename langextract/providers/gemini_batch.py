@@ -38,8 +38,10 @@ import time
 from typing import Any, Callable, Protocol
 import uuid
 
-from absl import logging
+from langextract._logging import get_logger
 from google import genai
+
+logger = get_logger(__name__)
 from google.api_core import exceptions as google_exceptions
 from google.cloud import storage
 
@@ -130,7 +132,7 @@ class BatchConfig:
 
     unknown = sorted(set(d.keys()) - valid_keys)
     if unknown:
-      logging.warning(
+      logger.warning(
           "Ignoring unknown batch config keys: %s", ", ".join(unknown)
       )
     cfg = cls(**filtered_dict)
@@ -152,8 +154,8 @@ _TERMINAL_OK = frozenset({
 
 def _default_job_create_callback(job: Any) -> None:
   """Default callback to log batch job details."""
-  logging.info("Batch job created successfully: %s", job.name)
-  logging.info("Job State: %s", job.state)
+  logger.info("Batch job created successfully: %s", job.name)
+  logger.info("Job State: %s", job.state)
   # Extract project and job ID for console URL
   try:
     # job.name format: projects/{project}/locations/{location}/batchPredictionJobs/{job_id}
@@ -162,7 +164,7 @@ def _default_job_create_callback(job: Any) -> None:
       job_id = parts[-1]
       location = parts[3]
       project = parts[1]
-      logging.info(
+      logger.info(
           "Job Console URL:"
           " https://console.cloud.google.com/vertex-ai/locations/%s/batch-predictions/%s?project=%s",
           location,
@@ -245,13 +247,13 @@ def _ensure_bucket_lifecycle(
   bucket.add_lifecycle_delete_rule(age=retention_days)
   try:
     bucket.patch()
-    logging.info(
+    logger.info(
         "Added lifecycle rule to bucket %s: delete after %d days",
         bucket.name,
         retention_days,
     )
   except Exception as e:
-    logging.warning(
+    logger.warning(
         "Failed to update lifecycle rule for bucket %s: %s", bucket.name, e
     )
 
@@ -360,10 +362,10 @@ def _submit_file(
     storage_client = storage.Client(project=project)
     try:
       bucket = storage_client.create_bucket(bucket_name, location=location)
-      logging.info("Created GCS bucket: %s", bucket_name)
+      logger.info("Created GCS bucket: %s", bucket_name)
     except google_exceptions.Conflict:
       bucket = storage_client.bucket(bucket_name)
-      logging.info("Using existing GCS bucket: %s", bucket_name)
+      logger.info("Using existing GCS bucket: %s", bucket_name)
 
     if retention_days:
       _ensure_bucket_lifecycle(bucket, retention_days)
@@ -414,7 +416,7 @@ class GCSBatchCache:
     except google_exceptions.NotFound:
       return None
     except Exception as e:
-      logging.warning("Cache read error for %s: %s", key_hash, e)
+      logger.warning("Cache read error for %s: %s", key_hash, e)
     return None
 
   def get_multi(self, key_data_list: Sequence[dict]) -> dict[int, str]:
@@ -455,7 +457,7 @@ class GCSBatchCache:
             content_type=_MIME_TYPE_JSON,
         )
       except Exception as e:
-        logging.warning(
+        logger.warning(
             "Cache write error for %s: %s", key_hash, e, exc_info=True
         )
 
@@ -466,7 +468,7 @@ class GCSBatchCache:
           try:
             text = json.dumps(text, default=_json_default, ensure_ascii=False)
           except Exception as e:
-            logging.warning("Serialization error: %s", e)
+            logger.warning("Serialization error: %s", e)
             continue
 
         executor.submit(_upload, text, key_data)
@@ -488,7 +490,7 @@ class GCSBatchCache:
         if text is not None:
           yield key_hash, text
       except (json.JSONDecodeError, Exception) as e:
-        logging.warning("Failed to read cache item %s: %s", blob.name, e)
+        logger.warning("Failed to read cache item %s: %s", blob.name, e)
 
 
 class _TextResponse(Protocol):
@@ -584,13 +586,13 @@ def _poll_completion(
       try:
         client.batches.cancel(name=name)
       except Exception as e:
-        logging.warning("Failed to cancel timed-out batch job %s: %s", name, e)
+        logger.warning("Failed to cancel timed-out batch job %s: %s", name, e)
       raise exceptions.InferenceRuntimeError(
           f"Batch job timed out after {cfg.timeout}s: {name}"
       )
 
     time.sleep(cfg.poll_interval)
-    logging.info("Batch job is running... (State: %s)", state.name)
+    logger.info("Batch job is running... (State: %s)", state.name)
 
 
 def _parse_batch_line(
@@ -676,8 +678,8 @@ def _extract_from_file(
         f"No output files found in {gcs_uri}"
     )
 
-  logging.info("Batch API: Downloading results from %s", gcs_uri)
-  logging.info("Batch API: Found %d output files", len(blobs))
+  logger.info("Batch API: Downloading results from %s", gcs_uri)
+  logger.info("Batch API: Found %d output files", len(blobs))
 
   for blob in blobs:
     if not blob.name.endswith(_EXT_JSONL):
@@ -690,7 +692,7 @@ def _extract_from_file(
           continue
         _parse_batch_line(line, outputs_by_idx, cfg)
 
-  logging.info("Batch API: Parsed %d results", len(outputs_by_idx))
+  logger.info("Batch API: Parsed %d results", len(outputs_by_idx))
   return [outputs_by_idx.get(i, "") for i in range(expected_count)]
 
 
@@ -749,16 +751,16 @@ def infer_batch(
     )
 
   # Suppress verbose HTTP logs from underlying libraries
-  std_logging.getLogger("google.auth.transport.requests").setLevel(
-      std_logging.WARNING
+  std_logger.getLogger("google.auth.transport.requests").setLevel(
+      std_logger.WARNING
   )
-  std_logging.getLogger("urllib3.connectionpool").setLevel(std_logging.WARNING)
-  std_logging.getLogger("httpx").setLevel(std_logging.WARNING)
-  std_logging.getLogger("httpcore").setLevel(std_logging.WARNING)
+  std_logger.getLogger("urllib3.connectionpool").setLevel(std_logger.WARNING)
+  std_logger.getLogger("httpx").setLevel(std_logger.WARNING)
+  std_logger.getLogger("httpcore").setLevel(std_logger.WARNING)
   # Force disable httpx propagation or handlers if level setting fails
-  std_logging.getLogger("httpx").disabled = True
+  std_logger.getLogger("httpx").disabled = True
 
-  logging.info("Batch API: Processing %d prompts", len(prompts))
+  logger.info("Batch API: Processing %d prompts", len(prompts))
 
   display_base = f"langextract-batch-{int(time.time())}"
 
@@ -767,7 +769,7 @@ def infer_batch(
 
   cache = GCSBatchCache(bucket_name, project) if cfg.enable_caching else None
   if cache:
-    logging.info(
+    logger.info(
         "Batch API: Using GCS bucket:"
         " https://console.cloud.google.com/storage/browser/%s",
         bucket_name,
@@ -798,10 +800,10 @@ def infer_batch(
     prompts_to_process = list(enumerate(prompts))
 
   if not prompts_to_process:
-    logging.info("Batch API: All %d prompts found in cache", len(prompts))
+    logger.info("Batch API: All %d prompts found in cache", len(prompts))
     return [cached_results[i] for i in range(len(prompts))]
 
-  logging.info(
+  logger.info(
       "Batch API: %d cached, %d to submit",
       len(cached_results),
       len(prompts_to_process),
@@ -835,9 +837,9 @@ def infer_batch(
       try:
         cfg.on_job_create(job)
       except Exception as e:
-        logging.warning("Batch job creation callback failed: %s", e)
+        logger.warning("Batch job creation callback failed: %s", e)
     job = _poll_completion(client, job, cfg)
-    logging.info("Batch job completed successfully.")
+    logger.info("Batch job completed successfully.")
     results = _extract_from_file(
         client, job, cfg, expected_count=len(batch_prompts)
     )

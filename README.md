@@ -496,3 +496,6 @@ For health-related applications, use of LangExtract is also subject to the
 ---
 
 **Happy Extracting!**
+ 
+ < ! - -   m i n o r   u p d a t e   - - >  
+ 

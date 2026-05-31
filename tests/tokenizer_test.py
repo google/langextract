@@ -224,6 +224,39 @@ class TokenizerTest(parameterized.TestCase):
     )
     self.assertEqual(tokenized.tokens[2].token_type, tokenizer.TokenType.WORD)
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="latin_cjk_boundary",
+          input_text="Hello世界",
+          expected_tokens=[
+              ("Hello", tokenizer.TokenType.WORD),
+              ("世界", tokenizer.TokenType.WORD),
+          ],
+      ),
+      dict(
+          testcase_name="accented_latin_cjk_boundary",
+          input_text="café世界",
+          expected_tokens=[
+              ("café", tokenizer.TokenType.WORD),
+              ("世界", tokenizer.TokenType.WORD),
+          ],
+      ),
+  )
+  def test_regex_tokenizer_splits_cjk_from_latin_words(
+      self, input_text, expected_tokens
+  ):
+    tokenized = tokenizer.RegexTokenizer().tokenize(input_text)
+    actual_tokens = [
+        (
+            input_text[
+                token.char_interval.start_pos : token.char_interval.end_pos
+            ],
+            token.token_type,
+        )
+        for token in tokenized.tokens
+    ]
+    self.assertEqual(actual_tokens, expected_tokens)
+
 
 class UnicodeTokenizerTest(parameterized.TestCase):
   # pylint: disable=too-many-public-methods

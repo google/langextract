@@ -241,6 +241,22 @@ class TokenizerTest(parameterized.TestCase):
               ("世界", tokenizer.TokenType.WORD),
           ],
       ),
+      dict(
+          testcase_name="latin_hangul_boundary",
+          input_text="Minsoo는",
+          expected_tokens=[
+              ("Minsoo", tokenizer.TokenType.WORD),
+              ("는", tokenizer.TokenType.WORD),
+          ],
+      ),
+      dict(
+          testcase_name="digit_hangul_boundary",
+          input_text="9900원",
+          expected_tokens=[
+              ("9900", tokenizer.TokenType.NUMBER),
+              ("원", tokenizer.TokenType.WORD),
+          ],
+      ),
   )
   def test_regex_tokenizer_splits_cjk_from_latin_words(
       self, input_text, expected_tokens

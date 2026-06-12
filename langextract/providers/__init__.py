@@ -56,9 +56,6 @@ def load_builtins_once() -> None:
   """
   global _builtins_loaded  # pylint: disable=global-statement
 
-  if _builtins_loaded:
-    return
-
   # Register built-ins lazily so they can be re-registered after a registry.clear()
   # even if their modules were already imported earlier in the test run.
   for config in builtin_registry.BUILTIN_PROVIDERS:

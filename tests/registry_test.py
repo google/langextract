@@ -25,8 +25,10 @@ import re
 from absl.testing import absltest
 
 from langextract import exceptions
+from langextract import providers as providers_module
 from langextract.core import base_model
 from langextract.core import types
+from langextract.providers import builtin_registry
 from langextract.providers import router
 
 
@@ -130,6 +132,22 @@ class RegistryTest(absltest.TestCase):
     # Should fail after clear
     with self.assertRaises(exceptions.InferenceConfigError):
       router.resolve("temp-model")
+
+  def test_load_builtins_once_deduplicates_and_recovers_after_clear(self):
+    """Built-in lazy registration can be repeated or restored after clear."""
+    providers_module._builtins_loaded = False  # pylint: disable=protected-access
+
+    providers_module.load_builtins_once()
+    first_providers = router.list_providers()
+    providers_module.load_builtins_once()
+
+    self.assertLen(first_providers, len(builtin_registry.BUILTIN_PROVIDERS))
+    self.assertEqual(router.list_providers(), first_providers)
+
+    router.clear()
+    providers_module.load_builtins_once()
+
+    self.assertEqual(router.list_providers(), first_providers)
 
   def test_list_entries(self):
     """Test listing registered entries."""

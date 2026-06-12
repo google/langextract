@@ -107,13 +107,14 @@ openai = "langextract.providers.openai:OpenAILanguageModel"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = "*_test.py"
+python_files = ["test_*.py", "*_test.py"]
 python_classes = "Test*"
 python_functions = "test_*"
 # Show extra test summary info
 addopts = "-ra"
 markers = [
     "live_api: marks tests as requiring live API access",
+    "vertex_ai: marks live tests that require Vertex AI credentials",
     "requires_pip: marks tests that perform pip install/uninstall operations",
     "integration: marks integration tests that test multiple components together",
 ]

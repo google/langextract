@@ -20,15 +20,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 import copy
 import dataclasses
+import re
 from typing import Any
 import warnings
 
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import format_handler as fh
+from langextract.core import output_schema as output_schema_lib
 from langextract.core import schema
+from langextract.core import types as core_types
 
 DEFAULT_SCHEMA_NAME = "langextract_extractions"
+_SCHEMA_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 JSON_SCHEMA_FORMAT_ERROR = (
     "OpenAI structured output only supports JSON format. "
     "Set format_type=JSON or use_schema_constraints=False."
@@ -162,6 +166,9 @@ class OpenAISchema(schema.BaseSchema):
   schema_dict: dict[str, Any]
   schema_name: str = DEFAULT_SCHEMA_NAME
   strict: bool = True
+  from_output_schema: bool = dataclasses.field(
+      default=False, repr=False, compare=False
+  )
 
   def __post_init__(self) -> None:
     # Copy before publishing the schema to worker threads so caller mutations
@@ -184,6 +191,10 @@ class OpenAISchema(schema.BaseSchema):
     """OpenAI schemas are applied through the provider schema hook."""
     return {}
 
+  def output_schema_reserved_provider_kwargs(self) -> frozenset[str]:
+    """Provider kwargs that would override an explicit output_schema."""
+    return frozenset({"openai_schema", "response_format"})
+
   @property
   def requires_raw_output(self) -> bool:
     """OpenAI structured outputs emit raw JSON without fences."""
@@ -199,7 +210,7 @@ class OpenAISchema(schema.BaseSchema):
     Raises:
       InferenceConfigError: if format_type is not JSON.
     """
-    if format_handler.format_type != data.FormatType.JSON:
+    if not output_schema_lib.is_json_format_type(format_handler.format_type):
       raise exceptions.InferenceConfigError(JSON_SCHEMA_FORMAT_ERROR)
 
     if format_handler.use_fences:
@@ -277,3 +288,42 @@ class OpenAISchema(schema.BaseSchema):
     }
 
     return cls(schema_dict=schema_dict, strict=strict)
+
+  @classmethod
+  def from_schema_dict(
+      cls,
+      output_schema: core_types.JsonSchema,
+      *,
+      schema_name: str = DEFAULT_SCHEMA_NAME,
+      strict: bool = True,
+  ) -> OpenAISchema:
+    """Creates an OpenAISchema from a user-provided output schema.
+
+    Strict mode requirements (every object lists all properties in
+    `required` and sets `additionalProperties: false`) are enforced by the
+    OpenAI API itself; the `lx.schema` helpers emit compliant schemas by
+    default.
+
+    Args:
+      output_schema: JSON schema for LangExtract's raw output object.
+      schema_name: Name sent to OpenAI's response_format payload.
+      strict: Whether OpenAI should enforce strict structured outputs.
+
+    Returns:
+      An OpenAISchema instance ready to apply to the OpenAI provider.
+    """
+    if not isinstance(schema_name, str) or not schema_name:
+      raise exceptions.InferenceConfigError(
+          "schema_name must be a non-empty string."
+      )
+    if not _SCHEMA_NAME_RE.fullmatch(schema_name):
+      raise exceptions.InferenceConfigError(
+          "schema_name must contain only letters, numbers, underscores, "
+          "or dashes, and be at most 64 characters."
+      )
+    return cls(
+        schema_dict=output_schema_lib.validate_output_schema(output_schema),
+        schema_name=schema_name,
+        strict=strict,
+        from_output_schema=True,
+    )

@@ -12,18 +12,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Schema compatibility layer.
+"""Public schema helpers and compatibility layer.
 
-This module provides backward compatibility for the schema module.
-New code should import from langextract.core.schema instead.
+New helper functions return plain JSON schema dictionaries for
+`extract(output_schema=...)`. Older schema classes remain available here with
+deprecation warnings.
 """
 
 from __future__ import annotations
 
-# Re-export core schema items with deprecation warnings
+# pylint: disable=undefined-all-variable
 import warnings
 
 from langextract._compat import schema
+from langextract.core import output_schema as output_schema_lib
+from langextract.core import types as core_types
+
+extraction_item_schema = output_schema_lib.extraction_item_schema
+extractions_schema = output_schema_lib.extractions_schema
+JsonSchema = core_types.JsonSchema
+JsonValue = core_types.JsonValue
+validate_output_schema = output_schema_lib.validate_output_schema
+
+_COMPAT_NAMES = [
+    "ATTRIBUTE_SUFFIX",
+    "BaseSchema",
+    "Constraint",
+    "ConstraintType",
+    "EXTRACTIONS_KEY",
+    "FormatModeSchema",
+    "GeminiSchema",
+]
+
+__all__ = [
+    *_COMPAT_NAMES,
+    "extraction_item_schema",
+    "extractions_schema",
+    "JsonSchema",
+    "JsonValue",
+    "validate_output_schema",
+]
 
 
 def __getattr__(name: str):

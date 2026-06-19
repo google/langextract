@@ -869,6 +869,45 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(call_args.kwargs["presence_penalty"], 0.7)
     self.assertEqual(call_args.kwargs["seed"], 42)
 
+  @mock.patch("openai.AzureOpenAI")
+  @mock.patch("openai.OpenAI")
+  def test_openai_azure_client_used(
+      self, mock_openai_class, mock_azure_openai_class
+  ):
+    """Azure OpenAI kwargs initialize an Azure client, not request kwargs."""
+    mock_client = mock.Mock()
+    mock_azure_openai_class.return_value = mock_client
+
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    model = openai.OpenAILanguageModel(
+        api_key="test-key",
+        azure_endpoint="https://example.openai.azure.com",
+        api_version="2024-10-21",
+        azure_deployment="deployment-name",
+    )
+
+    list(model.infer(["test prompt"]))
+
+    mock_openai_class.assert_not_called()
+    mock_azure_openai_class.assert_called_once_with(
+        api_key="test-key",
+        azure_endpoint="https://example.openai.azure.com",
+        api_version="2024-10-21",
+        azure_ad_token=None,
+        azure_ad_token_provider=None,
+        azure_deployment="deployment-name",
+        organization=None,
+    )
+    call_args = mock_client.chat.completions.create.call_args
+    self.assertNotIn("azure_endpoint", call_args.kwargs)
+    self.assertNotIn("api_version", call_args.kwargs)
+    self.assertNotIn("azure_deployment", call_args.kwargs)
+
   @mock.patch("openai.OpenAI")
   def test_openai_runtime_kwargs_override(self, mock_openai_class):
     """Test that runtime kwargs override stored kwargs."""

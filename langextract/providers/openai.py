@@ -109,6 +109,11 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       api_key: str | None = None,
       base_url: str | None = None,
       organization: str | None = None,
+      azure_endpoint: str | None = None,
+      api_version: str | None = None,
+      azure_ad_token: str | None = None,
+      azure_ad_token_provider: Any | None = None,
+      azure_deployment: str | None = None,
       openai_schema: schemas.openai.OpenAISchema | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float | None = None,
@@ -122,6 +127,11 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       api_key: API key for OpenAI service.
       base_url: Base URL for OpenAI service.
       organization: Optional OpenAI organization ID.
+      azure_endpoint: Azure OpenAI endpoint URL.
+      api_version: Azure OpenAI API version.
+      azure_ad_token: Azure Active Directory token for Azure OpenAI.
+      azure_ad_token_provider: Callable provider for Azure AD tokens.
+      azure_deployment: Azure OpenAI deployment name.
       openai_schema: Optional schema for structured output.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
@@ -148,6 +158,11 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.api_key = api_key
     self.base_url = base_url
     self.organization = organization
+    self.azure_endpoint = azure_endpoint
+    self.api_version = api_version
+    self.azure_ad_token = azure_ad_token
+    self.azure_ad_token_provider = azure_ad_token_provider
+    self.azure_deployment = azure_deployment
     self.openai_schema = None
     self.format_type = format_type
     self.temperature = temperature
@@ -164,11 +179,28 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
     # Keep SDK initialization after schema validation so LangExtract reports
     # configuration errors before any client-side transport checks.
-    self._client = openai.OpenAI(
-        api_key=self.api_key,
-        base_url=self.base_url,
-        organization=self.organization,
-    )
+    if (
+        self.azure_endpoint
+        or self.api_version
+        or self.azure_ad_token
+        or self.azure_ad_token_provider
+        or self.azure_deployment
+    ):
+      self._client = openai.AzureOpenAI(
+          api_key=self.api_key,
+          azure_endpoint=self.azure_endpoint,
+          api_version=self.api_version,
+          azure_ad_token=self.azure_ad_token,
+          azure_ad_token_provider=self.azure_ad_token_provider,
+          azure_deployment=self.azure_deployment,
+          organization=self.organization,
+      )
+    else:
+      self._client = openai.OpenAI(
+          api_key=self.api_key,
+          base_url=self.base_url,
+          organization=self.organization,
+      )
 
   def _validate_schema_config(self) -> None:
     """Rejects schema settings the OpenAI API cannot honor."""

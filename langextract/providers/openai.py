@@ -46,6 +46,13 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
   api_key: str | None = None
   base_url: str | None = None
   organization: str | None = None
+  azure_endpoint: str | None = None
+  api_version: str | None = None
+  azure_ad_token: str | None = None
+  azure_ad_token_provider: Any | None = dataclasses.field(
+      default=None, repr=False, compare=False
+  )
+  azure_deployment: str | None = None
   openai_schema: schemas.openai.OpenAISchema | None = dataclasses.field(
       default=None, repr=False, compare=False
   )
@@ -171,7 +178,19 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self._batch_cfg = openai_batch.BatchConfig.from_dict(batch_cfg_dict)
     self._extra_kwargs = kwargs or {}
 
-    if not self.api_key:
+    use_azure_client = any((
+        self.azure_endpoint,
+        self.api_version,
+        self.azure_ad_token,
+        self.azure_ad_token_provider,
+        self.azure_deployment,
+    ))
+
+    if not (
+        self.api_key
+        or (use_azure_client and self.azure_ad_token)
+        or (use_azure_client and self.azure_ad_token_provider)
+    ):
       raise exceptions.InferenceConfigError('API key not provided.')
 
     if openai_schema is not None:
@@ -179,13 +198,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
     # Keep SDK initialization after schema validation so LangExtract reports
     # configuration errors before any client-side transport checks.
-    if (
-        self.azure_endpoint
-        or self.api_version
-        or self.azure_ad_token
-        or self.azure_ad_token_provider
-        or self.azure_deployment
-    ):
+    if use_azure_client:
       self._client = openai.AzureOpenAI(
           api_key=self.api_key,
           azure_endpoint=self.azure_endpoint,

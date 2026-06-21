@@ -370,6 +370,28 @@ result = lx.extract(
 )
 ```
 
+For Azure OpenAI, use the OpenAI provider with Azure client settings in
+`provider_kwargs`. Use your Azure deployment name as `model_id`.
+
+```python
+from langextract.factory import ModelConfig
+
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    config=ModelConfig(
+        model_id="my-azure-deployment",
+        provider="openai",
+        provider_kwargs={
+            "api_key": "azure-api-key",
+            "azure_endpoint": "https://example.openai.azure.com",
+            "api_version": "2024-10-21",
+        },
+    ),
+)
+```
+
 ## Using Local LLMs with Ollama
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:
 

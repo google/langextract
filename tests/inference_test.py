@@ -908,6 +908,59 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertNotIn("api_version", call_args.kwargs)
     self.assertNotIn("azure_deployment", call_args.kwargs)
 
+  @mock.patch("openai.AzureOpenAI")
+  @mock.patch("openai.OpenAI")
+  def test_openai_azure_client_accepts_ad_token_without_api_key(
+      self, mock_openai_class, mock_azure_openai_class
+  ):
+    """Azure OpenAI can authenticate with an AAD token instead of an API key."""
+    mock_client = mock.Mock()
+    mock_azure_openai_class.return_value = mock_client
+
+    openai.OpenAILanguageModel(
+        azure_endpoint="https://example.openai.azure.com",
+        api_version="2024-10-21",
+        azure_ad_token="test-token",
+    )
+
+    mock_openai_class.assert_not_called()
+    mock_azure_openai_class.assert_called_once_with(
+        api_key=None,
+        azure_endpoint="https://example.openai.azure.com",
+        api_version="2024-10-21",
+        azure_ad_token="test-token",
+        azure_ad_token_provider=None,
+        azure_deployment=None,
+        organization=None,
+    )
+
+  @mock.patch("openai.AzureOpenAI")
+  @mock.patch("openai.OpenAI")
+  def test_openai_azure_client_accepts_ad_token_provider_without_api_key(
+      self, mock_openai_class, mock_azure_openai_class
+  ):
+    """Azure OpenAI can authenticate with an AAD token provider."""
+    mock_client = mock.Mock()
+    mock_azure_openai_class.return_value = mock_client
+    token_provider = mock.Mock(return_value="test-token")
+
+    openai.OpenAILanguageModel(
+        azure_endpoint="https://example.openai.azure.com",
+        api_version="2024-10-21",
+        azure_ad_token_provider=token_provider,
+    )
+
+    mock_openai_class.assert_not_called()
+    mock_azure_openai_class.assert_called_once_with(
+        api_key=None,
+        azure_endpoint="https://example.openai.azure.com",
+        api_version="2024-10-21",
+        azure_ad_token=None,
+        azure_ad_token_provider=token_provider,
+        azure_deployment=None,
+        organization=None,
+    )
+
   @mock.patch("openai.OpenAI")
   def test_openai_runtime_kwargs_override(self, mock_openai_class):
     """Test that runtime kwargs override stored kwargs."""

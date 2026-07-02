@@ -21,6 +21,7 @@ transform the textual output of an LLM into structured data.
 from __future__ import annotations
 
 import abc
+import bisect
 import collections
 from collections.abc import Iterator, Mapping, Sequence
 import difflib
@@ -62,6 +63,13 @@ _VALID_FUZZY_ALGORITHMS: Final[frozenset[str]] = frozenset({
     _FUZZY_ALGORITHM_LCS,
     _FUZZY_ALGORITHM_LEGACY,
 })
+_EXACT_ALGORITHM_DP = "dp"
+_EXACT_ALGORITHM_DIFFLIB = "difflib"
+_DEFAULT_EXACT_ALGORITHM = _EXACT_ALGORITHM_DP
+_VALID_EXACT_ALGORITHMS: Final[frozenset[str]] = frozenset({
+    _EXACT_ALGORITHM_DP,
+    _EXACT_ALGORITHM_DIFFLIB,
+})
 
 # Default suffix for extraction index keys (e.g., "entity_index")
 DEFAULT_INDEX_SUFFIX = "_index"  # Suffix for index fields in extraction sorting
@@ -71,6 +79,7 @@ ALIGNMENT_PARAM_KEYS: Final[frozenset[str]] = frozenset({
     "fuzzy_alignment_threshold",
     "fuzzy_alignment_algorithm",
     "fuzzy_alignment_min_density",
+    "exact_alignment_algorithm",
     "accept_match_lesser",
     "suppress_parse_errors",
 })
@@ -328,6 +337,7 @@ class Resolver(AbstractResolver):
       *,
       fuzzy_alignment_algorithm: str = _DEFAULT_FUZZY_ALGORITHM,
       fuzzy_alignment_min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY,
+      exact_alignment_algorithm: str = _DEFAULT_EXACT_ALGORITHM,
       **kwargs,
   ) -> Iterator[data.Extraction]:
     """Aligns annotated extractions with source text.
@@ -346,6 +356,8 @@ class Resolver(AbstractResolver):
         will be removed in a future release). Keyword-only.
       fuzzy_alignment_min_density: Minimum ratio of matched tokens to source
         span length (LCS only). Keyword-only.
+      exact_alignment_algorithm: "dp" (default) or "difflib" (legacy).
+        Keyword-only.
       **kwargs: Additional parameters.
 
     Yields:
@@ -372,6 +384,7 @@ class Resolver(AbstractResolver):
         fuzzy_alignment_threshold=fuzzy_alignment_threshold,
         fuzzy_alignment_algorithm=fuzzy_alignment_algorithm,
         fuzzy_alignment_min_density=fuzzy_alignment_min_density,
+        exact_alignment_algorithm=exact_alignment_algorithm,
         accept_match_lesser=accept_match_lesser,
         tokenizer_impl=tokenizer_inst,
     )
@@ -787,6 +800,7 @@ class WordAligner:
       *,
       fuzzy_alignment_algorithm: str = _DEFAULT_FUZZY_ALGORITHM,
       fuzzy_alignment_min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY,
+      exact_alignment_algorithm: str = _DEFAULT_EXACT_ALGORITHM,
   ) -> Sequence[Sequence[data.Extraction]]:
     """Aligns extractions with their positions in the source text.
 
@@ -818,11 +832,21 @@ class WordAligner:
         will be removed in a future release). Keyword-only.
       fuzzy_alignment_min_density: Minimum ratio of matched tokens to source
         span length (LCS only). Keyword-only.
+      exact_alignment_algorithm: "dp" (default) aligns exact matches via
+        an order-preserving occurrence DP, so repeated mentions map to
+        successive occurrences and spans of different extractions may
+        overlap. "difflib" restores the legacy greedy behavior with
+        non-overlapping exact spans. Keyword-only.
 
     Returns:
       A sequence of extractions aligned with the source text, including token
       intervals.
     """
+    if exact_alignment_algorithm not in _VALID_EXACT_ALGORITHMS:
+      raise ValueError(
+          f"Invalid exact_alignment_algorithm {exact_alignment_algorithm!r};"
+          f" expected one of {sorted(_VALID_EXACT_ALGORITHMS)}."
+      )
     if enable_fuzzy_alignment:
       if fuzzy_alignment_algorithm not in _VALID_FUZZY_ALGORITHMS:
         raise ValueError(
@@ -918,6 +942,22 @@ class WordAligner:
     exact_matches = 0
     lesser_matches = 0
 
+    # Track DP-aligned extractions by id(): duplicate extractions
+    # compare equal, so a value-based set would conflate them.
+    dp_matched_extraction_ids: set[int] = set()
+    if exact_alignment_algorithm == _EXACT_ALGORITHM_DP:
+      dp_matched = _apply_monotonic_exact_matches(
+          [ext for ext, _ in index_to_extraction_group.values()],
+          source_tokens,
+          tokenized_text,
+          token_offset,
+          char_offset,
+          tokenizer_impl=tokenizer_impl,
+      )
+      exact_matches += len(dp_matched)
+      aligned_extractions.extend(dp_matched)
+      dp_matched_extraction_ids = {id(ext) for ext in dp_matched}
+
     # Exact matching phase
     for i, j, n in self._get_matching_blocks()[:-1]:
       extraction, _ = index_to_extraction_group.get(j, (None, None))
@@ -927,6 +967,8 @@ class WordAligner:
             " Difflib matching_blocks",
             j,
         )
+        continue
+      if id(extraction) in dp_matched_extraction_ids:
         continue
 
       extraction.token_interval = tokenizer_lib.TokenInterval(
@@ -1029,6 +1071,176 @@ class WordAligner:
         "Final aligned extraction groups: %s", aligned_extraction_groups
     )
     return aligned_extraction_groups
+
+
+def _find_token_occurrences(
+    source_tokens: Sequence[str],
+    extraction_tokens: Sequence[str],
+) -> list[int]:
+  """Returns all start indices of extraction_tokens within source_tokens."""
+  num_source = len(source_tokens)
+  num_extraction = len(extraction_tokens)
+  if num_extraction == 0 or num_source < num_extraction:
+    return []
+  # Normalize so the slice comparison works for any Sequence input.
+  expected = list(extraction_tokens)
+  first_token = expected[0]
+  return [
+      i
+      for i in range(num_source - num_extraction + 1)
+      # Cheap first-token filter before the O(m) slice compare.
+      if source_tokens[i] == first_token
+      and list(source_tokens[i : i + num_extraction]) == expected
+  ]
+
+
+class _ChainNode(typing.NamedTuple):
+  """One selected occurrence in a monotonic match chain."""
+
+  extraction_index: int
+  start: int
+  parent: _ChainNode | None
+
+
+class _FrontierEntry(typing.NamedTuple):
+  """Pareto-optimal: no kept chain ends earlier with at least this weight."""
+
+  end: int
+  weight: int
+  node: _ChainNode
+
+
+def _select_monotonic_matches(
+    occurrence_lists: Sequence[Sequence[int]],
+    extraction_lengths: Sequence[int],
+) -> dict[int, int]:
+  """Selects exact-match occurrences maximizing total matched tokens.
+
+  Chooses at most one occurrence per extraction, keeping selections in
+  extraction output order without overlap. Token-count weighting
+  preserves the legacy preference for longer extractions in contested
+  regions; ties prefer the earliest-ending chain, so repeated mentions
+  resolve to successive occurrences.
+
+  Args:
+    occurrence_lists: Per-extraction sorted start token indices, in
+      extraction output order.
+    extraction_lengths: Per-extraction token counts.
+
+  Returns:
+    Dict mapping extraction index to its selected start token index.
+  """
+  # Frontier entries are strictly increasing in both end and weight.
+  frontier: list[_FrontierEntry] = []
+  frontier_end = operator.attrgetter("end")
+
+  def best_ending_at_or_before(position: int) -> _FrontierEntry | None:
+    idx = bisect.bisect_right(frontier, position, key=frontier_end)
+    return frontier[idx - 1] if idx else None
+
+  def insert_if_undominated(entry: _FrontierEntry) -> None:
+    covering = best_ending_at_or_before(entry.end)
+    if covering is not None and covering.weight >= entry.weight:
+      return
+    low = bisect.bisect_left(frontier, entry.end, key=frontier_end)
+    # Evict entries ending at or after entry.end with no more weight;
+    # they can never outscore entry as a predecessor.
+    dominated_end = low
+    while (
+        dominated_end < len(frontier)
+        and frontier[dominated_end].weight <= entry.weight
+    ):
+      dominated_end += 1
+    frontier[low:dominated_end] = [entry]
+
+  for extraction_index, (occurrences, length) in enumerate(
+      zip(occurrence_lists, extraction_lengths, strict=True)
+  ):
+    if not occurrences or length == 0:
+      continue
+    # Candidates are computed against the pre-insert frontier so an
+    # extraction cannot extend a chain that already contains it.
+    candidates = []
+    for start in occurrences:
+      predecessor = best_ending_at_or_before(start)
+      weight = length + (predecessor.weight if predecessor else 0)
+      parent = predecessor.node if predecessor else None
+      candidates.append(
+          _FrontierEntry(
+              start + length,
+              weight,
+              _ChainNode(extraction_index, start, parent),
+          )
+      )
+    for candidate in candidates:
+      insert_if_undominated(candidate)
+
+  if not frontier:
+    return {}
+  selection: dict[int, int] = {}
+  node: _ChainNode | None = frontier[-1].node
+  while node is not None:
+    selection[node.extraction_index] = node.start
+    node = node.parent
+  return selection
+
+
+def _apply_monotonic_exact_matches(
+    ordered_extractions: Sequence[data.Extraction],
+    source_tokens: Sequence[str],
+    tokenized_text: tokenizer_lib.TokenizedText,
+    token_offset: int,
+    char_offset: int,
+    tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
+) -> list[data.Extraction]:
+  """Aligns extractions exactly via the monotonic occurrence DP.
+
+  Extractions the DP cannot place are left untouched for the difflib
+  (lesser-match) and fuzzy fallback phases.
+
+  Args:
+    ordered_extractions: Extractions in model output order.
+    source_tokens: Lowercased source tokens.
+    tokenized_text: The tokenized source text, for interval lookup.
+    token_offset: Token offset of the current chunk.
+    char_offset: Character offset of the current chunk.
+    tokenizer_impl: Optional tokenizer instance.
+
+  Returns:
+    The extractions aligned by the DP.
+  """
+  extraction_token_lists = [
+      list(
+          _tokenize_with_lowercase(
+              extraction.extraction_text, tokenizer_inst=tokenizer_impl
+          )
+      )
+      for extraction in ordered_extractions
+  ]
+  selection = _select_monotonic_matches(
+      [
+          _find_token_occurrences(source_tokens, tokens)
+          for tokens in extraction_token_lists
+      ],
+      [len(tokens) for tokens in extraction_token_lists],
+  )
+  matched: list[data.Extraction] = []
+  for extraction_index, start in selection.items():
+    extraction = ordered_extractions[extraction_index]
+    num_tokens = len(extraction_token_lists[extraction_index])
+    extraction.token_interval = tokenizer_lib.TokenInterval(
+        start_index=start + token_offset,
+        end_index=start + num_tokens + token_offset,
+    )
+    start_token = tokenized_text.tokens[start]
+    end_token = tokenized_text.tokens[start + num_tokens - 1]
+    extraction.char_interval = data.CharInterval(
+        start_pos=char_offset + start_token.char_interval.start_pos,
+        end_pos=char_offset + end_token.char_interval.end_pos,
+    )
+    extraction.alignment_status = data.AlignmentStatus.MATCH_EXACT
+    matched.append(extraction)
+  return matched
 
 
 def _tokenize_with_lowercase(

@@ -15,16 +15,31 @@
 """Core data types for LangExtract."""
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import dataclasses
 import enum
 import textwrap
+from typing import TypeAlias
 
 __all__ = [
     'ScoredOutput',
     'FormatType',
     'ConstraintType',
     'Constraint',
+    'JsonSchema',
+    'JsonValue',
 ]
+
+JsonValue: TypeAlias = (
+    str
+    | int
+    | float
+    | bool
+    | None
+    | Mapping[str, 'JsonValue']
+    | Sequence['JsonValue']
+)
+JsonSchema: TypeAlias = Mapping[str, JsonValue]
 
 
 class FormatType(enum.Enum):

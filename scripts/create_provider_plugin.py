@@ -129,36 +129,36 @@ from langextract_{package_name}.schema import {provider_name}Schema"""
 
   schema_init = (
       """
-                self.response_schema = kwargs.get('response_schema')
-                self.structured_output = kwargs.get('structured_output', False)"""
+        self.response_schema = kwargs.get('response_schema')
+        self.structured_output = kwargs.get('structured_output', False)"""
       if with_schema
       else ""
   )
 
   schema_methods = f"""
 
-            @classmethod
-            def get_schema_class(cls):
-                \"\"\"Tell LangExtract about our schema support.\"\"\"
-                from langextract_{package_name}.schema import {provider_name}Schema
-                return {provider_name}Schema
+    @classmethod
+    def get_schema_class(cls):
+        \"\"\"Tell LangExtract about our schema support.\"\"\"
+        from langextract_{package_name}.schema import {provider_name}Schema
+        return {provider_name}Schema
 
-            def apply_schema(self, schema_instance):
-                \"\"\"Apply or clear schema configuration.\"\"\"
-                super().apply_schema(schema_instance)
-                if schema_instance:
-                    config = schema_instance.to_provider_config()
-                    self.response_schema = config.get('response_schema')
-                    self.structured_output = config.get('structured_output', False)
-                else:
-                    self.response_schema = None
-                    self.structured_output = False""" if with_schema else ""
+    def apply_schema(self, schema_instance):
+        \"\"\"Apply or clear schema configuration.\"\"\"
+        super().apply_schema(schema_instance)
+        if schema_instance:
+            config = schema_instance.to_provider_config()
+            self.response_schema = config.get('response_schema')
+            self.structured_output = config.get('structured_output', False)
+        else:
+            self.response_schema = None
+            self.structured_output = False""" if with_schema else ""
 
   schema_infer = (
       """
-                    api_params = {}
-                    if self.response_schema:
-                        api_params['response_schema'] = self.response_schema
+            api_params = {}
+            if self.response_schema:
+                api_params['response_schema'] = self.response_schema
                     # result = self.client.generate(prompt, **api_params)"""
       if with_schema
       else """
@@ -166,47 +166,47 @@ from langextract_{package_name}.schema import {provider_name}Schema"""
   )
 
   provider_content = textwrap.dedent(f'''\
-        """Provider implementation for {provider_name}."""
+"""Provider implementation for {provider_name}."""
 
-        import os
-        import langextract as lx{schema_imports}
+import os
+import langextract as lx{schema_imports}
 
 
-        @lx.providers.registry.register({patterns_str}, priority=10)
-        class {provider_name}LanguageModel(lx.inference.BaseLanguageModel):
-            """LangExtract provider for {provider_name}.
+@lx.providers.registry.register({patterns_str}, priority=10)
+class {provider_name}LanguageModel(lx.inference.BaseLanguageModel):
+    """LangExtract provider for {provider_name}.
 
-            This provider handles model IDs matching: {patterns}
-            """
+    This provider handles model IDs matching: {patterns}
+    """
 
-            def __init__(self, model_id: str, api_key: str = None, **kwargs):
-                """Initialize the {provider_name} provider.
+    def __init__(self, model_id: str, api_key: str = None, **kwargs):
+        """Initialize the {provider_name} provider.
 
-                Args:
-                    model_id: The model identifier.
-                    api_key: API key for authentication.
-                    **kwargs: Additional provider-specific parameters.
-                """
-                super().__init__()
-                self.model_id = model_id
-                self.api_key = api_key or os.environ.get('{env_var_safe}'){schema_init}
+        Args:
+            model_id: The model identifier.
+            api_key: API key for authentication.
+            **kwargs: Additional provider-specific parameters.
+        """
+        super().__init__()
+        self.model_id = model_id
+        self.api_key = api_key or os.environ.get('{env_var_safe}'){schema_init}
 
-                # self.client = YourClient(api_key=self.api_key)
-                self._extra_kwargs = kwargs{schema_methods}
+        # self.client = YourClient(api_key=self.api_key)
+        self._extra_kwargs = kwargs{schema_methods}
 
-            def infer(self, batch_prompts, **kwargs):
-                """Run inference on a batch of prompts.
+    def infer(self, batch_prompts, **kwargs):
+        """Run inference on a batch of prompts.
 
-                Args:
-                    batch_prompts: List of prompts to process.
-                    **kwargs: Additional inference parameters.
+        Args:
+            batch_prompts: List of prompts to process.
+            **kwargs: Additional inference parameters.
 
-                Yields:
-                    Lists of ScoredOutput objects, one per prompt.
-                """
-                for prompt in batch_prompts:{schema_infer}
-                    result = f"Mock response for: {{prompt[:50]}}..."
-                    yield [lx.inference.ScoredOutput(score=1.0, output=result)]
+        Yields:
+            Lists of ScoredOutput objects, one per prompt.
+        """
+        for prompt in batch_prompts:{schema_infer}
+            result = f"Mock response for: {{prompt[:50]}}..."
+            yield [lx.inference.ScoredOutput(score=1.0, output=result)]
     ''')
 
   (package_dir / "provider.py").write_text(provider_content, encoding="utf-8")

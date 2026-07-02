@@ -1022,6 +1022,63 @@ class WordAligner:
               extraction.extraction_text,
           )
 
+    # Substring fallback alignment (Chinese/CJK-friendly).
+    # If token-based exact+fuzzy alignment fails because the tokenizer groups
+    # multiple CJK words into a single token, try aligning via raw substring.
+    occupied: list[tuple[int, int]] = []
+    for e in aligned_extractions:
+      if (
+          e.char_interval
+          and e.char_interval.start_pos is not None
+          and e.char_interval.end_pos is not None
+      ):
+        occupied.append((e.char_interval.start_pos - char_offset, e.char_interval.end_pos - char_offset))
+
+    def _overlaps(a: tuple[int, int], b: tuple[int, int]) -> bool:
+      return a[0] < b[1] and b[0] < a[1]
+
+    def _find_non_overlapping_span(needle: str) -> tuple[int, int] | None:
+      if not needle:
+        return None
+      start = 0
+      while True:
+        idx = source_text.find(needle, start)
+        if idx == -1:
+          return None
+        span = (idx, idx + len(needle))
+        if not any(_overlaps(span, used) for used in occupied):
+          return span
+        start = idx + 1
+
+    substring_aligned = 0
+    still_unaligned = []
+    for extraction, _ in index_to_extraction_group.values():
+      if extraction in aligned_extractions:
+        continue
+      still_unaligned.append(extraction)
+
+    for extraction in still_unaligned:
+      span = _find_non_overlapping_span(extraction.extraction_text)
+      if span is None:
+        continue
+      start_pos, end_pos = span
+      extraction.char_interval = data.CharInterval(
+          start_pos=char_offset + start_pos,
+          end_pos=char_offset + end_pos,
+      )
+      extraction.token_interval = None
+      extraction.alignment_status = data.AlignmentStatus.MATCH_SUBSTRING
+      aligned_extractions.append(extraction)
+      occupied.append(span)
+      substring_aligned += 1
+
+    still_unaligned_post = []
+    for extraction, _ in index_to_extraction_group.values():
+      if extraction not in aligned_extractions:
+        still_unaligned_post.append(extraction)
+    # NOTE: Intentionally no logging here; alignment failures will surface as
+    # missing char_interval, which visualization can handle.
+
     for extraction, group_index in index_to_extraction_group.values():
       aligned_extraction_groups[group_index].append(extraction)
 

@@ -22,6 +22,7 @@ from langextract import visualization
 from langextract.core import data
 
 _PALETTE = visualization._PALETTE
+_HTML_CHARSET_META = visualization._HTML_CHARSET_META
 _VISUALIZATION_CSS = visualization._VISUALIZATION_CSS
 
 
@@ -134,6 +135,7 @@ class VisualizationTest(absltest.TestCase):
 
     actual_html = visualization.visualize(doc)
 
+    self.assertTrue(actual_html.startswith(_HTML_CHARSET_META))
     # Verify expected components appear in output
     for component in expected_components:
       self.assertIn(component, actual_html)
@@ -149,7 +151,7 @@ class VisualizationTest(absltest.TestCase):
         " animate.</p></div>"
     )
     css_html = _VISUALIZATION_CSS
-    expected_html = css_html + body_html
+    expected_html = _HTML_CHARSET_META + css_html + body_html
 
     actual_html = visualization.visualize(doc)
 

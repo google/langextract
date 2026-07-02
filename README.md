@@ -110,6 +110,11 @@ result = lx.extract(
 )
 ```
 
+For advanced constraints beyond examples, such as enum values on extraction
+attributes, Gemini and OpenAI support `output_schema` with or without
+few-shot examples. See
+[Custom output schemas](docs/examples/output_schema.md).
+
 > **Model Selection**: `gemini-3.5-flash` is the recommended default, offering strong extraction quality for LangExtract's schema-constrained workflows. For high-volume or cost-sensitive workloads, consider the current stable Flash-Lite model, `gemini-3.1-flash-lite`; for highly complex tasks requiring deeper reasoning, evaluate a current Gemini Pro model from the official model documentation. For large-scale or production use, a paid Gemini tier is suggested to increase throughput and avoid rate limits. See the [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits#usage-tiers) for details.
 >
 > **Model Lifecycle**: Note that Gemini models have a lifecycle with defined retirement dates. Users should consult the [official model version documentation](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions) to stay informed about the latest stable and legacy versions.
@@ -158,7 +163,9 @@ This approach can extract hundreds of entities from full novels while maintainin
 
 ### Vertex AI Batch Processing
 
-Save costs on large-scale tasks by enabling Vertex AI Batch API: `language_model_params={"vertexai": True, "batch": {"enabled": True}}`.
+Save costs on large-scale tasks by enabling Vertex AI Batch API with
+`language_model_params` that include `vertexai=True`, `project`, `location`,
+and a `batch` config.
 
 See an example of the Vertex AI Batch API usage in [this example](docs/examples/batch_api_example.md).
 
@@ -320,7 +327,11 @@ result = lx.extract(
 )
 ```
 
-The OpenAI provider uses JSON mode and auto-determines fence and schema behavior — leave `fence_output` and `use_schema_constraints` unset.
+The OpenAI provider uses structured outputs or JSON mode and auto-determines
+fence behavior — leave `fence_output` and `use_schema_constraints` unset.
+`output_schema` is also supported for OpenAI models that support structured
+outputs; provide a LangExtract output-envelope JSON schema, preferably with the
+`lx.schema` helpers.
 
 For large, non-latency-sensitive OpenAI workloads, enable the OpenAI Batch API
 with `language_model_params`. Batch mode is opt-in and falls back to realtime
@@ -374,7 +385,9 @@ result = lx.extract(
 )
 ```
 
-The Ollama provider exposes `FormatModeSchema` for JSON mode. Leave `fence_output` and `use_schema_constraints` unset so the factory auto-configures from the provider's schema.
+The Ollama provider exposes `FormatModeSchema` for JSON mode. Leave `fence_output`
+and `use_schema_constraints` unset so the factory auto-configures from the provider's
+schema. Ollama does not currently support `output_schema`.
 
 **Quick setup:** Install Ollama from [ollama.com](https://ollama.com/), run `ollama pull gemma2:2b`, then `ollama serve`.
 

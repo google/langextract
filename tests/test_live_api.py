@@ -1182,3 +1182,78 @@ class TestLiveAPIOpenAI(unittest.TestCase):
 
     assert result is not None
     self.assertIsInstance(result, lx.data.AnnotatedDocument)
+
+
+class TestLiveAPIOutputSchema(unittest.TestCase):
+  """Live tests for user-provided output_schema support."""
+
+  _OUTPUT_SCHEMA = {
+      "type": "object",
+      "properties": {
+          "extractions": {
+              "type": "array",
+              "items": {
+                  "type": "object",
+                  "properties": {
+                      "condition": {"type": "string"},
+                      "condition_attributes": {
+                          "type": "object",
+                          "properties": {
+                              "status": {
+                                  "type": "string",
+                                  "enum": ["active", "resolved"],
+                              }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": False,
+                      },
+                  },
+                  "required": ["condition", "condition_attributes"],
+                  "additionalProperties": False,
+              },
+          }
+      },
+      "required": ["extractions"],
+      "additionalProperties": False,
+  }
+  _INPUT_TEXT = "Patient has active hypertension and a resolved infection."
+
+  def _assert_schema_constrained_extractions(self, result):
+    self.assertIsInstance(result, lx.data.AnnotatedDocument)
+    self.assertTrue(result.extractions)
+    for extraction in result.extractions:
+      self.assertEqual(extraction.extraction_class, "condition")
+      if extraction.attributes:
+        self.assertIn(
+            extraction.attributes.get("status"), ("active", "resolved")
+        )
+
+  @skip_if_no_gemini
+  @live_api
+  def test_gemini_extract_with_output_schema(self):
+    result = lx.extract(
+        text_or_documents=self._INPUT_TEXT,
+        prompt_description=(
+            "Extract medical conditions with their status attribute."
+        ),
+        model_id=DEFAULT_GEMINI_MODEL,
+        api_key=GEMINI_API_KEY,
+        output_schema=self._OUTPUT_SCHEMA,
+    )
+
+    self._assert_schema_constrained_extractions(result)
+
+  @skip_if_no_openai
+  @live_api
+  def test_openai_extract_with_output_schema(self):
+    result = lx.extract(
+        text_or_documents=self._INPUT_TEXT,
+        prompt_description=(
+            "Extract medical conditions with their status attribute."
+        ),
+        model_id=DEFAULT_OPENAI_MODEL,
+        api_key=OPENAI_API_KEY,
+        output_schema=self._OUTPUT_SCHEMA,
+    )
+
+    self._assert_schema_constrained_extractions(result)

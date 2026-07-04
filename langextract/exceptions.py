@@ -17,6 +17,7 @@
 This module re-exports exceptions from core.exceptions for backward compatibility.
 All new code should import directly from langextract.core.exceptions.
 """
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations

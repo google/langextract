@@ -48,4 +48,9 @@ BUILTIN_PROVIDERS: list[ProviderConfig] = [
         'target': 'langextract.providers.openai:OpenAILanguageModel',
         'priority': patterns.OPENAI_PRIORITY,
     },
+    {
+        'patterns': patterns.MINIMAX_PATTERNS,
+        'target': 'langextract.providers.minimax:MiniMaxLanguageModel',
+        'priority': patterns.MINIMAX_PRIORITY,
+    },
 ]

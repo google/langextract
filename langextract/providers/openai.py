@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """OpenAI provider for LangExtract."""
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations

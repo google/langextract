@@ -18,6 +18,7 @@ Note: This file contains test helper classes that intentionally have
 few public methods and define attributes outside __init__. These
 pylint warnings are expected for test fixtures.
 """
+
 # pylint: disable=attribute-defined-outside-init
 
 from unittest import mock

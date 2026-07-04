@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Base interfaces for language models."""
+
 from __future__ import annotations
 
 import abc

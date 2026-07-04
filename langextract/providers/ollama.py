@@ -79,6 +79,7 @@ Prerequisites:
     2. Pull the model: ollama pull gemma2:2b
     3. Ollama server will start automatically when you use extract()
 """
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations

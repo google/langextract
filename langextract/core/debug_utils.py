@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Debug utilities for LangExtract."""
+
 from __future__ import annotations
 
 import functools

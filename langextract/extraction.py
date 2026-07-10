@@ -140,6 +140,8 @@ def extract(
         'fuzzy_alignment_threshold' (float, 0.75),
         'fuzzy_alignment_algorithm' (str, "lcs"; "legacy" is deprecated),
         'fuzzy_alignment_min_density' (float, 1/3),
+        'exact_alignment_algorithm' (str, "dp"; "difflib" restores the
+        legacy exact-match behavior),
         'accept_match_lesser' (bool, True).
       language_model_params: Additional provider-specific constructor kwargs,
         such as Gemini retry settings ('max_retries', 'retry_delay',

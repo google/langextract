@@ -25,6 +25,7 @@ import warnings
 from absl.testing import absltest
 from absl.testing import parameterized
 
+from langextract import schema as lx_schema
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
@@ -759,6 +760,253 @@ class SchemaValidationTest(parameterized.TestCase):
 
       self.assertEmpty(
           w, "FormatModeSchema should not issue validation warnings"
+      )
+
+
+class OutputSchemaHelperTest(parameterized.TestCase):
+  """Tests for the public lx.schema output-schema builders."""
+
+  def test_extraction_item_schema_without_attributes(self):
+    item = lx_schema.extraction_item_schema("condition")
+
+    self.assertEqual(
+        item,
+        {
+            "type": "object",
+            "properties": {"condition": {"type": "string"}},
+            "required": ["condition"],
+            "additionalProperties": False,
+        },
+    )
+
+  def test_extraction_item_schema_with_attributes(self):
+    item = lx_schema.extraction_item_schema(
+        "condition",
+        attributes={"status": {"type": "string", "enum": ["active"]}},
+    )
+
+    self.assertEqual(
+        item["properties"]["condition_attributes"],
+        {
+            "type": "object",
+            "properties": {"status": {"type": "string", "enum": ["active"]}},
+            "required": ["status"],
+            "additionalProperties": False,
+        },
+    )
+    self.assertCountEqual(
+        item["required"], ["condition", "condition_attributes"]
+    )
+
+  def test_extractions_schema_wraps_item_schema(self):
+    item = lx_schema.extraction_item_schema("condition")
+
+    envelope = lx_schema.extractions_schema(item)
+
+    self.assertEqual(
+        envelope["properties"][data.EXTRACTIONS_KEY]["items"], item
+    )
+    self.assertEqual(envelope["required"], [data.EXTRACTIONS_KEY])
+    self.assertIs(envelope["additionalProperties"], False)
+    lx_schema.validate_output_schema(envelope)
+
+  def test_extractions_schema_wraps_multiple_items_in_any_of(self):
+    condition = lx_schema.extraction_item_schema("condition")
+    medication = lx_schema.extraction_item_schema("medication")
+
+    envelope = lx_schema.extractions_schema(condition, medication)
+
+    self.assertEqual(
+        envelope["properties"][data.EXTRACTIONS_KEY]["items"],
+        {"anyOf": [condition, medication]},
+    )
+    lx_schema.validate_output_schema(envelope)
+
+  def test_builders_copy_input_schemas(self):
+    attribute_schema = {"type": "string"}
+
+    item = lx_schema.extraction_item_schema(
+        "condition", attributes={"status": attribute_schema}
+    )
+    attribute_schema["enum"] = ["mutated"]
+
+    status_schema = item["properties"]["condition_attributes"]["properties"][
+        "status"
+    ]
+    self.assertNotIn("enum", status_schema)
+
+  @parameterized.named_parameters(
+      dict(testcase_name="empty_class", extraction_class=""),
+      dict(testcase_name="reserved_suffix", extraction_class="foo_attributes"),
+      dict(testcase_name="reserved_key", extraction_class="extraction_text"),
+  )
+  def test_extraction_item_schema_rejects_invalid_class(self, extraction_class):
+    with self.assertRaises(exceptions.InferenceConfigError):
+      lx_schema.extraction_item_schema(extraction_class)
+
+
+class OutputSchemaValidationTest(parameterized.TestCase):
+  """Tests for validate_output_schema envelope checks."""
+
+  def test_accepts_envelope_and_returns_isolated_copy(self):
+    envelope = lx_schema.extractions_schema(
+        lx_schema.extraction_item_schema("condition")
+    )
+
+    validated = lx_schema.validate_output_schema(envelope)
+
+    self.assertEqual(validated, envelope)
+    validated["properties"]["extra"] = {"type": "string"}
+    self.assertNotIn("extra", envelope["properties"])
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="not_a_mapping",
+          output_schema=["extractions"],
+          error_regex="must be a mapping",
+      ),
+      dict(
+          testcase_name="empty",
+          output_schema={},
+          error_regex="must not be empty",
+      ),
+      dict(
+          testcase_name="non_object_root",
+          output_schema={"type": "array"},
+          error_regex="top-level type",
+      ),
+      dict(
+          testcase_name="missing_required_extractions",
+          output_schema={
+              "type": "object",
+              "properties": {
+                  "extractions": {
+                      "type": "array",
+                      "items": {
+                          "type": "object",
+                          "properties": {"condition": {"type": "string"}},
+                      },
+                  }
+              },
+          },
+          error_regex="required must include 'extractions'",
+      ),
+      dict(
+          testcase_name="extractions_not_array",
+          output_schema={
+              "type": "object",
+              "required": ["extractions"],
+              "properties": {"extractions": {"type": "object"}},
+          },
+          error_regex="array property",
+      ),
+      dict(
+          testcase_name="items_not_object_schema",
+          output_schema={
+              "type": "object",
+              "required": ["extractions"],
+              "properties": {
+                  "extractions": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                  }
+              },
+          },
+          error_regex="inline object schema",
+      ),
+      dict(
+          testcase_name="items_without_properties",
+          output_schema={
+              "type": "object",
+              "required": ["extractions"],
+              "properties": {
+                  "extractions": {
+                      "type": "array",
+                      "items": {"type": "object"},
+                  }
+              },
+          },
+          error_regex="extraction-class properties",
+      ),
+      dict(
+          testcase_name="reserved_item_keys",
+          output_schema={
+              "type": "object",
+              "required": ["extractions"],
+              "properties": {
+                  "extractions": {
+                      "type": "array",
+                      "items": {
+                          "type": "object",
+                          "properties": {
+                              "extraction_class": {"type": "string"},
+                              "extraction_text": {"type": "string"},
+                          },
+                      },
+                  }
+              },
+          },
+          error_regex="extraction_class, extraction_text",
+      ),
+  )
+  def test_rejects_invalid_envelopes(self, output_schema, error_regex):
+    with self.assertRaisesRegex(exceptions.InferenceConfigError, error_regex):
+      lx_schema.validate_output_schema(output_schema)
+
+
+class FromSchemaDictTest(absltest.TestCase):
+  """Tests for provider from_schema_dict implementations."""
+
+  def setUp(self):
+    super().setUp()
+    self.envelope = lx_schema.extractions_schema(
+        lx_schema.extraction_item_schema(
+            "condition",
+            attributes={
+                "status": {"type": "string", "enum": ["active", "resolved"]}
+            },
+        )
+    )
+
+  def test_base_schema_rejects_user_schemas_by_default(self):
+    with self.assertRaises(NotImplementedError):
+      schema.FormatModeSchema.from_schema_dict(self.envelope)
+
+  def test_gemini_from_schema_dict_targets_json_schema_field(self):
+    gemini_schema = schemas.gemini.GeminiSchema.from_schema_dict(self.envelope)
+
+    provider_config = gemini_schema.to_provider_config()
+
+    self.assertEqual(provider_config["response_json_schema"], self.envelope)
+    self.assertEqual(provider_config["response_mime_type"], "application/json")
+    self.assertTrue(gemini_schema.from_output_schema)
+    self.assertTrue(gemini_schema.requires_raw_output)
+
+  def test_gemini_from_schema_dict_validates_envelope(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "array property"
+    ):
+      schemas.gemini.GeminiSchema.from_schema_dict({
+          "type": "object",
+          "required": ["extractions"],
+          "properties": {"extractions": {"type": "object"}},
+      })
+
+  def test_openai_from_schema_dict_builds_response_format(self):
+    openai_schema = schemas.openai.OpenAISchema.from_schema_dict(self.envelope)
+
+    response_format = openai_schema.response_format
+
+    self.assertEqual(response_format["type"], "json_schema")
+    self.assertEqual(response_format["json_schema"]["schema"], self.envelope)
+    self.assertIs(response_format["json_schema"]["strict"], True)
+    self.assertTrue(openai_schema.from_output_schema)
+    self.assertTrue(openai_schema.requires_raw_output)
+
+  def test_openai_from_schema_dict_rejects_invalid_schema_name(self):
+    with self.assertRaisesRegex(exceptions.InferenceConfigError, "schema_name"):
+      schemas.openai.OpenAISchema.from_schema_dict(
+          self.envelope, schema_name="bad name!"
       )
 
 

@@ -29,8 +29,17 @@ from langextract import prompting
 from langextract import resolver
 from langextract.core import base_model
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import format_handler as fh
+from langextract.core import output_schema as output_schema_lib
 from langextract.core import tokenizer as tokenizer_lib
+from langextract.core import types as core_types
+
+
+def _has_preconfigured_output_schema(model: typing.Any) -> bool:
+  return isinstance(model, base_model.BaseLanguageModel) and getattr(
+      model.schema, "from_output_schema", False
+  )
 
 
 def extract(
@@ -57,6 +66,7 @@ def extract(
     config: typing.Any = None,
     model: typing.Any = None,
     *,
+    output_schema: core_types.JsonSchema | None = None,
     fetch_urls: bool = False,
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
@@ -77,6 +87,7 @@ def extract(
         caveats.
       prompt_description: Instructions for what to extract from the text.
       examples: List of ExampleData objects to guide the extraction.
+        Required unless `output_schema` is provided.
       tokenizer: Optional Tokenizer instance to use for chunking and alignment.
         If None, defaults to RegexTokenizer.
       api_key: API key for Gemini or other LLM services (can also use
@@ -129,6 +140,8 @@ def extract(
         'fuzzy_alignment_threshold' (float, 0.75),
         'fuzzy_alignment_algorithm' (str, "lcs"; "legacy" is deprecated),
         'fuzzy_alignment_min_density' (float, 1/3),
+        'exact_alignment_algorithm' (str, "dp"; "difflib" restores the
+        legacy exact-match behavior),
         'accept_match_lesser' (bool, True).
       language_model_params: Additional provider-specific constructor kwargs,
         such as Gemini retry settings ('max_retries', 'retry_delay',
@@ -154,6 +167,11 @@ def extract(
         and config are provided, model takes precedence.
       model: Pre-configured language model to use for extraction. Takes
         precedence over all other parameters including config.
+      output_schema: Optional JSON schema for LangExtract's raw JSON output
+        envelope. It replaces example-derived provider constraints, while
+        examples still guide the prompt when supplied. Use `lx.schema` helpers
+        for common schemas. Supported by Gemini and OpenAI; YAML and forced
+        fences are invalid with output_schema.
       fetch_urls: If True, http(s) strings are fetched via `requests.get`
         with no sanitization (SSRF risk: internal metadata, loopback,
         redirects, DNS rebinding, etc.). Default False; all strings are
@@ -172,17 +190,27 @@ def extract(
       iterable of Documents.
 
   Raises:
-      ValueError: If examples is None or empty.
+      ValueError: If examples is None or empty and neither output_schema nor a
+        preconfigured output-schema model is provided.
       ValueError: If no API key is provided or found in environment variables.
       requests.RequestException: If `fetch_urls=True` and the URL download
         fails.
       pv.PromptAlignmentError: If validation fails in ERROR mode.
   """
-  if not examples:
+  schema_active = output_schema is not None or _has_preconfigured_output_schema(
+      model
+  )
+  if not examples and not schema_active:
     raise ValueError(
         "Examples are required for reliable extraction. Please provide at least"
-        " one ExampleData object with sample extractions."
+        " one ExampleData object with sample extractions, or provide"
+        " output_schema."
     )
+  examples = list(examples or [])
+  # Reject before any model mutation so a caller-provided model is not left
+  # with a schema or fence override from a failed call.
+  if schema_active and fence_output is True:
+    raise exceptions.output_schema_fence_error()
 
   if prompt_validation_level is not pv.PromptValidationLevel.OFF:
     policy_kwargs = {}
@@ -236,9 +264,15 @@ def extract(
 
   if model:
     language_model = model
+    if output_schema is not None:
+      if not isinstance(language_model, base_model.BaseLanguageModel):
+        raise exceptions.unsupported_output_schema_error(
+            type(language_model).__name__
+        )
+      language_model.apply_output_schema(output_schema)
     if fence_output is not None:
       language_model.set_fence_output(fence_output)
-    if use_schema_constraints:
+    if use_schema_constraints and not schema_active:
       warnings.warn(
           "'use_schema_constraints' is ignored when 'model' is provided. "
           "The model should already be configured with schema constraints.",
@@ -246,10 +280,10 @@ def extract(
           stacklevel=2,
       )
   elif config:
-    if use_schema_constraints:
+    if use_schema_constraints and output_schema is None:
       warnings.warn(
           "With 'config', schema constraints are still applied via examples. "
-          "Or pass explicit schema in config.provider_kwargs.",
+          "Or pass output_schema=... for an explicit schema.",
           UserWarning,
           stacklevel=2,
       )
@@ -259,6 +293,7 @@ def extract(
         examples=prompt_template.examples if use_schema_constraints else None,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        output_schema=output_schema,
     )
   else:
     if language_model_type is not None:
@@ -301,6 +336,7 @@ def extract(
         examples=prompt_template.examples if use_schema_constraints else None,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        output_schema=output_schema,
     )
 
   format_handler, remaining_params = fh.FormatHandler.from_resolver_params(
@@ -311,6 +347,11 @@ def extract(
       base_use_wrapper=True,
       base_wrapper_key=data.EXTRACTIONS_KEY,
   )
+
+  if output_schema is not None or _has_preconfigured_output_schema(
+      language_model
+  ):
+    output_schema_lib.validate_output_schema_format_handler(format_handler)
 
   if language_model.schema is not None:
     language_model.schema.validate_format(format_handler)

@@ -192,7 +192,7 @@ result = lx.extract(
     text_or_documents="Your document",
     model_id="gemini-3.5-flash",
     prompt_description="Extract key facts",
-    examples=[...],             # Used for few-shot prompting (required)
+    examples=[...],             # Required unless output_schema is provided
     max_workers=4,              # Parallel processing (provider-dependent)
     max_char_buffer=3000,       # Document chunking
 )
@@ -286,6 +286,7 @@ yourprovider = "langextract_yourprovider:YourProviderLanguageModel"
 #### ☐ **4. (Optional) Add Schema Support** (`schema.py`)
 - [ ] Create schema class inheriting from `langextract.core.schema.BaseSchema`
 - [ ] Implement `from_examples()` class method
+- [ ] Implement `from_schema_dict()` if the provider supports `output_schema`
 - [ ] Implement `to_provider_config()` method
 - [ ] Add `get_schema_class()` to provider
 - [ ] Handle schema in provider's `__init__()` and `infer()`
@@ -499,6 +500,18 @@ When users set `use_schema_constraints=True`, LangExtract will:
 3. Call `to_provider_config()` to get provider-specific kwargs
 4. Pass these kwargs to your provider's `__init__()`
 5. Your provider uses the schema for structured output
+
+For user-authored schemas passed as `output_schema=...`, also implement
+`BaseSchema.from_schema_dict()`. If the provider exposes lower-level schema
+kwargs such as `response_schema`, list them in
+`output_schema_reserved_provider_kwargs()` so LangExtract can reject ambiguous
+requests where both `output_schema` and provider-native schema kwargs are set.
+Schemas returned from `from_schema_dict()` should expose
+`from_output_schema=True`; `BaseLanguageModel.apply_output_schema()` marks
+mutable schema instances automatically, but explicit state is safest for
+dataclass or slots-based schemas.
+Providers that store schema state after construction should override
+`apply_schema()` and call `super().apply_schema(schema_instance)`.
 
 ### Option 2: Built-in Provider (Requires Core Team Approval)
 

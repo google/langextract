@@ -19,8 +19,11 @@ import warnings
 
 from absl.testing import absltest
 
+from langextract import factory
 import langextract as lx
 from langextract.core import data
+from langextract.core import exceptions
+from langextract.providers import gemini
 
 
 class ExtractSchemaIntegrationTest(absltest.TestCase):
@@ -308,6 +311,234 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
           f"Unexpected format warning found in: {warning_messages}",
       )
 
+    self.assertIsNotNone(result)
+
+
+@mock.patch.dict("os.environ", {"GEMINI_API_KEY": "test_key"})
+class ExtractOutputSchemaTest(absltest.TestCase):
+  """Tests for extract() with user-provided output_schema."""
+
+  def setUp(self):
+    super().setUp()
+    self.output_schema = lx.schema.extractions_schema(
+        lx.schema.extraction_item_schema("condition")
+    )
+    self.test_text = "Patient has hypertension"
+
+  def _patch_infer(self):
+    return mock.patch.object(
+        gemini.GeminiLanguageModel,
+        "infer",
+        autospec=True,
+        return_value=iter(
+            [[mock.Mock(output='{"extractions": [{"condition": "fever"}]}')]]
+        ),
+    )
+
+  def test_extract_with_output_schema_allows_no_examples(self):
+    with self._patch_infer() as mock_infer:
+      result = lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model_id="gemini-3.5-flash",
+          output_schema=self.output_schema,
+      )
+
+    model = mock_infer.call_args[0][0]
+    self.assertEqual(
+        model.schema.to_provider_config()["response_json_schema"],
+        self.output_schema,
+    )
+    self.assertLen(result.extractions, 1)
+    self.assertEqual(result.extractions[0].extraction_class, "condition")
+    self.assertEqual(result.extractions[0].extraction_text, "fever")
+
+  def test_extract_output_schema_overrides_example_schema(self):
+    examples = [
+        data.ExampleData(
+            text="Patient has diabetes",
+            extractions=[
+                data.Extraction(
+                    extraction_class="condition",
+                    extraction_text="diabetes",
+                )
+            ],
+        )
+    ]
+
+    with self._patch_infer() as mock_infer:
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          examples=examples,
+          model_id="gemini-3.5-flash",
+          use_schema_constraints=True,
+          output_schema=self.output_schema,
+      )
+
+    model = mock_infer.call_args[0][0]
+    provider_config = model.schema.to_provider_config()
+    self.assertEqual(
+        provider_config["response_json_schema"], self.output_schema
+    )
+    self.assertNotIn("response_schema", provider_config)
+
+  def test_extract_requires_examples_without_output_schema(self):
+    with self.assertRaisesRegex(ValueError, "output_schema"):
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model_id="gemini-3.5-flash",
+      )
+
+  def test_extract_with_preconfigured_output_schema_model(self):
+    model = factory.create_model_from_id(
+        "gemini-3.5-flash", output_schema=self.output_schema
+    )
+
+    with self._patch_infer():
+      result = lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model=model,
+      )
+
+    self.assertLen(result.extractions, 1)
+
+  def test_extract_applies_output_schema_to_plain_model(self):
+    model = factory.create_model_from_id("gemini-3.5-flash")
+
+    with self._patch_infer():
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model=model,
+          output_schema=self.output_schema,
+      )
+
+    self.assertTrue(model.schema.from_output_schema)
+
+  def test_extract_reapplies_same_output_schema_idempotently(self):
+    model = factory.create_model_from_id(
+        "gemini-3.5-flash", output_schema=self.output_schema
+    )
+
+    with self._patch_infer():
+      result = lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model=model,
+          output_schema=self.output_schema,
+      )
+
+    self.assertIsNotNone(result)
+
+  def test_extract_output_schema_conflicts_with_example_schema_model(self):
+    examples = [
+        data.ExampleData(
+            text="Patient has diabetes",
+            extractions=[
+                data.Extraction(
+                    extraction_class="condition",
+                    extraction_text="diabetes",
+                )
+            ],
+        )
+    ]
+    model = factory.create_model(
+        factory.ModelConfig(model_id="gemini-3.5-flash"),
+        examples=examples,
+        use_schema_constraints=True,
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "already has a schema"
+    ):
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model=model,
+          output_schema=self.output_schema,
+      )
+
+  def test_extract_output_schema_rejects_fence_output(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "fence_output"
+    ):
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model_id="gemini-3.5-flash",
+          output_schema=self.output_schema,
+          fence_output=True,
+      )
+
+  def test_extract_output_schema_rejects_yaml_format(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "format_type=JSON"
+    ):
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model_id="gemini-3.5-flash",
+          output_schema=self.output_schema,
+          format_type=data.FormatType.YAML,
+      )
+
+  def test_extract_output_schema_rejects_fenced_resolver_params(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "fence_output"
+    ):
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model_id="gemini-3.5-flash",
+          output_schema=self.output_schema,
+          resolver_params={"fence_output": True},
+      )
+
+  def test_extract_output_schema_rejects_unwrapped_resolver_output(self):
+    with self.assertRaisesRegex(exceptions.InferenceConfigError, "envelope"):
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model_id="gemini-3.5-flash",
+          output_schema=self.output_schema,
+          resolver_params={"require_extractions_key": False},
+      )
+
+  def test_extract_output_schema_rejects_custom_attribute_suffix(self):
+    with self.assertRaisesRegex(exceptions.InferenceConfigError, "envelope"):
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model_id="gemini-3.5-flash",
+          output_schema=self.output_schema,
+          resolver_params={"attribute_suffix": "_props"},
+      )
+
+  def test_extract_fence_conflict_leaves_caller_model_unmodified(self):
+    model = factory.create_model_from_id("gemini-3.5-flash")
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "fence_output"
+    ):
+      lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model=model,
+          output_schema=self.output_schema,
+          fence_output=True,
+      )
+
+    self.assertIsNone(model.schema)
+    with self._patch_infer():
+      result = lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          model=model,
+          output_schema=self.output_schema,
+      )
     self.assertIsNotNone(result)
 
 

@@ -99,6 +99,7 @@ def _has_sdk_retry_options(http_options: Any) -> bool:
 _API_CONFIG_KEYS: Final[set[str]] = {
     'response_mime_type',
     'response_schema',
+    'response_json_schema',
     'safety_settings',
     'system_instruction',
     'tools',
@@ -148,10 +149,19 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
     Args:
       schema_instance: The schema instance to apply, or None to clear.
+
+    Raises:
+      InferenceConfigError: If schema_instance belongs to another provider.
     """
+    if schema_instance is not None and not isinstance(
+        schema_instance, schemas.gemini.GeminiSchema
+    ):
+      raise exceptions.InferenceConfigError(
+          'GeminiLanguageModel only accepts GeminiSchema instances; got '
+          f'{type(schema_instance).__name__}.'
+      )
     super().apply_schema(schema_instance)
-    if isinstance(schema_instance, schemas.gemini.GeminiSchema):
-      self.gemini_schema = schema_instance
+    self.gemini_schema = schema_instance
 
   def __init__(
       self,
@@ -215,7 +225,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.project = project
     self.location = location
     self.http_options = http_options
-    self.gemini_schema = gemini_schema
+    self.gemini_schema = None
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
@@ -286,6 +296,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self._extra_kwargs = {
         k: v for k, v in (kwargs or {}).items() if k in _API_CONFIG_KEYS
     }
+    # Route through apply_schema so self._schema stays in sync and
+    # apply_output_schema() can detect the pre-configured schema.
+    if gemini_schema is not None:
+      self.apply_schema(gemini_schema)
 
   def _validate_schema_config(self) -> None:
     """Validate that schema configuration is compatible with format type.
@@ -348,10 +362,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
         if self.gemini_schema:
           self._validate_schema_config()
-          call_config.setdefault('response_mime_type', 'application/json')
-          call_config.setdefault(
-              'response_schema', self.gemini_schema.schema_dict
-          )
+          for key, value in self.gemini_schema.to_provider_config().items():
+            call_config.setdefault(key, value)
 
         response = self._client.models.generate_content(
             model=self.model_id, contents=prompt, config=call_config
@@ -414,13 +426,17 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         try:
           if self.gemini_schema:
             self._validate_schema_config()
-          schema_dict = (
-              self.gemini_schema.schema_dict if self.gemini_schema else None
+          schema_config = (
+              self.gemini_schema.to_provider_config()
+              if self.gemini_schema
+              else None
           )
-          # Remove schema fields from config for batch API - they're handled via schema_dict
+          # Remove schema fields from config for batch API - they're handled
+          # via schema_config
           batch_config = dict(config)
           batch_config.pop('response_mime_type', None)
           batch_config.pop('response_schema', None)
+          batch_config.pop('response_json_schema', None)
           # Extract top-level fields that don't belong in generationConfig
           system_instruction = batch_config.pop('system_instruction', None)
           safety_settings = batch_config.pop('safety_settings', None)
@@ -428,7 +444,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
               client=self._client,
               model_id=self.model_id,
               prompts=batch_prompts,
-              schema_dict=schema_dict,
+              schema_config=schema_config,
               gen_config=batch_config,
               cfg=self._batch_cfg,
               system_instruction=system_instruction,

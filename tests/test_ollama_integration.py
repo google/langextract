@@ -20,6 +20,8 @@ import requests
 
 import langextract as lx
 
+pytestmark = pytest.mark.integration
+
 
 def _ollama_available():
   """Check if Ollama is running on localhost:11434."""

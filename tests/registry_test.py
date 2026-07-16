@@ -149,6 +149,17 @@ class RegistryTest(absltest.TestCase):
 
     self.assertEqual(router.list_providers(), first_providers)
 
+  def test_minimax_models_resolve_to_openai_provider(self):
+    """MiniMax model IDs use the existing OpenAI provider routing."""
+    providers_module._builtins_loaded = False  # pylint: disable=protected-access
+    providers_module.load_builtins_once()
+
+    for model_id in ("MiniMax-M3", "MiniMax-M2.7"):
+      with self.subTest(model_id=model_id):
+        self.assertEqual(
+            router.resolve(model_id).__name__, "OpenAILanguageModel"
+        )
+
   def test_list_entries(self):
     """Test listing registered entries."""
     router.register_lazy(r"^test1", target="fake:Target1", priority=5)

@@ -28,6 +28,7 @@ OPENAI_PATTERNS = (
     r'^gpt4\.',
     r'^gpt-5',
     r'^gpt5\.',
+    r'^MiniMax-M2\.7$',
     r'^MiniMax-M3$',
 )
 OPENAI_PRIORITY = 10

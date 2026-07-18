@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import dataclasses
+import os
 import typing
 import warnings
 
@@ -84,7 +85,9 @@ def extract(
       text_or_documents: The source text to extract information from, or an
         iterable of Document objects. An http:// or https:// string is fetched
         only when `fetch_urls=True`; see that parameter for the security
-        caveats.
+        caveats. Strings are never read from disk: if the string matches a
+        path to an existing file, a UserWarning is emitted and the path
+        itself is treated as the literal text to extract from.
       prompt_description: Instructions for what to extract from the text.
       examples: List of ExampleData objects to guide the extraction.
         Required unless `output_schema` is provided.
@@ -254,6 +257,22 @@ def extract(
       and io.is_url(text_or_documents)
   ):
     text_or_documents = io.download_text_from_url(text_or_documents)
+  elif (
+      isinstance(text_or_documents, str)
+      and len(text_or_documents) < 4096
+      and not io.is_url(text_or_documents)
+      and os.path.isfile(text_or_documents)
+  ):
+    warnings.warn(
+        "text_or_documents matches a path to an existing file"
+        f" ({text_or_documents!r}). LangExtract treats string input as"
+        " literal text, so the path itself -- not the file contents -- will"
+        " be sent to the model and may appear in extraction results. If you"
+        " meant to extract from the file, read it first, e.g."
+        " extract(pathlib.Path(path).read_text(), ...).",
+        UserWarning,
+        stacklevel=2,
+    )
 
   prompt_template = prompting.PromptTemplateStructured(
       description=prompt_description

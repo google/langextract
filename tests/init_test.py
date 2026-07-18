@@ -976,13 +976,12 @@ class FilePathInputWarningTest(absltest.TestCase):
   def test_existing_file_path_warns(self, create_model):
     sentinel = RuntimeError("short-circuit after path check")
     create_model.side_effect = sentinel
-    tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
-    tmp.write(b"file contents")
-    tmp.close()
-    self.addCleanup(os.unlink, tmp.name)
+    fd, path = tempfile.mkstemp(suffix=".txt")
+    os.close(fd)
+    self.addCleanup(os.unlink, path)
     with self.assertWarnsRegex(UserWarning, "path to an existing file"):
       with self.assertRaises(RuntimeError) as cm:
-        self._extract(tmp.name)
+        self._extract(path)
     self.assertIs(cm.exception, sentinel)
 
   @mock.patch("langextract.extraction.factory.create_model", autospec=True)

@@ -984,6 +984,53 @@ class AnnotatorMultiPassTest(absltest.TestCase):
     self.assertLen(result.extractions, 1)
     self.assertEqual(result.extractions[0].extraction_class, "test")
 
+  def test_multipass_chunk_offset_shifts_per_pass(self):
+    """Each pass shifts its first-chunk cap by max_char_buffer // passes."""
+    text = (
+        "Patient John Smith has diabetes and takes insulin daily every"
+        " morning without fail."
+    )
+
+    # Same output for every chunk/pass; this test only checks the per-pass
+    # offset forwarded to ChunkIterator, not the resolved extractions.
+    self.mock_language_model.infer.return_value = [[
+        types.ScoredOutput(
+            score=1.0,
+            output=textwrap.dedent(f"""\
+              ```yaml
+              {data.EXTRACTIONS_KEY}:
+              - patient: "John Smith"
+                patient_index: 1
+              ```"""),
+        )
+    ]]
+
+    resolver = resolver_lib.Resolver(
+        format_type=data.FormatType.YAML,
+        extraction_index_suffix=resolver_lib.DEFAULT_INDEX_SUFFIX,
+    )
+
+    captured_offsets = []
+    real_chunk_iterator = annotation.chunking.ChunkIterator
+
+    def _record(*args, **kwargs):
+      captured_offsets.append(kwargs.get("first_chunk_max_char"))
+      return real_chunk_iterator(*args, **kwargs)
+
+    with mock.patch.object(
+        annotation.chunking, "ChunkIterator", side_effect=_record
+    ):
+      self.annotator.annotate_text(
+          text,
+          resolver=resolver,
+          max_char_buffer=30,
+          extraction_passes=3,
+          debug=False,
+      )
+
+    # adjustment = 30 // 3 = 10; pass 0 is the unshifted baseline (None).
+    self.assertEqual(captured_offsets, [None, 10, 20])
+
 
 class MultiPassHelperFunctionsTest(parameterized.TestCase):
   """Tests for multi-pass helper functions."""
@@ -1047,6 +1094,28 @@ class MultiPassHelperFunctionsTest(parameterized.TestCase):
               "class1",
               "class3",
           ],  # class2 excluded due to overlap
+      ),
+      dict(
+          testcase_name="overlapping_passes_largest_span_wins",
+          all_extractions=[
+              [
+                  data.Extraction(
+                      "class1", "text1", char_interval=data.CharInterval(5, 10)
+                  )  # Smaller span from earlier pass
+              ],
+              [
+                  data.Extraction(
+                      "class2", "text2", char_interval=data.CharInterval(0, 20)
+                  ),  # Larger span from later pass, overlaps class1
+                  data.Extraction(
+                      "class3", "text3", char_interval=data.CharInterval(25, 30)
+                  ),  # No overlap
+              ],
+          ],
+          expected_count=2,
+          # class1 dropped: class2 is larger and overlaps it, so the larger
+          # later-pass span wins over the smaller earlier-pass span.
+          expected_classes=["class2", "class3"],
       ),
   )
   def test_merge_non_overlapping_extractions(

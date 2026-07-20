@@ -388,6 +388,7 @@ class ChunkIterator:
       max_char_buffer: int,
       tokenizer_impl: tokenizer_lib.Tokenizer,
       document: data.Document | None = None,
+      first_chunk_max_char: int | None = None,
   ):
     """Constructor.
 
@@ -396,6 +397,11 @@ class ChunkIterator:
       max_char_buffer: Size of buffer that we can run inference on.
       tokenizer_impl: Tokenizer instance to use.
       document: Optional source document.
+      first_chunk_max_char: Optional smaller buffer applied to the first chunk
+        only. Used to shift all subsequent chunk boundaries by a fixed amount
+        across extraction passes so a span split at a boundary in one pass can
+        land whole in another. When None (default), every chunk uses
+        max_char_buffer and behavior is unchanged.
     """
     if text is None:
       if document is None:
@@ -409,6 +415,8 @@ class ChunkIterator:
       text = tokenizer_impl.tokenize(text_to_tokenize)
     self.tokenized_text = text
     self.max_char_buffer = max_char_buffer
+    self.first_chunk_max_char = first_chunk_max_char
+    self._chunk_count = 0
     self.sentence_iter = SentenceIterator(self.tokenized_text)
     self.broken_sentence = False
 
@@ -439,6 +447,24 @@ class ChunkIterator:
     ) > self.max_char_buffer
 
   def __next__(self) -> TextChunk:
+    # The first chunk of a pass may use a smaller buffer so that all following
+    # chunk boundaries are shifted by that amount. Only the buffer value is
+    # swapped; the sentence iterator position and broken_sentence state carry
+    # over untouched, so chunking resumes seamlessly at the real buffer size.
+    if self._chunk_count == 0 and self.first_chunk_max_char is not None:
+      saved_buffer = self.max_char_buffer
+      self.max_char_buffer = max(1, self.first_chunk_max_char)
+      try:
+        chunk = self._next_chunk()
+      finally:
+        self.max_char_buffer = saved_buffer
+      self._chunk_count += 1
+      return chunk
+
+    self._chunk_count += 1
+    return self._next_chunk()
+
+  def _next_chunk(self) -> TextChunk:
     sentence = next(self.sentence_iter)
     # If the next token is greater than the max_char_buffer, let it be the
     # entire chunk.

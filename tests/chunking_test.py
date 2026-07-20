@@ -342,6 +342,103 @@ class ChunkIteratorTest(absltest.TestCase):
     self.assertEqual(text_chunk.chunk_text, text)
 
 
+class ChunkIteratorFirstChunkOffsetTest(absltest.TestCase):
+  """Tests for the first_chunk_max_char boundary-shifting behavior."""
+
+  LONG_TEXT = (
+      "No man is an island, entire of itself. Every man is a piece of the"
+      " continent, a part of the main. If a clod be washed away by the sea,"
+      " Europe is the less. Any man's death diminishes me, because I am"
+      " involved in mankind."
+  )
+
+  def _token_intervals(self, text, max_char_buffer, first_chunk_max_char=None):
+    chunk_iter = chunking.ChunkIterator(
+        text,
+        max_char_buffer=max_char_buffer,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+        first_chunk_max_char=first_chunk_max_char,
+    )
+    return [
+        (c.token_interval.start_index, c.token_interval.end_index)
+        for c in chunk_iter
+    ]
+
+  def test_none_matches_omitted(self):
+    """first_chunk_max_char=None reproduces the uncapped chunk sequence."""
+    omitted = self._token_intervals(self.LONG_TEXT, max_char_buffer=50)
+    explicit_none = self._token_intervals(
+        self.LONG_TEXT, max_char_buffer=50, first_chunk_max_char=None
+    )
+    self.assertEqual(omitted, explicit_none)
+
+  def test_first_chunk_is_capped_and_shifts_boundaries(self):
+    """A capped first chunk is smaller and shifts the remaining boundaries."""
+    tokenized_text = tokenizer.tokenize(self.LONG_TEXT)
+
+    baseline_iter = chunking.ChunkIterator(
+        tokenized_text,
+        max_char_buffer=50,
+        tokenizer_impl=tokenizer.RegexTokenizer(),
+    )
+    baseline_first = next(baseline_iter)
+
+    capped_chunks = list(
+        chunking.ChunkIterator(
+            tokenized_text,
+            max_char_buffer=50,
+            tokenizer_impl=tokenizer.RegexTokenizer(),
+            first_chunk_max_char=20,
+        )
+    )
+    capped_lengths = [
+        c.char_interval.end_pos - c.char_interval.start_pos
+        for c in capped_chunks
+    ]
+
+    # First chunk is capped to <= 20 chars and is strictly smaller than the
+    # uncapped first chunk, proving the boundary moved.
+    baseline_len = (
+        baseline_first.char_interval.end_pos
+        - baseline_first.char_interval.start_pos
+    )
+    self.assertLessEqual(capped_lengths[0], 20)
+    self.assertLess(capped_lengths[0], baseline_len)
+
+    # After the first chunk the full buffer is restored, so at least one later
+    # chunk exceeds the first-chunk cap (it is not stuck at 20).
+    self.assertGreater(max(capped_lengths[1:]), 20)
+    self.assertLessEqual(max(capped_lengths), 50)
+
+  def test_full_token_coverage_is_preserved(self):
+    """Capping the first chunk still covers every token of the document."""
+    total_tokens = len(tokenizer.tokenize(self.LONG_TEXT).tokens)
+    intervals = self._token_intervals(
+        self.LONG_TEXT, max_char_buffer=50, first_chunk_max_char=20
+    )
+
+    self.assertEqual(intervals[0][0], 0)
+    self.assertEqual(intervals[-1][1], total_tokens)
+    # Chunks are contiguous with no gaps or overlaps in token space.
+    for (_, prev_end), (next_start, _) in zip(intervals, intervals[1:]):
+      self.assertEqual(prev_end, next_start)
+
+  def test_cap_larger_than_document_yields_single_chunk(self):
+    """When the cap exceeds the document length, the whole doc is one chunk.
+
+    This is the property that keeps short documents (and existing multi-pass
+    tests) behaving identically: an offset >= document length collapses to a
+    single chunk covering the whole document.
+    """
+    total_tokens = len(tokenizer.tokenize(self.LONG_TEXT).tokens)
+    intervals = self._token_intervals(
+        self.LONG_TEXT,
+        max_char_buffer=50,
+        first_chunk_max_char=len(self.LONG_TEXT) + 100,
+    )
+    self.assertEqual(intervals, [(0, total_tokens)])
+
+
 class BatchingTest(parameterized.TestCase):
 
   _SAMPLE_DOCUMENT = data.Document(

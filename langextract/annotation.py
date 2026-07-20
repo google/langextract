@@ -43,22 +43,40 @@ from langextract.core import format_handler as fh
 from langextract.core import tokenizer as tokenizer_lib
 
 
+def _span_length(extraction: data.Extraction) -> int:
+  """Returns the character span length of an extraction.
+
+  Unresolved extractions (no character interval) return -1 so they sort last
+  and are never treated as the "largest" span.
+  """
+  char_interval = extraction.char_interval
+  if char_interval is None:
+    return -1
+  start_pos, end_pos = char_interval.start_pos, char_interval.end_pos
+  if start_pos is None or end_pos is None:
+    return -1
+  return end_pos - start_pos
+
+
 def _merge_non_overlapping_extractions(
     all_extractions: list[Iterable[data.Extraction]],
 ) -> list[data.Extraction]:
   """Merges extractions from multiple extraction passes.
 
   When extractions from different passes overlap in their character positions,
-  the extraction from the earlier pass is kept (first-pass wins strategy).
-  Only non-overlapping extractions from later passes are added to the result.
+  the extraction with the largest character span is kept (largest-span-wins
+  strategy); ties are broken toward earlier passes and earlier positions. This
+  prevents a full target span found in one pass from being displaced by a
+  smaller, partial span found in another pass. Extractions are returned in
+  their original discovery order (pass order, then within-pass order).
 
   Args:
     all_extractions: List of extraction iterables from different sequential
       extraction passes, ordered by pass number.
 
   Returns:
-    List of merged extractions with overlaps resolved in favor of earlier
-    passes.
+    List of merged extractions with overlaps resolved in favor of the largest
+    span.
   """
   if not all_extractions:
     return []
@@ -66,22 +84,29 @@ def _merge_non_overlapping_extractions(
   if len(all_extractions) == 1:
     return list(all_extractions[0])
 
-  merged_extractions = list(all_extractions[0])
+  flat_extractions = [
+      extraction
+      for pass_extractions in all_extractions
+      for extraction in pass_extractions
+  ]
 
-  for pass_extractions in all_extractions[1:]:
-    for extraction in pass_extractions:
-      overlaps = False
-      if extraction.char_interval is not None:
-        for existing_extraction in merged_extractions:
-          if existing_extraction.char_interval is not None:
-            if _extractions_overlap(extraction, existing_extraction):
-              overlaps = True
-              break
+  # Consider candidates largest-span-first; ties keep discovery order.
+  selection_order = sorted(
+      enumerate(flat_extractions),
+      key=lambda pair: (-_span_length(pair[1]), pair[0]),
+  )
 
-      if not overlaps:
-        merged_extractions.append(extraction)
+  kept: list[tuple[int, data.Extraction]] = []
+  for original_index, extraction in selection_order:
+    if any(
+        _extractions_overlap(extraction, existing) for _, existing in kept
+    ):
+      continue
+    kept.append((original_index, extraction))
 
-  return merged_extractions
+  # Restore original discovery order for the returned extractions.
+  kept.sort(key=lambda pair: pair[0])
+  return [extraction for _, extraction in kept]
 
 
 def _extractions_overlap(
@@ -120,6 +145,7 @@ def _document_chunk_iterator(
     max_char_buffer: int,
     restrict_repeats: bool = True,
     tokenizer: tokenizer_lib.Tokenizer | None = None,
+    first_chunk_max_char: int | None = None,
 ) -> Iterator[chunking.TextChunk]:
   """Iterates over documents to yield text chunks along with the document ID.
 
@@ -129,6 +155,9 @@ def _document_chunk_iterator(
     restrict_repeats: Whether to restrict the same document id from being
       visited more than once.
     tokenizer: Optional tokenizer instance.
+    first_chunk_max_char: Optional smaller buffer for the first chunk of each
+      document, shifting subsequent chunk boundaries. Forwarded to
+      ChunkIterator. None (default) leaves chunking unchanged.
 
   Yields:
     TextChunk containing document ID for a corresponding document.
@@ -154,6 +183,7 @@ def _document_chunk_iterator(
         max_char_buffer=max_char_buffer,
         document=document,
         tokenizer_impl=tokenizer or tokenizer_lib.RegexTokenizer(),
+        first_chunk_max_char=first_chunk_max_char,
     )
     visited_ids.add(document_id)
 
@@ -236,9 +266,12 @@ class Annotator:
       debug: Whether to populate debug fields.
       extraction_passes: Number of sequential extraction attempts to improve
         recall by finding additional entities. Defaults to 1, which performs
-        standard single extraction.
-        Values > 1 reprocess tokens multiple times, potentially increasing
-        costs with the potential for a more thorough extraction.
+        standard single extraction. Values > 1 reprocess tokens multiple times,
+        potentially increasing costs with the potential for a more thorough
+        extraction. Each pass after the first shifts its chunk boundaries by a
+        deterministic offset of max_char_buffer // extraction_passes so spans
+        split at a boundary in one pass can land whole in another; overlapping
+        results are merged with the largest span winning.
       context_window_chars: Number of characters from the previous chunk to
         include as context for the current chunk. Helps with coreference
         resolution across chunk boundaries. Defaults to None (disabled).
@@ -293,6 +326,7 @@ class Annotator:
       context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       suppress_parse_errors: bool = False,
+      first_chunk_max_char: int | None = None,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Single-pass annotation with stable ordering and streaming emission.
@@ -346,7 +380,10 @@ class Annotator:
         next_emit_idx += 1
 
     chunk_iter = _document_chunk_iterator(
-        _capture_docs(documents), max_char_buffer, tokenizer=tokenizer
+        _capture_docs(documents),
+        max_char_buffer,
+        tokenizer=tokenizer,
+        first_chunk_max_char=first_chunk_max_char,
     )
     batches = chunking.make_batches_of_textchunk(chunk_iter, batch_length)
 
@@ -474,10 +511,19 @@ class Annotator:
     for _doc in document_list:
       document_texts[_doc.document_id] = _doc.text or ""
 
+    # Shift each pass's chunk boundaries by a deterministic offset so a span
+    # cut at a boundary in one pass can land whole in another. Pass 0 always
+    # uses the exact, unshifted baseline. adjustment is 0 only when
+    # extraction_passes > max_char_buffer, in which case every pass falls back
+    # to identical baseline chunking.
+    adjustment = max_char_buffer // extraction_passes
+
     for pass_num in range(extraction_passes):
       logging.info(
           "Starting extraction pass %d of %d", pass_num + 1, extraction_passes
       )
+
+      pass_offset = pass_num * adjustment
 
       for annotated_doc in self._annotate_documents_single_pass(
           document_list,
@@ -488,6 +534,7 @@ class Annotator:
           show_progress=show_progress if pass_num == 0 else False,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
+          first_chunk_max_char=(pass_offset if pass_offset > 0 else None),
           **kwargs,
       ):
         doc_id = annotated_doc.document_id
@@ -556,7 +603,11 @@ class Annotator:
       extraction_passes: Number of sequential extraction passes to improve
         recall by finding additional entities. Defaults to 1, which performs
         standard single extraction. Values > 1 reprocess tokens multiple times,
-        potentially increasing costs.
+        potentially increasing costs. Each pass after the first shifts its
+        chunk boundaries by a deterministic offset of
+        max_char_buffer // extraction_passes so spans split at a boundary in
+        one pass can land whole in another; overlapping results are merged with
+        the largest span winning.
       context_window_chars: Number of characters from the previous chunk to
         include as context for coreference resolution. Defaults to None
         (disabled).

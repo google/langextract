@@ -153,11 +153,13 @@ def extract(
         when the selected `language_model_type` accepts this argument.
       extraction_passes: Number of sequential extraction attempts to improve
         recall and find additional entities. Defaults to 1 (standard single
-        extraction). When > 1, the system performs multiple independent
-        extractions and merges non-overlapping results (first extraction wins
-        for overlaps). WARNING: Each additional pass reprocesses tokens,
-        potentially increasing API costs. For example, extraction_passes=3
-        reprocesses tokens 3x.
+        extraction). When > 1, the system performs multiple extraction passes
+        whose chunk boundaries are shifted by a deterministic per-pass offset
+        (so a span split at a boundary in one pass can land whole in another)
+        and merges the results; when spans overlap the largest span wins, with
+        ties broken toward earlier passes. WARNING: Each additional pass
+        reprocesses tokens, potentially increasing API costs. For example,
+        extraction_passes=3 reprocesses tokens 3x.
       context_window_chars: Number of characters from the previous chunk to
         include as context for the current chunk. This helps with coreference
         resolution across chunk boundaries (e.g., resolving "She" to a person

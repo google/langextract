@@ -245,6 +245,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
     """Sends one prompt while preserving provider-specific error types."""
+    if not isinstance(prompt, str):
+      prompt = str(prompt)
     try:
       api_params = self._build_chat_completions_params(prompt, config)
       response = self._client.chat.completions.create(**api_params)

@@ -352,6 +352,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
     """Run one Gemini request with per-chunk retries for transient failures."""
+    if not isinstance(prompt, str):
+      prompt = str(prompt)
     delay = self.retry_delay
     for attempt in range(self.max_retries + 1):
       try:

@@ -149,7 +149,7 @@ class InitTest(parameterized.TestCase):
     mock_gemini_schema.assert_not_called()
     mock_create_model.assert_called_once()
     mock_model.infer.assert_called_once_with(
-        batch_prompts=[prompt_generator.render(input_text)],
+        batch_prompts=[prompt_generator.render_parts(input_text)],
         max_workers=10,
     )
 

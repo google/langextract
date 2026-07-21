@@ -67,7 +67,7 @@ results = lx.extract(
     text_or_documents=text_subset,
     prompt_description=prompt,
     examples=examples,
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     max_char_buffer=500,
     batch_length=1000,
     language_model_params={
@@ -77,6 +77,7 @@ results = lx.extract(
         "batch": batch_config
     }
 )
+```
 
 ## GCS File Structure
 
@@ -101,6 +102,8 @@ LangExtract's batch processing is designed to minimize costs:
     -   **Lifecycle Management**: Use `retention_days` (e.g., 30) to automatically clean up old data and manage storage usage.
 
 ## Analyze Results
+
+```python
 print(f"Extracted {len(results.extractions)} entities.")
 print("First 5 extractions:")
 for extraction in results.extractions[:5]:

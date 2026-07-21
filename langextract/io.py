@@ -94,7 +94,10 @@ def save_annotated_documents(
     annotated_documents: Iterator over AnnotatedDocument objects to save.
     output_dir: The directory to which the JSONL file should be written.
       Can be a Path object or a string. Defaults to 'test_output/' if None.
-    output_name: File name for the JSONL file.
+    output_name: File name for the JSONL file. Not sanitized; callers
+      passing untrusted input (e.g. in a hosted service) should validate
+      it first (reject `..`, absolute paths, etc.) to avoid writing
+      outside `output_dir`.
     show_progress: Whether to show a progress bar during saving.
 
   Raises:

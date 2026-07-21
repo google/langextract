@@ -106,11 +106,16 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
 )
 ```
 
-> **Model Selection**: `gemini-2.5-flash` is the recommended default, offering an excellent balance of speed, cost, and quality. For highly complex tasks requiring deeper reasoning, `gemini-2.5-pro` may provide superior results. For large-scale or production use, a Tier 2 Gemini quota is suggested to increase throughput and avoid rate limits. See the [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits#tier-2) for details.
+For advanced constraints beyond examples, such as enum values on extraction
+attributes, Gemini and OpenAI support `output_schema` with or without
+few-shot examples. See
+[Custom output schemas](docs/examples/output_schema.md).
+
+> **Model Selection**: `gemini-3.5-flash` is the recommended default, offering strong extraction quality for LangExtract's schema-constrained workflows. For high-volume or cost-sensitive workloads, consider the current stable Flash-Lite model, `gemini-3.1-flash-lite`; for highly complex tasks requiring deeper reasoning, evaluate a current Gemini Pro model from the official model documentation. For large-scale or production use, a paid Gemini tier is suggested to increase throughput and avoid rate limits. See the [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits#usage-tiers) for details.
 >
 > **Model Lifecycle**: Note that Gemini models have a lifecycle with defined retirement dates. Users should consult the [official model version documentation](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions) to stay informed about the latest stable and legacy versions.
 
@@ -147,7 +152,7 @@ result = lx.extract(
     text_or_documents="https://www.gutenberg.org/files/1513/1513-0.txt",
     prompt_description=prompt,
     examples=examples,
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     extraction_passes=3,    # Improves recall through multiple passes
     max_workers=20,         # Parallel processing for speed
     max_char_buffer=1000    # Smaller contexts for better accuracy
@@ -158,7 +163,9 @@ This approach can extract hundreds of entities from full novels while maintainin
 
 ### Vertex AI Batch Processing
 
-Save costs on large-scale tasks by enabling Vertex AI Batch API: `language_model_params={"vertexai": True, "batch": {"enabled": True}}`.
+Save costs on large-scale tasks by enabling Vertex AI Batch API with
+`language_model_params` that include `vertexai=True`, `project`, `location`,
+and a `batch` config.
 
 See an example of the Vertex AI Batch API usage in [this example](docs/examples/batch_api_example.md).
 
@@ -251,7 +258,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description="Extract information...",
     examples=[...],
-    model_id="gemini-2.5-flash"
+    model_id="gemini-3.5-flash"
 )
 ```
 
@@ -264,7 +271,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description="Extract information...",
     examples=[...],
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     api_key="your-api-key-here"  # Only use this for testing/development
 )
 ```
@@ -278,7 +285,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description="Extract information...",
     examples=[...],
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     language_model_params={
         "vertexai": True,
         "project": "your-project-id",
@@ -320,7 +327,31 @@ result = lx.extract(
 )
 ```
 
-The OpenAI provider uses JSON mode and auto-determines fence and schema behavior — leave `fence_output` and `use_schema_constraints` unset.
+The OpenAI provider uses structured outputs or JSON mode and auto-determines
+fence behavior — leave `fence_output` and `use_schema_constraints` unset.
+`output_schema` is also supported for OpenAI models that support structured
+outputs; provide a LangExtract output-envelope JSON schema, preferably with the
+`lx.schema` helpers.
+
+For large, non-latency-sensitive OpenAI workloads, enable the OpenAI Batch API
+with `language_model_params`. Batch mode is opt-in and falls back to realtime
+calls when the prompt count is below the configured threshold.
+
+```python
+result = lx.extract(
+    text_or_documents=documents,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="gpt-4o-mini",
+    language_model_params={
+        "batch": {
+            "enabled": True,
+            "threshold": 50,
+            "poll_interval": 10,
+        }
+    },
+)
+```
 
 For OpenAI-compatible endpoints or non-GPT model IDs (which skip auto-routing), use `ModelConfig` with an explicit provider:
 
@@ -354,7 +385,9 @@ result = lx.extract(
 )
 ```
 
-The Ollama provider exposes `FormatModeSchema` for JSON mode. Leave `fence_output` and `use_schema_constraints` unset so the factory auto-configures from the provider's schema.
+The Ollama provider exposes `FormatModeSchema` for JSON mode. Leave `fence_output`
+and `use_schema_constraints` unset so the factory auto-configures from the provider's
+schema. Ollama does not currently support `output_schema`.
 
 **Quick setup:** Install Ollama from [ollama.com](https://ollama.com/), run `ollama pull gemma2:2b`, then `ollama serve`.
 

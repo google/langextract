@@ -259,7 +259,7 @@ def _ensure_bucket_lifecycle(
 
 def _build_request(
     prompt: str | PromptParts,
-    schema_dict: dict | None,
+    schema_config: dict | None,
     gen_config: dict | None,
     system_instruction: str | None = None,
     safety_settings: Sequence[Any] | None = None,
@@ -277,7 +277,10 @@ def _build_request(
 
   Args:
     prompt: The text prompt or structured PromptParts.
-    schema_dict: Optional JSON schema for structured output.
+    schema_config: Optional provider schema config for structured output, as
+        produced by GeminiSchema.to_provider_config(). Supports
+        response_json_schema (JSON Schema) and response_schema
+        (OpenAPI-style) sources.
     gen_config: Optional generation configuration parameters.
     system_instruction: Optional system instruction text.
     safety_settings: Optional safety settings sequence.
@@ -309,11 +312,18 @@ def _build_request(
   if safety_settings:
     request["safetySettings"] = safety_settings
 
-  if schema_dict or gen_config:
+  if schema_config or gen_config:
     generation_config = {}
-    if schema_dict:
-      generation_config["responseMimeType"] = _MIME_TYPE_JSON
-      generation_config["responseSchema"] = schema_dict
+    if schema_config:
+      json_schema = schema_config.get("response_json_schema")
+      response_schema = schema_config.get("response_schema")
+      if json_schema is not None:
+        generation_config["responseJsonSchema"] = json_schema
+      elif response_schema is not None:
+        generation_config["responseSchema"] = response_schema
+      generation_config["responseMimeType"] = schema_config.get(
+          "response_mime_type", _MIME_TYPE_JSON
+      )
     if gen_config:
       for k, v in gen_config.items():
         generation_config[_snake_to_camel(k)] = v
@@ -340,7 +350,7 @@ def _submit_file(
   Args:
     client: google.genai.Client instance configured for Vertex AI
         (must have client.vertexai=True).
-    model_id: Model identifier (e.g., "gemini-2.5-flash").
+    model_id: Model identifier (e.g., "gemini-3.5-flash").
     requests: List of request dictionaries with embedded configuration.
         Each request contains contents and optional generationConfig
         (including schema and generation parameters).
@@ -726,7 +736,7 @@ def infer_batch(
     client: genai.Client,
     model_id: str,
     prompts: Sequence[str],
-    schema_dict: dict | None,
+    schema_config: dict | None,
     gen_config: dict,
     cfg: BatchConfig,
     system_instruction: str | None = None,
@@ -745,9 +755,10 @@ def infer_batch(
   Args:
     client: google.genai.Client instance configured for Vertex AI
         (must have client.vertexai=True).
-    model_id: Model identifier (e.g., "gemini-2.5-flash").
+    model_id: Model identifier (e.g., "gemini-3.5-flash").
     prompts: Sequence of prompts to process in batch.
-    schema_dict: Optional JSON schema for structured output. When provided,
+    schema_config: Optional provider schema config for structured output, as
+        produced by GeminiSchema.to_provider_config(). When provided,
         enables JSON mode with the specified schema constraints.
     gen_config: Generation configuration parameters (temperature, top_p, etc.).
     cfg: Batch configuration including thresholds, timeouts, and error handling.
@@ -814,7 +825,7 @@ def infer_batch(
           "system_instruction": system_instruction,
           "gen_config": gen_config,
           "safety_settings": safety_settings,
-          "schema": schema_dict,
+          "schema": schema_config,
       })
 
     cached_results = cache.get_multi(key_data_list)
@@ -846,7 +857,7 @@ def infer_batch(
     batch_prompts = [p for _, p in batch_items]
     requests = [
         _build_request(
-            p, schema_dict, gen_config, system_instruction, safety_settings
+            p, schema_config, gen_config, system_instruction, safety_settings
         )
         for p in batch_prompts
     ]
@@ -905,7 +916,7 @@ def infer_batch(
           "system_instruction": system_instruction,
           "gen_config": gen_config,
           "safety_settings": safety_settings,
-          "schema": schema_dict,
+          "schema": schema_config,
       }
       upload_list.append((key_data, text))
 

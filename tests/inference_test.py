@@ -152,6 +152,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
         model="gemma2:latest",
         structured_output_format="json",
         model_url="http://localhost:11434",
+        think=False,
     )
     expected_results = [[
         types.ScoredOutput(
@@ -160,7 +161,243 @@ class TestOllamaLanguageModel(absltest.TestCase):
     ]]
     self.assertEqual(results, expected_results)
 
-  @mock.patch("requests.post")
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_prefers_response_over_thinking(self, mock_ollama_query):
+    """Test Ollama inference ignores reasoning when final output is present."""
+    thinking_response = {
+        "model": "deepseek-r1:latest",
+        "created_at": "2025-01-23T22:37:08.579440841Z",
+        "response": "{'bus' : '**autóbusz**'} \n\n\n  \n",
+        "thinking": "The prompt asks for a Hungarian translation of bus.",
+        "done": True,
+        "done_reason": "stop",
+        "context": [106, 1645, 108],
+        "total_duration": 24038204381,
+        "load_duration": 21551375738,
+        "prompt_eval_count": 15,
+        "prompt_eval_duration": 633000000,
+        "eval_count": 17,
+        "eval_duration": 1848000000,
+    }
+    mock_ollama_query.return_value = thinking_response
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+    )
+    batch_prompts = ["What is bus in Hungarian?"]
+    results = list(model.infer(batch_prompts))
+
+    mock_ollama_query.assert_called_once_with(
+        prompt="What is bus in Hungarian?",
+        model="deepseek-r1:latest",
+        structured_output_format="json",
+        model_url="http://localhost:11434",
+        think=False,
+    )
+    expected_results = [[
+        types.ScoredOutput(
+            score=1.0, output="{'bus' : '**autóbusz**'} \n\n\n  \n"
+        )
+    ]]
+    self.assertEqual(results, expected_results)
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_raises_on_empty_response_with_thinking(
+      self, mock_ollama_query
+  ):
+    """Test Ollama inference does not treat reasoning as final output."""
+    mock_ollama_query.return_value = {
+        "model": "deepseek-r1:latest",
+        "created_at": "2025-01-23T22:37:08.579440841Z",
+        "response": "",
+        "thinking": "The prompt asks for a Hungarian translation of bus.",
+        "done": True,
+        "done_reason": "stop",
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, "think=False"
+    ):
+      list(model.infer(["What is bus in Hungarian?"]))
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_raises_when_response_missing(self, mock_ollama_query):
+    """Test Ollama inference requires final generated text."""
+    mock_ollama_query.return_value = {
+        "model": "deepseek-r1:latest",
+        "created_at": "2025-01-23T22:37:08.579440841Z",
+        "done": True,
+        "done_reason": "stop",
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, "response.*field"
+    ):
+      list(model.infer(["What is bus in Hungarian?"]))
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_preserves_explicit_think(self, mock_ollama_query):
+    """Test user-provided think setting is passed through."""
+    mock_ollama_query.return_value = {
+        "response": '{"test": "value"}',
+        "done": True,
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+    )
+
+    list(model.infer(["Test prompt"], think=True))
+
+    mock_ollama_query.assert_called_once_with(
+        prompt="Test prompt",
+        model="deepseek-r1:latest",
+        structured_output_format="json",
+        model_url="http://localhost:11434",
+        think=True,
+    )
+
+  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  def test_ollama_infer_default_think_does_not_mutate_stored_kwargs(
+      self, mock_ollama_query
+  ):
+    """Test default think setting is per request only."""
+    mock_ollama_query.return_value = {
+        "response": '{"test": "value"}',
+        "done": True,
+    }
+    model = ollama.OllamaLanguageModel(
+        model_id="deepseek-r1:latest",
+        model_url="http://localhost:11434",
+        structured_output_format="json",
+        temperature=0.1,
+    )
+    stored_kwargs = model.merge_kwargs()
+
+    list(model.infer(["Test prompt"]))
+
+    self.assertEqual(model.merge_kwargs(), stored_kwargs)
+    self.assertNotIn("think", model.merge_kwargs())
+
+  def test_ollama_gpt_oss_model_matching(self):
+    for model_id in ("gpt-oss", "gpt-oss:20b", "GPT-OSS:20B"):
+      with self.subTest(model_id=model_id):
+        self.assertTrue(ollama._is_gpt_oss_model(model_id))
+
+    for model_id in (
+        "gpt-oss-120b",
+        "not-gpt-oss:20b",
+        "openai/gpt-oss:20b",
+        "gpt-oss:",
+    ):
+      with self.subTest(model_id=model_id):
+        self.assertFalse(ollama._is_gpt_oss_model(model_id))
+
+  def test_ollama_chat_empty_content_with_thinking_raises(self):
+    with self.assertRaisesRegex(exceptions.InferenceRuntimeError, "think=True"):
+      ollama.OllamaLanguageModel._extract_chat_response_text(
+          {"message": {"content": "", "thinking": "reasoning"}}
+      )
+
+  def test_ollama_chat_missing_content_raises(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, "message.content"
+    ):
+      ollama.OllamaLanguageModel._extract_chat_response_text({"done": True})
+
+  @mock.patch.object(ollama.requests, "post", autospec=True)
+  def test_ollama_gpt_oss_yaml_uses_generate_path(self, mock_post):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "response": "extractions: []",
+        "done": True,
+    }
+    mock_post.return_value = mock_response
+
+    model = ollama.OllamaLanguageModel(
+        model_id="gpt-oss:20b",
+        model_url="http://localhost:11434",
+        format_type=types.FormatType.YAML,
+    )
+
+    results = list(model.infer(["Test prompt"]))
+
+    mock_post.assert_called_once()
+    call_args = mock_post.call_args
+    payload = call_args.kwargs["json"]
+    self.assertEqual(call_args.args[0], "http://localhost:11434/api/generate")
+    self.assertEqual(payload["format"], "yaml")
+    self.assertNotIn("messages", payload)
+    self.assertEqual(
+        results,
+        [[types.ScoredOutput(score=1.0, output="extractions: []")]],
+    )
+
+  @mock.patch.object(ollama.requests, "post", autospec=True)
+  def test_ollama_gpt_oss_uses_chat_without_native_json(self, mock_post):
+    """GPT-OSS avoids native JSON mode, which conflicts with Harmony format."""
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "message": {"content": '{"extractions": []}'},
+        "done": True,
+    }
+    mock_post.return_value = mock_response
+
+    model = ollama.OllamaLanguageModel(
+        model_id="gpt-oss:20b",
+        model_url="http://localhost:11434",
+    )
+
+    results = list(model.infer(["Test prompt"], temperature=0.0))
+
+    mock_post.assert_called_once()
+    call_args = mock_post.call_args
+    self.assertEqual(call_args.args[0], "http://localhost:11434/api/chat")
+    self.assertDictEqual(
+        call_args.kwargs["json"],
+        {
+            "model": "gpt-oss:20b",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Output a single JSON object matching the requested "
+                        "extraction format. Do not include code fences, prose, "
+                        "or reasoning."
+                    ),
+                },
+                {"role": "user", "content": "Test prompt"},
+            ],
+            "stream": False,
+            "options": {
+                "keep_alive": 300,
+                "temperature": 0.0,
+                "num_ctx": 2048,
+            },
+            "keep_alive": 300,
+            "think": False,
+        },
+    )
+    self.assertEqual(
+        results,
+        [[types.ScoredOutput(score=1.0, output='{"extractions": []}')]],
+    )
+
+  @mock.patch.object(ollama.requests, "post", autospec=True)
   def test_ollama_extra_kwargs_passed_to_api(self, mock_post):
     """Verify extra kwargs like timeout and keep_alive are passed to the API."""
     mock_response = mock.Mock()
@@ -185,7 +422,12 @@ class TestOllamaLanguageModel(absltest.TestCase):
     call_args = mock_post.call_args
     json_payload = call_args.kwargs["json"]
 
+    self.assertEqual(call_args.args[0], "http://localhost:11434/api/generate")
+    self.assertEqual(json_payload["format"], "json")
+    self.assertNotIn("messages", json_payload)
     self.assertEqual(json_payload["keep_alive"], 600)
+    self.assertIs(json_payload["think"], False)
+    self.assertNotIn("think", json_payload["options"])
     self.assertEqual(json_payload["options"]["keep_alive"], 600)
     self.assertEqual(json_payload["options"]["num_thread"], 8)
     # timeout is passed to requests.post, not in the JSON payload
@@ -359,7 +601,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         api_key="test-key",
         # Allow-listed parameters
         tools=["tool1", "tool2"],
@@ -407,7 +649,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         api_key="test-key",
     )
 
@@ -802,7 +1044,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         api_key="test-key",
     )
 

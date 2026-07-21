@@ -19,7 +19,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "langextract"
-version = "1.2.1"
+version = "1.6.0"
 description = "LangExtract: A library for extracting structured data from language models"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -59,8 +59,8 @@ dependencies = [
 openai = ["openai>=1.50.0"]
 all = ["openai>=1.50.0"]
 dev = [
-    "pyink~=24.3.0",
-    "isort>=5.13.0",
+    "pyink==24.3.0",
+    "isort==5.13.2",
     "pylint>=3.0.0",
     "pytype>=2024.10.11",
     "tox>=4.0.0",
@@ -107,13 +107,14 @@ openai = "langextract.providers.openai:OpenAILanguageModel"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = "*_test.py"
+python_files = ["test_*.py", "*_test.py"]
 python_classes = "Test*"
 python_functions = "test_*"
 # Show extra test summary info
 addopts = "-ra"
 markers = [
     "live_api: marks tests as requiring live API access",
+    "vertex_ai: marks live tests that require Vertex AI credentials",
     "requires_pip: marks tests that perform pip install/uninstall operations",
     "integration: marks integration tests that test multiple components together",
 ]

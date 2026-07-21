@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 import dataclasses
 import typing
-from typing import cast
 import warnings
 
 from langextract import annotation
@@ -30,15 +29,24 @@ from langextract import prompting
 from langextract import resolver
 from langextract.core import base_model
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import format_handler as fh
+from langextract.core import output_schema as output_schema_lib
 from langextract.core import tokenizer as tokenizer_lib
+from langextract.core import types as core_types
+
+
+def _has_preconfigured_output_schema(model: typing.Any) -> bool:
+  return isinstance(model, base_model.BaseLanguageModel) and getattr(
+      model.schema, "from_output_schema", False
+  )
 
 
 def extract(
-    text_or_documents: typing.Any,
+    text_or_documents: str | Iterable[data.Document],
     prompt_description: str | None = None,
     examples: typing.Sequence[typing.Any] | None = None,
-    model_id: str = "gemini-2.5-flash",
+    model_id: str = "gemini-3.5-flash",
     api_key: str | None = None,
     language_model_type: typing.Type[typing.Any] | None = None,
     format_type: typing.Any = None,
@@ -58,7 +66,8 @@ def extract(
     config: typing.Any = None,
     model: typing.Any = None,
     *,
-    fetch_urls: bool = True,
+    output_schema: core_types.JsonSchema | None = None,
+    fetch_urls: bool = False,
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
@@ -72,11 +81,13 @@ def extract(
   of additional API calls.
 
   Args:
-      text_or_documents: The source text to extract information from, a URL to
-        download text from (starting with http:// or https:// when fetch_urls
-        is True), or an iterable of Document objects.
+      text_or_documents: The source text to extract information from, or an
+        iterable of Document objects. An http:// or https:// string is fetched
+        only when `fetch_urls=True`; see that parameter for the security
+        caveats.
       prompt_description: Instructions for what to extract from the text.
       examples: List of ExampleData objects to guide the extraction.
+        Required unless `output_schema` is provided.
       tokenizer: Optional Tokenizer instance to use for chunking and alignment.
         If None, defaults to RegexTokenizer.
       api_key: API key for Gemini or other LLM services (can also use
@@ -86,7 +97,7 @@ def extract(
         multiple times. Note that max_workers improves processing speed without
         additional token costs. Refer to your API provider's pricing details and
         monitor usage with small test runs to estimate costs.
-      model_id: The model ID to use for extraction (e.g., 'gemini-2.5-flash').
+      model_id: The model ID to use for extraction (e.g., 'gemini-3.5-flash').
         If your model ID is not recognized or you need to use a custom provider,
         use the 'config' parameter with factory.ModelConfig to specify the
         provider explicitly.
@@ -129,8 +140,12 @@ def extract(
         'fuzzy_alignment_threshold' (float, 0.75),
         'fuzzy_alignment_algorithm' (str, "lcs"; "legacy" is deprecated),
         'fuzzy_alignment_min_density' (float, 1/3),
+        'exact_alignment_algorithm' (str, "dp"; "difflib" restores the
+        legacy exact-match behavior),
         'accept_match_lesser' (bool, True).
-      language_model_params: Additional parameters for the language model.
+      language_model_params: Additional provider-specific constructor kwargs,
+        such as Gemini retry settings ('max_retries', 'retry_delay',
+        'max_retry_delay') or 'http_options'.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract
         namespace. Note: Debug logging remains enabled for the process once activated.
@@ -152,10 +167,16 @@ def extract(
         and config are provided, model takes precedence.
       model: Pre-configured language model to use for extraction. Takes
         precedence over all other parameters including config.
-      fetch_urls: Whether to automatically download content when the input is a
-        URL string. When True (default), strings starting with http:// or
-        https:// are fetched. When False, all strings are treated as literal
-        text to analyze. This is a keyword-only parameter.
+      output_schema: Optional JSON schema for LangExtract's raw JSON output
+        envelope. It replaces example-derived provider constraints, while
+        examples still guide the prompt when supplied. Use `lx.schema` helpers
+        for common schemas. Supported by Gemini and OpenAI; YAML and forced
+        fences are invalid with output_schema.
+      fetch_urls: If True, http(s) strings are fetched via `requests.get`
+        with no sanitization (SSRF risk: internal metadata, loopback,
+        redirects, DNS rebinding, etc.). Default False; all strings are
+        literal text. Only enable when URLs come from a trusted source
+        AND the process runs in a sandbox. Keyword-only.
       prompt_validation_level: Controls pre-flight alignment checks on few-shot
         examples. OFF skips validation, WARNING logs issues but continues, ERROR
         raises on failures. Defaults to WARNING.
@@ -169,16 +190,27 @@ def extract(
       iterable of Documents.
 
   Raises:
-      ValueError: If examples is None or empty.
+      ValueError: If examples is None or empty and neither output_schema nor a
+        preconfigured output-schema model is provided.
       ValueError: If no API key is provided or found in environment variables.
-      requests.RequestException: If URL download fails.
+      requests.RequestException: If `fetch_urls=True` and the URL download
+        fails.
       pv.PromptAlignmentError: If validation fails in ERROR mode.
   """
-  if not examples:
+  schema_active = output_schema is not None or _has_preconfigured_output_schema(
+      model
+  )
+  if not examples and not schema_active:
     raise ValueError(
         "Examples are required for reliable extraction. Please provide at least"
-        " one ExampleData object with sample extractions."
+        " one ExampleData object with sample extractions, or provide"
+        " output_schema."
     )
+  examples = list(examples or [])
+  # Reject before any model mutation so a caller-provided model is not left
+  # with a schema or fence override from a failed call.
+  if schema_active and fence_output is True:
+    raise exceptions.output_schema_fence_error()
 
   if prompt_validation_level is not pv.PromptValidationLevel.OFF:
     policy_kwargs = {}
@@ -232,9 +264,15 @@ def extract(
 
   if model:
     language_model = model
+    if output_schema is not None:
+      if not isinstance(language_model, base_model.BaseLanguageModel):
+        raise exceptions.unsupported_output_schema_error(
+            type(language_model).__name__
+        )
+      language_model.apply_output_schema(output_schema)
     if fence_output is not None:
       language_model.set_fence_output(fence_output)
-    if use_schema_constraints:
+    if use_schema_constraints and not schema_active:
       warnings.warn(
           "'use_schema_constraints' is ignored when 'model' is provided. "
           "The model should already be configured with schema constraints.",
@@ -242,10 +280,10 @@ def extract(
           stacklevel=2,
       )
   elif config:
-    if use_schema_constraints:
+    if use_schema_constraints and output_schema is None:
       warnings.warn(
           "With 'config', schema constraints are still applied via examples. "
-          "Or pass explicit schema in config.provider_kwargs.",
+          "Or pass output_schema=... for an explicit schema.",
           UserWarning,
           stacklevel=2,
       )
@@ -255,6 +293,7 @@ def extract(
         examples=prompt_template.examples if use_schema_constraints else None,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        output_schema=output_schema,
     )
   else:
     if language_model_type is not None:
@@ -297,6 +336,7 @@ def extract(
         examples=prompt_template.examples if use_schema_constraints else None,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        output_schema=output_schema,
     )
 
   format_handler, remaining_params = fh.FormatHandler.from_resolver_params(
@@ -307,6 +347,11 @@ def extract(
       base_use_wrapper=True,
       base_wrapper_key=data.EXTRACTIONS_KEY,
   )
+
+  if output_schema is not None or _has_preconfigured_output_schema(
+      language_model
+  ):
+    output_schema_lib.validate_output_schema_format_handler(format_handler)
 
   if language_model.schema is not None:
     language_model.schema.validate_format(format_handler)
@@ -357,7 +402,15 @@ def extract(
     )
     return result
   else:
-    documents = cast(Iterable[data.Document], text_or_documents)
+    if additional_context is not None:
+      documents = (
+          doc.with_additional_context(additional_context)
+          if doc.additional_context is None
+          else doc
+          for doc in text_or_documents
+      )
+    else:
+      documents = text_or_documents
     result = annotator.annotate_documents(
         documents=documents,
         resolver=res,

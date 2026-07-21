@@ -430,9 +430,9 @@ class GCSBatchCache:
     were plain strings.  The conversion is transient — only one
     stringified copy exists at a time — so it does not affect peak memory.
     """
-    _PRIMITIVES = (str, int, float, bool, type(None), dict, list)
+    primitives = (str, int, float, bool, type(None), dict, list)
     resolved = {
-        k: str(v) if not isinstance(v, _PRIMITIVES) else v
+        k: str(v) if not isinstance(v, primitives) else v
         for k, v in key_data.items()
     }
     canonical_json = json.dumps(

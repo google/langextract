@@ -15,7 +15,7 @@ example and input text. `prompt_description` is optional but recommended.
 pip install langextract
 
 # For OpenAI model support:
-pip install langextract[openai]
+pip install 'langextract[openai]'
 ```
 
 ## API keys

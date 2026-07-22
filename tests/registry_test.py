@@ -149,6 +149,20 @@ class RegistryTest(absltest.TestCase):
 
     self.assertEqual(router.list_providers(), first_providers)
 
+  def test_openai_patterns_cover_reasoning_and_gpt35_models(self):
+    """OpenAI o-series and gpt-3.5 model IDs resolve to the OpenAI provider."""
+    providers_module._builtins_loaded = False  # pylint: disable=protected-access
+    providers_module.load_builtins_once()
+
+    for model_id in ("o1", "o3-mini", "o4-mini", "gpt-3.5-turbo", "gpt-4o"):
+      with self.subTest(model_id=model_id):
+        resolved = router.resolve(model_id)
+        self.assertEqual(resolved.__name__, "OpenAILanguageModel")
+
+    # The o-series pattern must not swallow other o-prefixed model IDs.
+    with self.assertRaises(exceptions.InferenceConfigError):
+      router.resolve("openchat")
+
   def test_list_entries(self):
     """Test listing registered entries."""
     router.register_lazy(r"^test1", target="fake:Target1", priority=5)

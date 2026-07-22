@@ -24,10 +24,12 @@ GEMINI_PRIORITY = 10
 
 # OpenAI provider patterns
 OPENAI_PATTERNS = (
+    r'^gpt-3\.5',  # gpt-3.5-turbo, gpt-3.5-turbo-16k, etc.
     r'^gpt-4',
     r'^gpt4\.',
     r'^gpt-5',
     r'^gpt5\.',
+    r'^o[1-9]',  # reasoning models: o1, o3, o3-mini, o4-mini, etc.
 )
 OPENAI_PRIORITY = 10
 

@@ -13,6 +13,13 @@ authors:
     family-names: Goel
     email: goelak@google.com
     affiliation: Google LLC
+    orcid: "https://orcid.org/0000-0003-4833-9356"
+contact:
+  - given-names: Akshay
+    family-names: Goel
+    email: goelak@google.com
+    affiliation: Google LLC
+    orcid: "https://orcid.org/0000-0003-4833-9356"
 repository-code: "https://github.com/google/langextract"
 url: "https://github.com/google/langextract"
 repository: "https://github.com/google/langextract"
@@ -27,6 +34,11 @@ license: Apache-2.0
 version: 1.6.0
 date-released: 2026-07-02
 
+# The concept DOI here is deliberate: it needs no per-release update and always
+# resolves. Zenodo mints a version DOI only on `release: published`, after the
+# version bump lands, so a pinned version DOI would silently disagree with
+# `version:` above until someone hand-fixed it. The README tells paper authors
+# to cite the version DOI of the release they actually ran.
 doi: "10.5281/zenodo.17015089"
 identifiers:
   - type: doi

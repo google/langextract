@@ -1,9 +1,6 @@
 <p align="center">
   <a href="https://github.com/google/langextract">
-    <picture>
-      <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/google/langextract/main/docs/_static/langextract_concept_still.png" />
-      <img src="https://raw.githubusercontent.com/google/langextract/main/docs/_static/langextract_concept.gif" alt="LangExtract: unstructured text is chunked, extracted in parallel by an LLM, and every extracted value is grounded back to its exact character span in the source" width="880" />
-    </picture>
+    <img src="https://raw.githubusercontent.com/google/langextract/main/docs/_static/logo.svg" alt="LangExtract Logo" width="128" />
   </a>
 </p>
 
@@ -37,6 +34,13 @@
 ## Introduction
 
 LangExtract is a Python library that uses LLMs to extract structured information from unstructured text documents based on user-defined instructions. It processes materials such as clinical notes or reports, identifying and organizing key details while ensuring the extracted data corresponds to the source text.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/google/langextract/main/docs/_static/langextract_concept_still.png" />
+    <img src="https://raw.githubusercontent.com/google/langextract/main/docs/_static/langextract_concept.gif" alt="LangExtract end to end: unstructured text is chunked, extracted in parallel by an LLM, and every extracted value is grounded back to its exact character span in the source" width="880" />
+  </picture>
+</p>
 
 ## Why LangExtract?
 

@@ -740,5 +740,62 @@ class ApplyOutputSchemaTest(absltest.TestCase):
         model.apply_output_schema(self.output_schema)
 
 
+class OpenAIRefusalHandlingTest(absltest.TestCase):
+  """Tests OpenAI refusal and missing-content handling."""
+
+  def setUp(self):
+    super().setUp()
+
+    patcher = mock.patch("openai.OpenAI", autospec=True)
+    self.addCleanup(patcher.stop)
+
+    mock_client_cls = patcher.start()
+    self.mock_client = mock_client_cls.return_value
+
+    self.mock_client.chat = mock.Mock()
+    self.mock_client.chat.completions = mock.Mock()
+    self.mock_client.chat.completions.create = mock.Mock()
+
+    self.model = openai.OpenAILanguageModel(
+        model_id="gpt-4o",
+        api_key="test_key",
+    )
+
+  def test_process_single_prompt_returns_content(self):
+    message = mock.Mock(content="Hello", refusal=None)
+    response = mock.Mock(choices=[mock.Mock(message=message)])
+    self.mock_client.chat.completions.create.return_value = response
+
+    result = self.model._process_single_prompt("prompt", {})
+
+    self.assertEqual(result.output, "Hello")
+    self.assertEqual(result.score, 1.0)
+
+  def test_process_single_prompt_raises_on_refusal(self):
+    message = mock.Mock(
+        content=None,
+        refusal="I can't help with that.",
+    )
+    response = mock.Mock(choices=[mock.Mock(message=message)])
+    self.mock_client.chat.completions.create.return_value = response
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        "OpenAI response refusal",
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+  def test_process_single_prompt_raises_when_content_missing(self):
+    message = mock.Mock(content=None, refusal=None)
+    response = mock.Mock(choices=[mock.Mock(message=message)])
+    self.mock_client.chat.completions.create.return_value = response
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        "missing 'message.content'",
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+
 if __name__ == "__main__":
   absltest.main()

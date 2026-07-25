@@ -249,11 +249,31 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       api_params = self._build_chat_completions_params(prompt, config)
       response = self._client.chat.completions.create(**api_params)
 
-      output_text = response.choices[0].message.content
+      if not response.choices:
+        raise exceptions.InferenceRuntimeError(
+            'OpenAI response contained no choices.'
+        )
+
+      message = response.choices[0].message
+      output_text = message.content
+
+      if output_text is None:
+        refusal = getattr(message, 'refusal', None)
+
+        if refusal:
+          raise exceptions.InferenceRuntimeError(
+              f'OpenAI response refusal: {refusal}'
+          )
+
+        raise exceptions.InferenceRuntimeError(
+            "OpenAI response body missing 'message.content'"
+        )
 
       return core_types.ScoredOutput(score=1.0, output=output_text)
 
     except exceptions.InferenceConfigError:
+      raise
+    except exceptions.InferenceRuntimeError:
       raise
     except Exception as e:
       raise exceptions.InferenceRuntimeError(

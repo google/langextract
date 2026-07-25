@@ -429,7 +429,7 @@ LangExtract excels at extracting structured medical information from clinical te
 
 Explore RadExtract, a live interactive demo on HuggingFace Spaces that shows how LangExtract can automatically structure radiology reports. Try it directly in your browser with no setup required.
 
-**[View RadExtract Demo →](https://huggingface.co/spaces/google/radextract)**
+**[View RadExtract Demo →](https://google-radextract.hf.space/)**
 
 ## Community Providers
 

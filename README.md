@@ -10,6 +10,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/google/langextract.svg?style=social&label=Star)](https://github.com/google/langextract)
 ![Tests](https://github.com/google/langextract/actions/workflows/ci.yaml/badge.svg)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17015089.svg)](https://doi.org/10.5281/zenodo.17015089)
+[![Live demo](https://img.shields.io/badge/%F0%9F%A4%97%20demo-LangExtract-yellow)](https://google-langextract.hf.space/)
 
 ## Table of Contents
 
@@ -40,6 +41,11 @@ LangExtract is a Python library that uses LLMs to extract structured information
     <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/google/langextract/main/docs/_static/langextract_concept_still.png" />
     <img src="https://raw.githubusercontent.com/google/langextract/main/docs/_static/langextract_concept.gif" alt="LangExtract end to end: unstructured text is chunked, extracted in parallel by an LLM, and every extracted value is grounded back to its exact character span in the source" width="880" />
   </picture>
+</p>
+
+<p align="center">
+  <b><a href="https://google-langextract.hf.space/">Try the live demo &rarr;</a></b><br>
+  <sub>Run grounded extraction on <i>Romeo and Juliet</i> in your browser, no install required.</sub>
 </p>
 
 ## Why LangExtract?

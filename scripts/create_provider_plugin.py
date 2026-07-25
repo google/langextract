@@ -301,13 +301,13 @@ def create_schema(
                 }}
 
             @property
-            def supports_strict_mode(self) -> bool:
-                """Whether this schema guarantees valid structured output.
+            def requires_raw_output(self) -> bool:
+                """Whether this schema emits raw JSON without fence markers.
 
                 Returns:
-                    True if the provider enforces valid JSON output.
+                    True because structured output is returned as raw JSON.
                 """
-                return False  # Set to True only if your provider guarantees valid JSON
+                return True
     ''')
 
   (package_dir / "schema.py").write_text(schema_content, encoding="utf-8")

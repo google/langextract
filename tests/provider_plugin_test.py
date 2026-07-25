@@ -19,6 +19,7 @@ few public methods. The too-few-public-methods warnings are expected.
 """
 
 from importlib import metadata
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -35,6 +36,15 @@ import pytest
 import langextract as lx
 from langextract.core import base_model
 from langextract.core import types
+
+
+def _load_module_from_path(name: str, path: Path):
+  spec = importlib.util.spec_from_file_location(name, path)
+  if spec is None or spec.loader is None:
+    raise ImportError(f"Could not load {path}")
+  module = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(module)
+  return module
 
 
 def _create_mock_entry_points(entry_points_list):
@@ -56,6 +66,27 @@ def _create_mock_entry_points(entry_points_list):
       return []
 
   return MockEntryPoints()
+
+
+class ProviderPluginGeneratorTest(absltest.TestCase):
+
+  def test_generated_schema_can_be_created_from_examples(self):
+    generator = _load_module_from_path(
+        "create_provider_plugin",
+        Path(__file__).parents[1] / "scripts" / "create_provider_plugin.py",
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      base_dir = Path(tmpdir) / "langextract-myprovider"
+      (base_dir / "langextract_myprovider").mkdir(parents=True)
+      generator.create_schema(base_dir, "MyProvider", "myprovider")
+
+      generated = _load_module_from_path(
+          "generated_schema", base_dir / "langextract_myprovider" / "schema.py"
+      )
+      schema = generated.MyProviderSchema.from_examples([])
+
+    self.assertTrue(schema.requires_raw_output)
 
 
 class PluginSmokeTest(absltest.TestCase):

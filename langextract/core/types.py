@@ -67,11 +67,24 @@ class Constraint:
 
 
 @dataclasses.dataclass(frozen=True)
+class TokenUsage:
+  """Token usage details for a model request/run."""
+
+  prompt_tokens: int | None = None
+  completion_tokens: int | None = None
+  total_tokens: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class ScoredOutput:
   """Scored output from language model inference."""
 
   score: float | None = None
   output: str | None = None
+  token_usage: TokenUsage | None = dataclasses.field(
+      default=None, compare=False
+  )
+  request_id: str | None = dataclasses.field(default=None, compare=False)
 
   def __str__(self) -> str:
     score_str = '-' if self.score is None else f'{self.score:.2f}'

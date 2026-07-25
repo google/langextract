@@ -368,7 +368,17 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         response = self._client.models.generate_content(
             model=self.model_id, contents=prompt, config=call_config
         )
-        return core_types.ScoredOutput(score=1.0, output=response.text)
+        usage = getattr(response, 'usage_metadata', None)
+        token_usage = None
+        if usage is not None:
+          token_usage = core_types.TokenUsage(
+              prompt_tokens=getattr(usage, 'prompt_token_count', None),
+              completion_tokens=getattr(usage, 'candidates_token_count', None),
+              total_tokens=getattr(usage, 'total_token_count', None),
+          )
+        return core_types.ScoredOutput(
+            score=1.0, output=response.text, token_usage=token_usage
+        )
 
       except Exception as e:
         if attempt < self.max_retries and self._is_retryable_error(e):

@@ -217,6 +217,7 @@ class Annotator:
       context_window_chars: int | None = None,
       show_progress: bool = True,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
+      track_api_call_details: bool = False,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Annotates a sequence of documents with NLP extractions.
@@ -244,6 +245,9 @@ class Annotator:
         resolution across chunk boundaries. Defaults to None (disabled).
       show_progress: Whether to show progress bar. Defaults to True.
       tokenizer: Optional tokenizer to use. If None, uses default tokenizer.
+      track_api_call_details: Whether to track detailed tokens of individual API calls.
+        Warning: Enabling this on extremely large runs with thousands of chunks/passes can consume
+        significant memory.
       **kwargs: Additional arguments passed to LanguageModel.infer and
         Resolver.
 
@@ -266,6 +270,7 @@ class Annotator:
           show_progress,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
+          track_api_call_details=track_api_call_details,
           **kwargs,
       )
     else:
@@ -279,6 +284,7 @@ class Annotator:
           show_progress,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
+          track_api_call_details=track_api_call_details,
           **kwargs,
       )
 
@@ -293,6 +299,8 @@ class Annotator:
       context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       suppress_parse_errors: bool = False,
+      track_api_call_details: bool = False,
+      pass_num: int = 0,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Single-pass annotation with stable ordering and streaming emission.
@@ -309,6 +317,14 @@ class Annotator:
     per_doc: DefaultDict[str, list[data.Extraction]] = collections.defaultdict(
         list
     )
+    doc_usage = collections.defaultdict(
+        lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    )
+    # doc_successful_api_calls tracks the number of successful inference API requests
+    # that completed and returned a scored output.
+    doc_successful_api_calls = collections.defaultdict(int)
+    doc_api_call_details = collections.defaultdict(list)
+    chunk_counters = collections.defaultdict(int)
     next_emit_idx = 0
 
     def _capture_docs(src: Iterable[data.Document]) -> Iterator[data.Document]:
@@ -336,13 +352,26 @@ class Annotator:
       limit = max(0, len(doc_order) - 1) if keep_last_doc else len(doc_order)
       while next_emit_idx < limit:
         document_id = doc_order[next_emit_idx]
+        metadata = {
+            "token_usage": doc_usage.get(document_id),
+            "api_calls": doc_successful_api_calls.get(document_id, 0),
+        }
+        if track_api_call_details:
+          metadata["api_call_details"] = doc_api_call_details.get(
+              document_id, []
+          )
         yield data.AnnotatedDocument(
             document_id=document_id,
             extractions=per_doc.get(document_id, []),
             text=doc_text_by_id.get(document_id, ""),
+            metadata=metadata,
         )
         per_doc.pop(document_id, None)
         doc_text_by_id.pop(document_id, None)
+        doc_usage.pop(document_id, None)
+        doc_successful_api_calls.pop(document_id, None)
+        doc_api_call_details.pop(document_id, None)
+        chunk_counters.pop(document_id, None)
         next_emit_idx += 1
 
     chunk_iter = _document_chunk_iterator(
@@ -401,8 +430,37 @@ class Annotator:
                 "No scored outputs from language model."
             )
 
+          doc_id = text_chunk.document_id
+          doc_successful_api_calls[doc_id] += 1
+          scored_output = scored_outputs[0]
+          usage = scored_output.token_usage
+          chunk_idx = chunk_counters[doc_id]
+          chunk_counters[doc_id] += 1
+
+          if usage is not None:
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+              val = getattr(usage, key, None)
+              if isinstance(val, (int, float)):
+                doc_usage[doc_id][key] += val
+
+          if track_api_call_details:
+            detail = {
+                "pass_index": pass_num,
+                "chunk_index": chunk_idx,
+                "token_usage": {
+                    "prompt_tokens": usage.prompt_tokens if usage else None,
+                    "completion_tokens": (
+                        usage.completion_tokens if usage else None
+                    ),
+                    "total_tokens": usage.total_tokens if usage else None,
+                },
+            }
+            if scored_output.request_id is not None:
+              detail["request_id"] = scored_output.request_id
+            doc_api_call_details[doc_id].append(detail)
+
           resolved_extractions = resolver.resolve(
-              scored_outputs[0].output,
+              scored_output.output,
               debug=debug,
               suppress_parse_errors=suppress_parse_errors,
               **kwargs,
@@ -455,6 +513,7 @@ class Annotator:
       show_progress: bool = True,
       context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
+      track_api_call_details: bool = False,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Sequential extraction passes logic for improved recall."""
@@ -469,6 +528,10 @@ class Annotator:
 
     document_extractions_by_pass: dict[str, list[list[data.Extraction]]] = {}
     document_texts: dict[str, str] = {}
+    document_usage = {}
+    document_api_calls = {}
+    document_api_call_details = {}
+
     # Preserve text up-front so we can emit documents even if later passes
     # produce no extractions.
     for _doc in document_list:
@@ -488,17 +551,42 @@ class Annotator:
           show_progress=show_progress if pass_num == 0 else False,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
+          track_api_call_details=track_api_call_details,
+          pass_num=pass_num,
           **kwargs,
       ):
         doc_id = annotated_doc.document_id
 
         if doc_id not in document_extractions_by_pass:
           document_extractions_by_pass[doc_id] = []
-          # Keep first-seen text (already pre-filled above).
+          document_usage[doc_id] = {
+              "prompt_tokens": 0,
+              "completion_tokens": 0,
+              "total_tokens": 0,
+          }
+          document_api_calls[doc_id] = 0
+          document_api_call_details[doc_id] = []
 
         document_extractions_by_pass[doc_id].append(
             annotated_doc.extractions or []
         )
+
+        if annotated_doc.metadata:
+          meta = annotated_doc.metadata
+          usage = meta.get("token_usage")
+          if usage:
+            document_usage[doc_id]["prompt_tokens"] += (
+                usage.get("prompt_tokens") or 0
+            )
+            document_usage[doc_id]["completion_tokens"] += (
+                usage.get("completion_tokens") or 0
+            )
+            document_usage[doc_id]["total_tokens"] += (
+                usage.get("total_tokens") or 0
+            )
+          document_api_calls[doc_id] += meta.get("api_calls", 0)
+          if "api_call_details" in meta:
+            document_api_call_details[doc_id].extend(meta["api_call_details"])
 
     # Emit results strictly in original input order.
     for doc in document_list:
@@ -521,10 +609,18 @@ class Annotator:
             len(merged_extractions),
         )
 
+      metadata = {
+          "token_usage": document_usage.get(doc_id),
+          "api_calls": document_api_calls.get(doc_id, 0),
+      }
+      if track_api_call_details:
+        metadata["api_call_details"] = document_api_call_details.get(doc_id, [])
+
       yield data.AnnotatedDocument(
           document_id=doc_id,
           extractions=merged_extractions,
           text=document_texts.get(doc_id, doc.text or ""),
+          metadata=metadata,
       )
 
     logging.info("Sequential extraction passes completed.")
@@ -541,6 +637,7 @@ class Annotator:
       context_window_chars: int | None = None,
       show_progress: bool = True,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
+      track_api_call_details: bool = False,
       **kwargs,
   ) -> data.AnnotatedDocument:
     """Annotates text with NLP extractions for text input.
@@ -562,6 +659,9 @@ class Annotator:
         (disabled).
       show_progress: Whether to show progress bar. Defaults to True.
       tokenizer: Optional tokenizer instance.
+      track_api_call_details: Whether to track detailed tokens of individual API calls.
+        Warning: Enabling this on extremely large runs with thousands of chunks/passes can consume
+        significant memory.
       **kwargs: Additional arguments for inference and resolver_lib.
 
     Returns:
@@ -593,6 +693,7 @@ class Annotator:
             context_window_chars=context_window_chars,
             show_progress=show_progress,
             tokenizer=tokenizer,
+            track_api_call_details=track_api_call_details,
             **kwargs,
         )
     )
@@ -622,4 +723,5 @@ class Annotator:
         document_id=annotations[0].document_id,
         extractions=annotations[0].extractions,
         text=annotations[0].text,
+        metadata=annotations[0].metadata,
     )

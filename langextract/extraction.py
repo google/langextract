@@ -71,6 +71,7 @@ def extract(
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
+    track_api_call_details: bool = False,
     tokenizer: tokenizer_lib.Tokenizer | None = None,
 ) -> list[data.AnnotatedDocument] | data.AnnotatedDocument:
   """Extracts structured information from text.
@@ -183,6 +184,11 @@ def extract(
       prompt_validation_strict: When True and prompt_validation_level is ERROR,
         raises on non-exact matches (MATCH_FUZZY, MATCH_LESSER). Defaults to False.
       show_progress: Whether to show progress bar during extraction. Defaults to True.
+      track_api_call_details: Whether to track detailed tokens of individual API calls.
+        Note that the total number of API calls is equal to (number of chunks) * (extraction_passes).
+        Warning: Enabling this on extremely large runs with thousands of chunks/passes can consume
+        significant memory.
+        Defaults to False.
 
   Returns:
       An AnnotatedDocument with the extracted information when input is a
@@ -398,6 +404,7 @@ def extract(
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,
+        track_api_call_details=track_api_call_details,
         **alignment_kwargs,
     )
     return result
@@ -422,6 +429,7 @@ def extract(
         show_progress=show_progress,
         max_workers=max_workers,
         tokenizer=tokenizer,
+        track_api_call_details=track_api_call_details,
         **alignment_kwargs,
     )
     return list(result)

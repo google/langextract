@@ -25,6 +25,7 @@
   - [*Romeo and Juliet* Full Text Extraction](#romeo-and-juliet-full-text-extraction)
   - [Medication Extraction](#medication-extraction)
   - [Radiology Report Structuring: RadExtract](#radiology-report-structuring-radextract)
+  - [Tracking Token Usage & API Calls](#tracking-token-usage--api-calls)
 - [Community Providers](#community-providers)
 - [Contributing](#contributing)
 - [Testing](#testing)
@@ -160,6 +161,52 @@ result = lx.extract(
 ```
 
 This approach can extract hundreds of entities from full novels while maintaining high accuracy. The interactive visualization seamlessly handles large result sets, making it easy to explore hundreds of entities from the output JSONL file. **[See the full *Romeo and Juliet* extraction example →](https://github.com/google/langextract/blob/main/docs/examples/longer_text_example.md)** for detailed results and performance insights.
+
+### Tracking Token Usage & API Calls
+
+By default, the returned `AnnotatedDocument` contains aggregated token usage and API call metrics inside its `metadata` dictionary:
+
+```python
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="gemini-3.5-flash",
+)
+
+print(result.metadata)
+# Output:
+# {
+#   'token_usage': {'prompt_tokens': 197, 'completion_tokens': 82, 'total_tokens': 279},
+#   'api_calls': 1
+# }
+```
+
+> **Note:** The total number of `api_calls` is equal to `(number of chunks) * (extraction_passes)`.
+>
+> **Warning:** Enabling `track_api_call_details=True` on extremely large runs (with thousands of chunks or passes) can consume significant memory because details for every single API call are stored in memory. Only use it when detailed observability is required.
+
+For detailed observability (e.g., tracking the exact token cost of each chunk or extraction pass), you can opt-in to detailed call-level tracking by setting `track_api_call_details=True`:
+
+```python
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="gemini-3.5-flash",
+    track_api_call_details=True,
+)
+
+print(result.metadata["api_call_details"])
+# Output:
+# [
+#   {
+#     'pass_index': 0,
+#     'chunk_index': 0,
+#     'token_usage': {'prompt_tokens': 197, 'completion_tokens': 82, 'total_tokens': 279}
+#   }
+# ]
+```
 
 ### Vertex AI Batch Processing
 

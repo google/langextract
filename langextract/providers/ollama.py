@@ -307,7 +307,21 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
               **combined_kwargs,
           )
           output = self._extract_response_text(response)
-        yield [core_types.ScoredOutput(score=1.0, output=output)]
+        prompt_tokens = response.get('prompt_eval_count')
+        completion_tokens = response.get('eval_count')
+        token_usage = None
+        if prompt_tokens is not None or completion_tokens is not None:
+          total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+          token_usage = core_types.TokenUsage(
+              prompt_tokens=prompt_tokens,
+              completion_tokens=completion_tokens,
+              total_tokens=total_tokens,
+          )
+        yield [
+            core_types.ScoredOutput(
+                score=1.0, output=output, token_usage=token_usage
+            )
+        ]
       except exceptions.InferenceError:
         raise
       except Exception as e:

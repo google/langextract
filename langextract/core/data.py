@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+from typing import Any
 import uuid
 
 from langextract.core import tokenizer
@@ -212,10 +213,14 @@ class AnnotatedDocument:
     extractions: List of extractions in the document.
     text: Raw text representation of the document.
     tokenized_text: Tokenized text of the document, computed from `text`.
+    metadata: Metadata dict (e.g. token_usage, api_calls) for the document.
   """
 
   extractions: list[Extraction] | None = None
   text: str | None = None
+  metadata: dict[str, Any] | None = dataclasses.field(
+      default=None, compare=False
+  )
   _document_id: str | None = dataclasses.field(
       default=None, init=False, repr=False, compare=False
   )
@@ -229,9 +234,11 @@ class AnnotatedDocument:
       document_id: str | None = None,
       extractions: list[Extraction] | None = None,
       text: str | None = None,
+      metadata: dict[str, Any] | None = None,
   ):
     self.extractions = extractions
     self.text = text
+    self.metadata = metadata
     self._document_id = document_id
 
   @property

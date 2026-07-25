@@ -28,6 +28,7 @@
 - [Community Providers](#community-providers)
 - [Contributing](#contributing)
 - [Testing](#testing)
+- [How to Cite](#how-to-cite)
 - [Disclaimer](#disclaimer)
 
 ## Introduction
@@ -430,7 +431,7 @@ with development, testing, and pull requests. You must sign a
 [Contributor License Agreement](https://cla.developers.google.com/about)
 before submitting patches.
 
-
+Thanks to everyone who has [contributed](https://github.com/google/langextract/graphs/contributors).
 
 ## Testing
 
@@ -497,6 +498,25 @@ pylint --rcfile=.pylintrc langextract tests
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full development guidelines.
+
+## How to Cite
+
+If you use LangExtract in your research, please cite it:
+
+```bibtex
+@software{goel_langextract,
+  author  = {Goel, Akshay},
+  title   = {{LangExtract}},
+  year    = {2026},
+  version = {1.6.0},
+  doi     = {10.5281/zenodo.21126643},
+  url     = {https://github.com/google/langextract}
+}
+```
+
+Cite the version you used — each release has its own DOI on
+[Zenodo](https://doi.org/10.5281/zenodo.17015089). If your style rejects
+`@software`, use `@misc`.
 
 ## Disclaimer
 

@@ -348,6 +348,34 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
     return bool(_RETRYABLE_MESSAGE_RE.search(str(error)))
 
+  @staticmethod
+  def _describe_missing_gemini_text(response: Any) -> str:
+    """Builds a diagnostic message for a Gemini response with no text.
+
+    `response.text` returns None (not an exception) when the prompt was
+    blocked before generation, when the candidate stopped for a non-STOP
+    reason (safety, recitation, etc.) with no content, or when the response
+    contains only non-text parts (e.g. a function call). Without this,
+    callers previously got ScoredOutput(score=1.0, output=None) reported as
+    a successful empty extraction, silently discarding the actual reason.
+    """
+    prompt_feedback = getattr(response, 'prompt_feedback', None)
+    block_reason = getattr(prompt_feedback, 'block_reason', None)
+    if block_reason:
+      block_message = getattr(prompt_feedback, 'block_reason_message', None)
+      detail = f': {block_message}' if block_message else ''
+      return f'Gemini blocked the prompt ({block_reason}){detail}'
+
+    candidates = getattr(response, 'candidates', None)
+    if candidates:
+      finish_reason = getattr(candidates[0], 'finish_reason', None)
+      if finish_reason and finish_reason != 'STOP':
+        return (
+            f'Gemini response contained no text (finish_reason={finish_reason})'
+        )
+
+    return 'Gemini response contained no text content.'
+
   def _process_single_prompt(
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
@@ -368,8 +396,15 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         response = self._client.models.generate_content(
             model=self.model_id, contents=prompt, config=call_config
         )
-        return core_types.ScoredOutput(score=1.0, output=response.text)
+        output_text = response.text
+        if output_text is None:
+          raise exceptions.InferenceRuntimeError(
+              self._describe_missing_gemini_text(response)
+          )
+        return core_types.ScoredOutput(score=1.0, output=output_text)
 
+      except exceptions.InferenceRuntimeError:
+        raise
       except Exception as e:
         if attempt < self.max_retries and self._is_retryable_error(e):
           # Cap after jitter so the named maximum applies to the real sleep.

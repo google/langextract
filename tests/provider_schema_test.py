@@ -740,5 +740,91 @@ class ApplyOutputSchemaTest(absltest.TestCase):
         model.apply_output_schema(self.output_schema)
 
 
+class GeminiRefusalHandlingTest(absltest.TestCase):
+  """Tests Gemini safety-block and empty-response handling.
+
+  response.text returns None (not an exception) when a prompt is blocked
+  before generation or a candidate stops for a non-STOP reason with no
+  content -- mirrors the OpenAI refusal-handling gap fixed for #491, but
+  for the Gemini realtime path, which was left unaddressed.
+  """
+
+  def setUp(self):
+    super().setUp()
+
+    patcher = mock.patch("google.genai.Client", autospec=True)
+    self.addCleanup(patcher.stop)
+
+    mock_client_cls = patcher.start()
+    self.mock_client = mock_client_cls.return_value
+
+    self.model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        api_key="test_key",
+    )
+
+  def test_process_single_prompt_returns_text(self):
+    response = mock.Mock(text="Hello")
+    self.mock_client.models.generate_content.return_value = response
+
+    result = self.model._process_single_prompt("prompt", {})
+
+    self.assertEqual(result.output, "Hello")
+    self.assertEqual(result.score, 1.0)
+
+  def test_process_single_prompt_raises_on_blocked_prompt(self):
+    prompt_feedback = mock.Mock(
+        block_reason="SAFETY", block_reason_message="blocked content"
+    )
+    response = mock.Mock(
+        text=None, prompt_feedback=prompt_feedback, candidates=[]
+    )
+    self.mock_client.models.generate_content.return_value = response
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        "Gemini blocked the prompt \\(SAFETY\\): blocked content",
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+  def test_process_single_prompt_raises_on_non_stop_finish_reason(self):
+    candidate = mock.Mock(finish_reason="SAFETY")
+    response = mock.Mock(
+        text=None, prompt_feedback=None, candidates=[candidate]
+    )
+    self.mock_client.models.generate_content.return_value = response
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        "no text \\(finish_reason=SAFETY\\)",
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+  def test_process_single_prompt_raises_when_no_diagnostic_available(self):
+    response = mock.Mock(text=None, prompt_feedback=None, candidates=[])
+
+    self.mock_client.models.generate_content.return_value = response
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        "contained no text content",
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+  def test_process_single_prompt_does_not_retry_on_refusal(self):
+    prompt_feedback = mock.Mock(
+        block_reason="SAFETY", block_reason_message=None
+    )
+    response = mock.Mock(
+        text=None, prompt_feedback=prompt_feedback, candidates=[]
+    )
+    self.mock_client.models.generate_content.return_value = response
+
+    with self.assertRaises(exceptions.InferenceRuntimeError):
+      self.model._process_single_prompt("prompt", {})
+
+    self.mock_client.models.generate_content.assert_called_once()
+
+
 if __name__ == "__main__":
   absltest.main()

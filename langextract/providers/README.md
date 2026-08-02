@@ -22,12 +22,12 @@ User Code                    LangExtract                      Provider
 ─────────                    ───────────                      ────────
     |                             |                              |
     | lx.extract(                 |                              |
-    |   model_id="gemini-2.5-flash")                             |
+    |   model_id="gemini-3.5-flash")                             |
     |─────────────────────────────>                              |
     |                             |                              |
     |                    factory.create_model()                  |
     |                             |                              |
-    |                    router.resolve("gemini-2.5-flash")      |
+    |                    router.resolve("gemini-3.5-flash")      |
     |                       Pattern match: ^gemini               |
     |                             ↓                              |
     |                       GeminiLanguageModel                  |
@@ -59,14 +59,14 @@ model = lx.factory.create_model(config)
 
 # Method 2: Using provider without model_id (uses provider's default)
 config = lx.factory.ModelConfig(
-    provider="GeminiLanguageModel",  # Will use default gemini-2.5-flash
+    provider="GeminiLanguageModel",  # Will use default gemini-3.5-flash
     provider_kwargs={"api_key": "..."}
 )
 model = lx.factory.create_model(config)
 
 # Method 3: Auto-detection (when no conflicts exist)
 config = lx.factory.ModelConfig(
-    model_id="gemini-2.5-flash"  # Provider auto-detected
+    model_id="gemini-3.5-flash"  # Provider auto-detected
 )
 model = lx.factory.create_model(config)
 ```
@@ -137,9 +137,9 @@ result = lx.extract(
 
 ## How Provider Selection Works
 
-When you call `lx.extract(model_id="gemini-2.5-flash", ...)`, here's what happens:
+When you call `lx.extract(model_id="gemini-3.5-flash", ...)`, here's what happens:
 
-1. **Factory receives model_id**: "gemini-2.5-flash"
+1. **Factory receives model_id**: "gemini-3.5-flash"
 2. **Router searches patterns**: Each provider registers regex patterns
 3. **First match wins**: Returns the matching provider class
 4. **Provider instantiated**: With model_id and any kwargs
@@ -154,7 +154,7 @@ from langextract.providers import router
 # Gemini provider registration:
 @router.register(
     r'^GeminiLanguageModel$',  # Explicit: model_id="GeminiLanguageModel"
-    r'^gemini',                # Prefix: model_id="gemini-2.5-flash"
+    r'^gemini',                # Prefix: model_id="gemini-3.5-flash"
     r'^palm'                   # Legacy: model_id="palm-2"
 )
 class GeminiLanguageModel(base_model.BaseLanguageModel):
@@ -178,7 +178,7 @@ result = lx.extract(
     text_or_documents="...",
     prompt_description="Extract key information",
     examples=[...],
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
 )
 ```
 
@@ -190,9 +190,9 @@ Parameters flow from `lx.extract()` to providers through several mechanisms:
 # 1. Common parameters handled by lx.extract itself:
 result = lx.extract(
     text_or_documents="Your document",
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     prompt_description="Extract key facts",
-    examples=[...],             # Used for few-shot prompting (required)
+    examples=[...],             # Required unless output_schema is provided
     max_workers=4,              # Parallel processing (provider-dependent)
     max_char_buffer=3000,       # Document chunking
 )
@@ -200,7 +200,7 @@ result = lx.extract(
 # 2. Provider-specific parameters passed via **kwargs:
 result = lx.extract(
     text_or_documents="Your document",
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     prompt_description="Extract entities",
     examples=[...],
     # These go directly to the Gemini provider:
@@ -234,7 +234,7 @@ import langextract as lx
 from langextract.providers.gemini import GeminiLanguageModel
 
 model = GeminiLanguageModel(
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     api_key="your-key"
 )
 outputs = model.infer(["prompt1", "prompt2"])
@@ -286,6 +286,7 @@ yourprovider = "langextract_yourprovider:YourProviderLanguageModel"
 #### ☐ **4. (Optional) Add Schema Support** (`schema.py`)
 - [ ] Create schema class inheriting from `langextract.core.schema.BaseSchema`
 - [ ] Implement `from_examples()` class method
+- [ ] Implement `from_schema_dict()` if the provider supports `output_schema`
 - [ ] Implement `to_provider_config()` method
 - [ ] Add `get_schema_class()` to provider
 - [ ] Handle schema in provider's `__init__()` and `infer()`
@@ -499,6 +500,18 @@ When users set `use_schema_constraints=True`, LangExtract will:
 3. Call `to_provider_config()` to get provider-specific kwargs
 4. Pass these kwargs to your provider's `__init__()`
 5. Your provider uses the schema for structured output
+
+For user-authored schemas passed as `output_schema=...`, also implement
+`BaseSchema.from_schema_dict()`. If the provider exposes lower-level schema
+kwargs such as `response_schema`, list them in
+`output_schema_reserved_provider_kwargs()` so LangExtract can reject ambiguous
+requests where both `output_schema` and provider-native schema kwargs are set.
+Schemas returned from `from_schema_dict()` should expose
+`from_output_schema=True`; `BaseLanguageModel.apply_output_schema()` marks
+mutable schema instances automatically, but explicit state is safest for
+dataclass or slots-based schemas.
+Providers that store schema state after construction should override
+`apply_schema()` and call `super().apply_schema(schema_instance)`.
 
 ### Option 2: Built-in Provider (Requires Core Team Approval)
 

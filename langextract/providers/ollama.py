@@ -107,6 +107,25 @@ _DEFAULT_TEMPERATURE = 0.1
 _DEFAULT_TIMEOUT = 120
 _DEFAULT_KEEP_ALIVE = 5 * 60  # 5 minutes
 _DEFAULT_NUM_CTX = 2048
+_GPT_OSS_MODEL_PREFIX = 'gpt-oss'
+# GPT-OSS's Harmony response format conflicts with Ollama's native JSON mode,
+# so JSON extraction uses a narrow chat adapter instead.
+_GPT_OSS_JSON_SYSTEM_INSTRUCTION = (
+    'Output a single JSON object matching the requested extraction format. '
+    'Do not include code fences, prose, or reasoning.'
+)
+
+
+def _is_gpt_oss_model(model_id: str) -> bool:
+  """Return whether an Ollama model ID is GPT-OSS."""
+  normalized_model_id = model_id.lower()
+  if normalized_model_id == _GPT_OSS_MODEL_PREFIX:
+    return True
+  prefix = f'{_GPT_OSS_MODEL_PREFIX}:'
+  return normalized_model_id.startswith(prefix) and len(
+      normalized_model_id
+  ) > len(prefix)
+
 
 # Pre-configured FormatHandler for consistent Ollama configuration
 # use_wrapper=True creates {"extractions": [...]} vs just [...]
@@ -260,18 +279,34 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
     # LangExtract consumes final structured output, not Ollama reasoning traces.
     combined_kwargs.setdefault('think', False)
 
+    structured_output_format = (
+        'json' if self.format_type == core_types.FormatType.JSON else 'yaml'
+    )
+    # Keep YAML on the existing generate path; issue #116 is JSON-only.
+    use_gpt_oss_chat = (
+        _is_gpt_oss_model(self._model)
+        and self.format_type == core_types.FormatType.JSON
+    )
+
     for prompt in batch_prompts:
       try:
-        response = self._ollama_query(
-            prompt=prompt,
-            model=self._model,
-            structured_output_format='json'
-            if self.format_type == core_types.FormatType.JSON
-            else 'yaml',
-            model_url=self._model_url,
-            **combined_kwargs,
-        )
-        output = self._extract_response_text(response)
+        if use_gpt_oss_chat:
+          response = self._ollama_gpt_oss_chat_query(
+              prompt=prompt,
+              model=self._model,
+              model_url=self._model_url,
+              **combined_kwargs,
+          )
+          output = self._extract_chat_response_text(response)
+        else:
+          response = self._ollama_query(
+              prompt=prompt,
+              model=self._model,
+              structured_output_format=structured_output_format,
+              model_url=self._model_url,
+              **combined_kwargs,
+          )
+          output = self._extract_response_text(response)
         yield [core_types.ScoredOutput(score=1.0, output=output)]
       except exceptions.InferenceError:
         raise
@@ -298,6 +333,208 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
         "Ollama response did not include generated text in the 'response' "
         'field.',
         provider='Ollama',
+    )
+
+  @staticmethod
+  def _extract_chat_response_text(response: Mapping[str, Any]) -> str:
+    """Returns final generated text from an Ollama chat response."""
+    message = response.get('message')
+    thinking = response.get('thinking')
+    if isinstance(message, Mapping):
+      output = message.get('content')
+      if output:
+        return output
+      thinking = thinking or message.get('thinking')
+
+    if thinking:
+      raise exceptions.InferenceRuntimeError(
+          'Ollama returned an empty chat response with only a reasoning '
+          'trace. This usually happens when the model returned only '
+          "reasoning tokens, such as when 'think=True' is passed to a "
+          'reasoning model. LangExtract defaults to think=False so models '
+          'emit final JSON instead.',
+          provider='Ollama',
+      )
+    raise exceptions.InferenceRuntimeError(
+        'Ollama chat response did not include generated text in the '
+        "'message.content' field.",
+        provider='Ollama',
+    )
+
+  def _request_headers(self) -> dict[str, str]:
+    """Returns HTTP headers for Ollama requests."""
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
+    if self._api_key:
+      if self._auth_scheme:
+        headers[self._auth_header] = f'{self._auth_scheme} {self._api_key}'
+      else:
+        headers[self._auth_header] = self._api_key
+    return headers
+
+  @staticmethod
+  def _build_request_options(
+      *,
+      temperature: float | None = None,
+      seed: int | None = None,
+      top_k: int | None = None,
+      top_p: float | None = None,
+      max_output_tokens: int | None = None,
+      keep_alive: int | None = None,
+      num_threads: int | None = None,
+      num_ctx: int | None = None,
+      **kwargs,
+  ) -> tuple[dict[str, Any], int]:
+    """Returns Ollama options and the mirrored top-level keep_alive value."""
+    options: dict[str, Any] = {}
+    keep_alive_value = (
+        keep_alive if keep_alive is not None else _DEFAULT_KEEP_ALIVE
+    )
+    options['keep_alive'] = keep_alive_value
+
+    if seed is not None:
+      options['seed'] = seed
+    if temperature is not None:
+      options['temperature'] = temperature
+    else:
+      options['temperature'] = _DEFAULT_TEMPERATURE
+    if top_k is not None:
+      options['top_k'] = top_k
+    if top_p is not None:
+      options['top_p'] = top_p
+    if num_threads is not None:
+      options['num_thread'] = num_threads
+    if max_output_tokens is not None:
+      options['num_predict'] = max_output_tokens
+    if num_ctx is not None:
+      options['num_ctx'] = num_ctx
+    else:
+      options['num_ctx'] = _DEFAULT_NUM_CTX
+
+    reserved_top_level = {
+        'model',
+        'messages',
+        'prompt',
+        'system',
+        'stop',
+        'format',
+        'stream',
+        'raw',
+    }
+
+    for key, value in kwargs.items():
+      if value is None:
+        continue
+      if key in reserved_top_level:
+        continue
+      if key not in options:
+        options[key] = value
+    return options, keep_alive_value
+
+  def _post_ollama_json(
+      self,
+      api_url: str,
+      payload: Mapping[str, Any],
+      request_timeout: int,
+      num_threads: int | None,
+      model: str,
+  ) -> Mapping[str, Any]:
+    """Posts a non-streaming Ollama request and returns the JSON response."""
+    try:
+      response = self._requests.post(
+          api_url,
+          headers=self._request_headers(),
+          json=payload,
+          timeout=request_timeout,
+      )
+    except self._requests.exceptions.RequestException as e:
+      if isinstance(e, self._requests.exceptions.ReadTimeout):
+        msg = (
+            f'Ollama Model timed out (timeout={request_timeout},'
+            f' num_threads={num_threads})'
+        )
+        raise exceptions.InferenceRuntimeError(
+            msg, original=e, provider='Ollama'
+        ) from e
+      raise exceptions.InferenceRuntimeError(
+          f'Ollama request failed: {str(e)}', original=e, provider='Ollama'
+      ) from e
+
+    response.encoding = 'utf-8'
+    if response.status_code == 200:
+      return response.json()
+    if response.status_code == 404:
+      raise exceptions.InferenceConfigError(
+          f"Can't find Ollama {model}. Try: ollama run {model}"
+      )
+    msg = f'Bad status code from Ollama: {response.status_code}'
+    raise exceptions.InferenceRuntimeError(msg, provider='Ollama')
+
+  def _ollama_gpt_oss_chat_query(
+      self,
+      prompt: str,
+      model: str | None = None,
+      temperature: float | None = None,
+      seed: int | None = None,
+      top_k: int | None = None,
+      top_p: float | None = None,
+      max_output_tokens: int | None = None,
+      system: str = '',
+      model_url: str | None = None,
+      timeout: int | None = None,
+      keep_alive: int | None = None,
+      think: bool | None = None,
+      num_threads: int | None = None,
+      num_ctx: int | None = None,
+      stop: str | list[str] | None = None,
+      **kwargs,
+  ) -> Mapping[str, Any]:
+    """Sends a GPT-OSS JSON prompt through Ollama's chat endpoint."""
+    model = model or self._model
+    model_url = model_url or self._model_url
+
+    options, keep_alive_value = self._build_request_options(
+        temperature=temperature,
+        seed=seed,
+        top_k=top_k,
+        top_p=top_p,
+        max_output_tokens=max_output_tokens,
+        keep_alive=keep_alive,
+        num_threads=num_threads,
+        num_ctx=num_ctx,
+        **kwargs,
+    )
+
+    api_url = urljoin(
+        model_url if model_url.endswith('/') else model_url + '/',
+        'api/chat',
+    )
+    payload: dict[str, Any] = {
+        'model': model,
+        'messages': [
+            {
+                'role': 'system',
+                'content': system or _GPT_OSS_JSON_SYSTEM_INSTRUCTION,
+            },
+            {'role': 'user', 'content': prompt},
+        ],
+        'stream': False,
+        'options': options,
+    }
+    payload['keep_alive'] = keep_alive_value
+
+    if think is not None:
+      payload['think'] = think
+
+    if stop is not None:
+      payload['stop'] = stop
+
+    request_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
+    return self._post_ollama_json(
+        api_url, payload, request_timeout, num_threads, model
     )
 
   def _ollama_query(
@@ -376,47 +613,17 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
           'json' if self.format_type == core_types.FormatType.JSON else 'yaml'
       )
 
-    options: dict[str, Any] = {}
-    keep_alive_value = (
-        keep_alive if keep_alive is not None else _DEFAULT_KEEP_ALIVE
+    options, keep_alive_value = self._build_request_options(
+        temperature=temperature,
+        seed=seed,
+        top_k=top_k,
+        top_p=top_p,
+        max_output_tokens=max_output_tokens,
+        keep_alive=keep_alive,
+        num_threads=num_threads,
+        num_ctx=num_ctx,
+        **kwargs,
     )
-    options['keep_alive'] = keep_alive_value
-
-    if seed is not None:
-      options['seed'] = seed
-    if temperature is not None:
-      options['temperature'] = temperature
-    else:
-      options['temperature'] = _DEFAULT_TEMPERATURE
-    if top_k is not None:
-      options['top_k'] = top_k
-    if top_p is not None:
-      options['top_p'] = top_p
-    if num_threads is not None:
-      options['num_thread'] = num_threads
-    if max_output_tokens is not None:
-      options['num_predict'] = max_output_tokens
-    if num_ctx is not None:
-      options['num_ctx'] = num_ctx
-    else:
-      options['num_ctx'] = _DEFAULT_NUM_CTX
-
-    reserved_top_level = {
-        'model',
-        'prompt',
-        'system',
-        'stop',
-        'format',
-        'stream',
-        'raw',
-    }
-    for key, value in kwargs.items():
-      if value is None:
-        continue
-      if key in reserved_top_level:
-        continue
-      if key not in options:
-        options[key] = value
 
     api_url = urljoin(
         model_url if model_url.endswith('/') else model_url + '/',
@@ -443,45 +650,6 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       payload['stop'] = stop
 
     request_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
-
-    headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-    }
-
-    if self._api_key:
-      if self._auth_scheme:
-        headers[self._auth_header] = f'{self._auth_scheme} {self._api_key}'
-      else:
-        headers[self._auth_header] = self._api_key
-
-    try:
-      response = self._requests.post(
-          api_url,
-          headers=headers,
-          json=payload,
-          timeout=request_timeout,
-      )
-    except self._requests.exceptions.RequestException as e:
-      if isinstance(e, self._requests.exceptions.ReadTimeout):
-        msg = (
-            f'Ollama Model timed out (timeout={request_timeout},'
-            f' num_threads={num_threads})'
-        )
-        raise exceptions.InferenceRuntimeError(
-            msg, original=e, provider='Ollama'
-        ) from e
-      raise exceptions.InferenceRuntimeError(
-          f'Ollama request failed: {str(e)}', original=e, provider='Ollama'
-      ) from e
-
-    response.encoding = 'utf-8'
-    if response.status_code == 200:
-      return response.json()
-    if response.status_code == 404:
-      raise exceptions.InferenceConfigError(
-          f"Can't find Ollama {model}. Try: ollama run {model}"
-      )
-    else:
-      msg = f'Bad status code from Ollama: {response.status_code}'
-      raise exceptions.InferenceRuntimeError(msg, provider='Ollama')
+    return self._post_ollama_json(
+        api_url, payload, request_timeout, num_threads, model
+    )

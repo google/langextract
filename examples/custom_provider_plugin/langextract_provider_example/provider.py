@@ -44,7 +44,7 @@ class CustomGeminiProvider(base_model.BaseLanguageModel):
   you must explicitly specify this provider when creating a model:
 
   config = lx.factory.ModelConfig(
-      model_id="gemini-2.5-flash",
+      model_id="gemini-3.5-flash",
       provider="CustomGeminiProvider"
   )
   model = lx.factory.create_model(config)
@@ -59,7 +59,7 @@ class CustomGeminiProvider(base_model.BaseLanguageModel):
 
   def __init__(
       self,
-      model_id: str = 'gemini-2.5-flash',
+      model_id: str = 'gemini-3.5-flash',
       api_key: str | None = None,
       temperature: float = 0.0,
       **kwargs: Any,

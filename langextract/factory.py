@@ -29,6 +29,9 @@ import warnings
 from langextract import providers
 from langextract.core import base_model
 from langextract.core import exceptions
+from langextract.core import output_schema as output_schema_lib
+from langextract.core import schema as core_schema
+from langextract.core import types as core_types
 from langextract.providers import router
 
 
@@ -37,7 +40,7 @@ class ModelConfig:
   """Configuration for instantiating a language model provider.
 
   Attributes:
-    model_id: The model identifier (e.g., "gemini-2.5-flash", "gpt-4o").
+    model_id: The model identifier (e.g., "gemini-3.5-flash", "gpt-4o").
     provider: Optional explicit provider name or class name. Use this to
       disambiguate when multiple providers support the same model_id.
     provider_kwargs: Optional provider-specific keyword arguments.
@@ -106,6 +109,7 @@ def create_model(
     use_schema_constraints: bool = False,
     fence_output: bool | None = None,
     return_fence_output: bool = False,
+    output_schema: core_types.JsonSchema | None = None,
 ) -> base_model.BaseLanguageModel | tuple[base_model.BaseLanguageModel, bool]:
   """Create a language model instance from configuration.
 
@@ -115,6 +119,10 @@ def create_model(
     use_schema_constraints: Whether to apply schema constraints from examples.
     fence_output: Explicit fence output preference. If None, computed from schema.
     return_fence_output: If True, also return computed fence_output value.
+    output_schema: Optional user-provided JSON schema for the raw LangExtract
+      output. When provided, it is used verbatim and example-derived schema
+      generation is skipped, regardless of use_schema_constraints. Cannot be
+      combined with fence_output=True.
 
   Returns:
     An instantiated language model provider.
@@ -125,19 +133,24 @@ def create_model(
     ValueError: If no provider is registered for the model_id.
     InferenceConfigError: If provider instantiation fails.
   """
-  if use_schema_constraints or fence_output is not None:
+  if not config.model_id and not config.provider:
+    raise ValueError("Either model_id or provider must be specified")
+
+  if (
+      use_schema_constraints
+      or fence_output is not None
+      or output_schema is not None
+  ):
     model = _create_model_with_schema(
         config=config,
         examples=examples,
         use_schema_constraints=use_schema_constraints,
         fence_output=fence_output,
+        output_schema=output_schema,
     )
     if return_fence_output:
       return model, model.requires_fence_output
     return model
-
-  if not config.model_id and not config.provider:
-    raise ValueError("Either model_id or provider must be specified")
 
   providers.load_builtins_once()
   providers.load_plugins_once()
@@ -177,13 +190,17 @@ def create_model(
 def create_model_from_id(
     model_id: str | None = None,
     provider: str | None = None,
+    *,
+    output_schema: core_types.JsonSchema | None = None,
     **provider_kwargs: typing.Any,
 ) -> base_model.BaseLanguageModel:
   """Convenience function to create a model.
 
   Args:
-    model_id: The model identifier (e.g., "gemini-2.5-flash").
+    model_id: The model identifier (e.g., "gemini-3.5-flash").
     provider: Optional explicit provider name to disambiguate.
+    output_schema: Optional user-provided JSON schema for the raw LangExtract
+      output.
     **provider_kwargs: Optional provider-specific keyword arguments.
 
   Returns:
@@ -192,7 +209,21 @@ def create_model_from_id(
   config = ModelConfig(
       model_id=model_id, provider=provider, provider_kwargs=provider_kwargs
   )
-  return create_model(config)
+  return create_model(config, output_schema=output_schema)
+
+
+def _unsupported_output_schema_error(
+    config: ModelConfig,
+    provider_class: type[base_model.BaseLanguageModel],
+) -> exceptions.InferenceConfigError:
+  """Build an error naming the model or provider without output_schema support."""
+  if config.model_id:
+    target = f"model_id={config.model_id!r}"
+  elif config.provider:
+    target = f"provider={config.provider!r}"
+  else:
+    target = provider_class.__name__
+  return exceptions.unsupported_output_schema_error(f"Provider for {target}")
 
 
 def _create_model_with_schema(
@@ -200,6 +231,7 @@ def _create_model_with_schema(
     examples: typing.Sequence[typing.Any] | None = None,
     use_schema_constraints: bool = True,
     fence_output: bool | None = None,
+    output_schema: core_types.JsonSchema | None = None,
 ) -> base_model.BaseLanguageModel:
   """Internal helper to create a model with optional schema constraints.
 
@@ -213,10 +245,18 @@ def _create_model_with_schema(
     use_schema_constraints: Whether to generate and apply schema constraints.
     fence_output: Whether to wrap output in markdown fences. If None,
       will be computed based on schema's requires_raw_output.
+    output_schema: Optional user-provided JSON schema for the raw LangExtract
+      output. When provided, it replaces example-derived schema generation.
 
   Returns:
     A model instance with fence_output configured appropriately.
   """
+  if output_schema is not None and fence_output is True:
+    raise exceptions.output_schema_fence_error()
+  if output_schema is not None and not output_schema_lib.is_json_format_type(
+      config.provider_kwargs.get("format_type")
+  ):
+    raise exceptions.output_schema_format_error()
 
   # Must run before resolution regardless of config path.
   providers.load_builtins_once()
@@ -228,14 +268,36 @@ def _create_model_with_schema(
     provider_class = router.resolve(config.model_id)
 
   schema_instance = None
-  if use_schema_constraints and examples:
+  if output_schema is not None:
+    schema_class = provider_class.get_schema_class()
+    if schema_class is None:
+      raise _unsupported_output_schema_error(config, provider_class)
+    try:
+      schema_instance = schema_class.from_schema_dict(output_schema)
+    except NotImplementedError as e:
+      raise _unsupported_output_schema_error(config, provider_class) from e
+    core_schema.mark_from_output_schema(schema_instance)
+  elif use_schema_constraints and examples:
     schema_class = provider_class.get_schema_class()
     if schema_class is not None:
       schema_instance = schema_class.from_examples(examples)
 
   if schema_instance:
     kwargs = schema_instance.to_provider_config()
-    kwargs.update(config.provider_kwargs)
+    provider_kwargs = config.provider_kwargs
+    if output_schema is not None:
+      reserved = schema_instance.output_schema_reserved_provider_kwargs()
+      conflicts = sorted(
+          key for key in reserved if provider_kwargs.get(key) is not None
+      )
+      if conflicts:
+        raise exceptions.output_schema_provider_kwargs_error(conflicts)
+      provider_kwargs = {
+          key: value
+          for key, value in provider_kwargs.items()
+          if value is not None or key not in reserved
+      }
+    kwargs.update(provider_kwargs)
   else:
     kwargs = dict(config.provider_kwargs)
 

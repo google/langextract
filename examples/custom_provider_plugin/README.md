@@ -120,7 +120,7 @@ import langextract as lx
 
 # Option A: build a model explicitly and pass it to extract()
 config = lx.factory.ModelConfig(
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     provider="CustomGeminiProvider",
     provider_kwargs={"api_key": "your-api-key"},
 )
@@ -137,7 +137,7 @@ result = lx.extract(
 result = lx.extract(
     text_or_documents="Your text here",
     config=lx.factory.ModelConfig(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         provider="CustomGeminiProvider",
         provider_kwargs={"api_key": "your-api-key"},
     ),

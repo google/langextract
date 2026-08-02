@@ -50,13 +50,13 @@ class ProviderSchemaDiscoveryTest(absltest.TestCase):
         msg="OllamaLanguageModel should return FormatModeSchema class",
     )
 
-  def test_openai_returns_none(self):
-    """Test that OpenAILanguageModel returns None (no schema support yet)."""
-    # OpenAI imports dependencies in __init__, not at module level
+  def test_openai_returns_openai_schema(self):
+    """OpenAILanguageModel advertises OpenAISchema support."""
     schema_class = openai.OpenAILanguageModel.get_schema_class()
-    self.assertIsNone(
+    self.assertIs(
         schema_class,
-        msg="OpenAILanguageModel should return None (no schema support)",
+        schemas.openai.OpenAISchema,
+        msg="OpenAILanguageModel should return OpenAISchema class",
     )
 
 
@@ -489,7 +489,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
 
     with mock.patch("google.genai.Client", autospec=True):
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           format_type=data.FormatType.YAML,
       )
@@ -528,7 +528,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
       mock_model_instance.return_value.text = '{"extractions": []}'
 
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           response_schema=test_schema.schema_dict,
           response_mime_type="application/json",
@@ -570,7 +570,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
       mock_model_instance.return_value.text = '{"extractions": []}'
 
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           max_workers=5,
           response_schema={"test": "schema"},  # API parameter
@@ -628,6 +628,116 @@ class SchemaShimTest(absltest.TestCase):
             " compatibility"
         ),
     )
+
+
+class ApplyOutputSchemaTest(absltest.TestCase):
+  """Tests for BaseLanguageModel.apply_output_schema across providers."""
+
+  def setUp(self):
+    super().setUp()
+    self.output_schema = schema.extractions_schema(
+        schema.extraction_item_schema("condition")
+    )
+
+  def test_gemini_output_schema_reaches_generate_config(self):
+    with mock.patch("google.genai.Client", autospec=True) as mock_client:
+      mock_generate = mock.Mock(spec=["return_value"])
+      mock_client.return_value.models.generate_content = mock_generate
+      mock_generate.return_value.text = '{"extractions": []}'
+
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash", api_key="test_key"
+      )
+      model.apply_output_schema(self.output_schema)
+      list(model.infer(["Test prompt"]))
+
+      config = mock_generate.call_args[1]["config"]
+      self.assertEqual(config["response_json_schema"], self.output_schema)
+      self.assertEqual(config["response_mime_type"], "application/json")
+
+  def test_openai_output_schema_reaches_response_format(self):
+    with mock.patch("openai.OpenAI", autospec=True) as mock_client_cls:
+      mock_client = mock.Mock()
+      mock_client_cls.return_value = mock_client
+      mock_response = mock.Mock()
+      mock_response.choices = [
+          mock.Mock(message=mock.Mock(content='{"extractions": []}'))
+      ]
+      mock_client.chat.completions.create.return_value = mock_response
+
+      model = openai.OpenAILanguageModel(model_id="gpt-4o", api_key="test_key")
+      model.apply_output_schema(self.output_schema)
+      list(model.infer(["Test prompt"]))
+
+      call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+      response_format = call_kwargs["response_format"]
+      self.assertEqual(response_format["type"], "json_schema")
+      self.assertEqual(
+          response_format["json_schema"]["schema"], self.output_schema
+      )
+
+  def test_ollama_apply_output_schema_raises(self):
+    model = ollama.OllamaLanguageModel(model_id="gemma2:2b")
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "does not support output_schema"
+    ):
+      model.apply_output_schema(self.output_schema)
+
+  def test_apply_output_schema_rejects_conflicting_schema_kwargs(self):
+    with mock.patch("google.genai.Client", autospec=True):
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash",
+          api_key="test_key",
+          response_schema={"type": "object"},
+      )
+
+      with self.assertRaisesRegex(
+          exceptions.InferenceConfigError, "response_schema"
+      ):
+        model.apply_output_schema(self.output_schema)
+
+  def test_apply_output_schema_is_idempotent_for_same_schema(self):
+    with mock.patch("google.genai.Client", autospec=True):
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash", api_key="test_key"
+      )
+
+      model.apply_output_schema(self.output_schema)
+      model.apply_output_schema(self.output_schema)
+
+      self.assertTrue(model.schema.from_output_schema)
+
+  def test_apply_output_schema_rejects_different_schema(self):
+    with mock.patch("google.genai.Client", autospec=True):
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash", api_key="test_key"
+      )
+      model.apply_output_schema(self.output_schema)
+
+      other_schema = schema.extractions_schema(
+          schema.extraction_item_schema("medication")
+      )
+      with self.assertRaisesRegex(
+          exceptions.InferenceConfigError, "already has a schema"
+      ):
+        model.apply_output_schema(other_schema)
+
+  def test_apply_output_schema_rejects_constructor_gemini_schema(self):
+    with mock.patch("google.genai.Client", autospec=True):
+      example_schema = schemas.gemini.GeminiSchema(
+          _schema_dict={"type": "object", "properties": {}}
+      )
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash",
+          api_key="test_key",
+          gemini_schema=example_schema,
+      )
+
+      with self.assertRaisesRegex(
+          exceptions.InferenceConfigError, "already has a schema"
+      ):
+        model.apply_output_schema(self.output_schema)
 
 
 if __name__ == "__main__":

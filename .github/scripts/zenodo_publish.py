@@ -54,6 +54,25 @@ except (KeyError, FileNotFoundError) as e:
   sys.exit(1)
 
 
+def display_name() -> str:
+  """Canonical project name for the record title.
+
+  Sourced from CITATION.cff, which is where the project already declares its
+  citation title. The PyPI name cannot be used directly: str.title() on
+  "langextract" yields "Langextract", which is how the v1.6.0 record ended up
+  mis-capitalized. Read with a narrow regex to avoid a YAML dependency in the
+  release workflow.
+  """
+  try:
+    with open("CITATION.cff", encoding="utf-8") as f:
+      for line in f:
+        if m := re.match(r'^title:\s*["\']?([^"\'\n]+)', line):
+          return m.group(1).strip()
+  except FileNotFoundError:
+    pass
+  return PROJECT.replace("-", " ").title()
+
+
 def _check(r: requests.Response, op: str) -> None:
   """raise_for_status with the response body included for debugging."""
   if not r.ok:
@@ -150,7 +169,7 @@ def update_metadata(draft_id: str) -> None:
   for field in ("creators", "description", "publication_date"):
     if not metadata.get(field) and source_metadata.get(field):
       metadata[field] = source_metadata[field]
-  metadata["title"] = f"{PROJECT.replace('-', ' ').title()} v{VERSION}"
+  metadata["title"] = f"{display_name()} v{VERSION}"
   metadata["version"] = VERSION
   if released := release_date():
     metadata["publication_date"] = released

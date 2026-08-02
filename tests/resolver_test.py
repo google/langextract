@@ -1453,14 +1453,14 @@ class AlignEntitiesTest(parameterized.TestCase):
       ),
       dict(
           testcase_name="fuzzy_alignment_success",
-          # Tests fuzzy alignment alongside exact matching. Shows different alignment statuses:
-          # "heart problems" gets fuzzy match, "severe heart problems complications" gets lesser match.
-          # Demonstrates both fuzzy and lesser matching working with 75% threshold.
+          # "heart problem" (singular, absent verbatim) exercises the
+          # fuzzy path via stemmed tokens; the longer extraction gets a
+          # lesser match at the 75% threshold.
           extractions=[
               [
                   data.Extraction(
                       extraction_class="condition",
-                      extraction_text="heart problems",
+                      extraction_text="heart problem",
                   )
               ],
               [
@@ -1475,7 +1475,7 @@ class AlignEntitiesTest(parameterized.TestCase):
               [
                   data.Extraction(
                       extraction_class="condition",
-                      extraction_text="heart problems",
+                      extraction_text="heart problem",
                       token_interval=tokenizer.TokenInterval(
                           start_index=3, end_index=5
                       ),
@@ -2439,6 +2439,189 @@ class FlexibleSchemaTest(parameterized.TestCase):
     self.assertEqual(result[0]["medication"], "Aspirin")
     self.assertEqual(result[0]["medication_attributes"]["dosage"], "100mg")
     self.assertEqual(result[1]["medication"], "Ibuprofen")
+
+
+def _entity(text: str) -> data.Extraction:
+  return data.Extraction(extraction_class="entity", extraction_text=text)
+
+
+class MonotonicExactAlignmentTest(parameterized.TestCase):
+  """Exact-phase DP: repeated mentions align to successive occurrences."""
+
+  _CLINICAL_NOTE = textwrap.dedent("""\
+      CLINICAL NOTE
+      Patient: John Smith    DOB: 03/14/1962
+      Chief Complaint: Follow-up of hypertension and type 2 diabetes.
+      History: The patient reports good adherence to lisinopril 20 mg
+      daily. Blood pressure remains elevated at 148/92 today. Home logs
+      show fasting values of 130-150 mg/dL on metformin 1000 mg twice
+      daily. He continues atorvastatin 40 mg nightly for hyperlipidemia.
+      Assessment and Plan:
+      1. Hypertension, uncontrolled. Increase lisinopril to 40 mg daily.
+      2. Type 2 diabetes, above goal. Start empagliflozin 10 mg daily.
+      3. Hyperlipidemia, stable. Continue atorvastatin.
+      """)
+
+  _LONG_SEED_SOURCE = (
+      "alpha beta gamma delta was noted. omega followed. Later, alpha"
+      " beta gamma delta recurred."
+  )
+
+  def setUp(self):
+    super().setUp()
+    self.aligner = resolver_lib.WordAligner()
+
+  def _align(self, texts, source, **kwargs):
+    groups = self.aligner.align_extractions(
+        [[_entity(t)] for t in texts], source, **kwargs
+    )
+    return [e for group in groups for e in group]
+
+  def test_repeated_mention_aligns_to_successive_occurrences(self):
+    source = "Take aspirin in the morning. Take aspirin at night."
+    first_start = source.index("aspirin")
+    second_start = source.index("aspirin", first_start + 1)
+
+    first, second = self._align(["aspirin", "aspirin"], source)
+
+    self.assertIs(first.alignment_status, data.AlignmentStatus.MATCH_EXACT)
+    self.assertIs(second.alignment_status, data.AlignmentStatus.MATCH_EXACT)
+    self.assertEqual(first.char_interval.start_pos, first_start)
+    self.assertEqual(second.char_interval.start_pos, second_start)
+
+  def test_clinical_note_duplicates_align_to_assessment_section(self):
+    # Model output order tracks document order, so a fully monotonic
+    # assignment exists; the greedy difflib exact phase still pins the
+    # duplicated mentions to their first (History section) occurrences.
+    source = self._CLINICAL_NOTE
+    texts = [
+        "lisinopril",
+        "148/92",
+        "metformin",
+        "atorvastatin",
+        "Hypertension",
+        "lisinopril",
+        "Type 2 diabetes",
+        "empagliflozin",
+        "Hyperlipidemia",
+    ]
+    expected_starts = [
+        source.index("lisinopril 20 mg"),
+        source.index("148/92"),
+        source.index("metformin"),
+        source.index("atorvastatin 40 mg"),
+        source.index("Hypertension, uncontrolled"),
+        source.index("lisinopril to 40 mg"),
+        source.index("Type 2 diabetes, above"),
+        source.index("empagliflozin"),
+        source.index("Hyperlipidemia, stable"),
+    ]
+
+    aligned = self._align(texts, source)
+
+    self.assertLen(aligned, len(texts))
+    for extraction, start in zip(aligned, expected_starts, strict=True):
+      with self.subTest(text=extraction.extraction_text, start=start):
+        self.assertIs(
+            extraction.alignment_status, data.AlignmentStatus.MATCH_EXACT
+        )
+        self.assertEqual(extraction.char_interval.start_pos, start)
+
+  def test_long_mention_seed_does_not_break_earlier_extractions(self):
+    source = self._LONG_SEED_SOURCE
+
+    omega, long_mention = self._align(
+        ["omega", "alpha beta gamma delta"], source
+    )
+
+    self.assertIs(omega.alignment_status, data.AlignmentStatus.MATCH_EXACT)
+    self.assertIs(
+        long_mention.alignment_status, data.AlignmentStatus.MATCH_EXACT
+    )
+    self.assertEqual(omega.char_interval.start_pos, source.index("omega"))
+    self.assertEqual(
+        long_mention.char_interval.start_pos,
+        source.index("alpha beta gamma delta recurred"),
+    )
+
+  def test_difflib_escape_hatch_preserves_legacy_behavior(self):
+    source = self._LONG_SEED_SOURCE
+
+    omega, long_mention = self._align(
+        ["omega", "alpha beta gamma delta"],
+        source,
+        exact_alignment_algorithm="difflib",
+    )
+
+    self.assertIs(
+        long_mention.alignment_status, data.AlignmentStatus.MATCH_EXACT
+    )
+    self.assertEqual(
+        long_mention.char_interval.start_pos, source.index("alpha")
+    )
+    self.assertIs(omega.alignment_status, data.AlignmentStatus.MATCH_FUZZY)
+
+  def test_duplicate_extractions_with_single_occurrence_share_span(self):
+    source = "Only aspirin appears here."
+
+    first, second = self._align(["aspirin", "aspirin"], source)
+
+    self.assertIs(first.alignment_status, data.AlignmentStatus.MATCH_EXACT)
+    self.assertIs(second.alignment_status, data.AlignmentStatus.MATCH_FUZZY)
+    self.assertEqual(
+        second.char_interval.start_pos, first.char_interval.start_pos
+    )
+    self.assertEqual(second.char_interval.end_pos, first.char_interval.end_pos)
+
+  def test_out_of_order_extractions_fall_back_gracefully(self):
+    source = "aspirin was given before ibuprofen was considered."
+
+    aligned = self._align(["ibuprofen", "aspirin"], source)
+
+    for extraction in aligned:
+      with self.subTest(text=extraction.extraction_text):
+        self.assertIsNotNone(extraction.alignment_status)
+        ci = extraction.char_interval
+        self.assertEqual(
+            source[ci.start_pos : ci.end_pos].lower(),
+            extraction.extraction_text.lower(),
+        )
+
+  def test_exact_span_upgraded_over_competing_lesser_extraction(self):
+    # "heart problems" is present verbatim; under the legacy difflib
+    # phase the longer extraction consumed the region and the verbatim
+    # span was demoted to MATCH_FUZZY.
+    source = "Patient has severe heart problems today."
+
+    short, longer = self._align(
+        ["heart problems", "severe heart problems complications"], source
+    )
+
+    self.assertIs(short.alignment_status, data.AlignmentStatus.MATCH_EXACT)
+    self.assertEqual(short.char_interval.start_pos, source.index("heart"))
+    self.assertIs(longer.alignment_status, data.AlignmentStatus.MATCH_LESSER)
+    self.assertEqual(longer.char_interval.start_pos, source.index("severe"))
+
+  def test_invalid_exact_alignment_algorithm_raises(self):
+    with self.assertRaisesRegex(
+        ValueError, "Invalid exact_alignment_algorithm"
+    ):
+      self._align(
+          ["aspirin"],
+          "aspirin taken daily.",
+          exact_alignment_algorithm="dP",
+      )
+
+  def test_offsets_applied_to_dp_matches(self):
+    source = "aspirin taken daily."
+
+    (extraction,) = self._align(
+        ["aspirin"], source, token_offset=7, char_offset=100
+    )
+
+    self.assertIs(extraction.alignment_status, data.AlignmentStatus.MATCH_EXACT)
+    self.assertEqual(extraction.token_interval.start_index, 7)
+    self.assertEqual(extraction.char_interval.start_pos, 100)
 
 
 if __name__ == "__main__":

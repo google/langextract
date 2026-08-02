@@ -18,17 +18,37 @@ Note: This file contains test helper classes that intentionally have
 few public methods. The too-few-public-methods warnings are expected.
 """
 
+import dataclasses
 from unittest import mock
 import warnings
 
 from absl.testing import absltest
 from absl.testing import parameterized
 
+from langextract import schema as lx_schema
 from langextract.core import base_model
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import format_handler as fh
 from langextract.core import schema
 from langextract.providers import schemas
+
+
+def _openai_extraction_items(openai_schema):
+  return openai_schema.schema_dict["properties"][data.EXTRACTIONS_KEY]["items"]
+
+
+def _openai_variant(openai_schema, extraction_class):
+  for variant in _openai_extraction_items(openai_schema)["anyOf"]:
+    if extraction_class in variant["properties"]:
+      return variant
+  raise AssertionError(f"Missing OpenAI schema variant for {extraction_class}")
+
+
+def _openai_attribute_properties(openai_schema, extraction_class):
+  variant = _openai_variant(openai_schema, extraction_class)
+  attributes_key = f"{extraction_class}{data.ATTRIBUTE_SUFFIX}"
+  return variant["properties"][attributes_key]["anyOf"][0]["properties"]
 
 
 class BaseSchemaTest(absltest.TestCase):
@@ -281,6 +301,380 @@ class GeminiSchemaTest(parameterized.TestCase):
     self.assertTrue(gemini_schema.requires_raw_output)
 
 
+class OpenAISchemaTest(parameterized.TestCase):
+  """Tests for OpenAI structured output schema generation."""
+
+  def test_response_format_returns_json_schema_response_format(self):
+    """OpenAI schema exposes Chat Completions structured outputs."""
+    examples_data = [
+        data.ExampleData(
+            text="Patient has diabetes.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="diabetes",
+                    extraction_class="condition",
+                    attributes={"chronicity": "chronic"},
+                )
+            ],
+        )
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    response_format = openai_schema.response_format
+    self.assertEqual(
+        response_format,
+        {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "langextract_extractions",
+                "schema": openai_schema.schema_dict,
+                "strict": True,
+            },
+        },
+    )
+    self.assertIsNot(
+        response_format["json_schema"]["schema"], openai_schema.schema_dict
+    )
+
+  def test_to_provider_config_uses_provider_schema_hook(self):
+    """OpenAI schema state is applied after provider construction."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+
+    provider_config = openai_schema.to_provider_config()
+
+    self.assertEmpty(provider_config)
+
+  def test_from_examples_constructs_strict_openai_schema(self):
+    """OpenAI schema uses strict-compatible extraction variants."""
+    examples_data = [
+        data.ExampleData(
+            text="Patient has diabetes.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="diabetes",
+                    extraction_class="condition",
+                    attributes={"chronicity": "chronic"},
+                ),
+                data.Extraction(
+                    extraction_text="metformin",
+                    extraction_class="medication",
+                    attributes={"route": "oral"},
+                ),
+            ],
+        )
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    self.assertEqual(
+        openai_schema.schema_dict,
+        {
+            "type": "object",
+            "properties": {
+                data.EXTRACTIONS_KEY: {
+                    "type": "array",
+                    "items": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "condition": {"type": "string"},
+                                    "condition_attributes": {
+                                        "anyOf": [
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "chronicity": {
+                                                        "anyOf": [
+                                                            {"type": "string"},
+                                                            {"type": "null"},
+                                                        ]
+                                                    }
+                                                },
+                                                "required": ["chronicity"],
+                                                "additionalProperties": False,
+                                            },
+                                            {"type": "null"},
+                                        ]
+                                    },
+                                },
+                                "required": [
+                                    "condition",
+                                    "condition_attributes",
+                                ],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "medication": {"type": "string"},
+                                    "medication_attributes": {
+                                        "anyOf": [
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "route": {
+                                                        "anyOf": [
+                                                            {"type": "string"},
+                                                            {"type": "null"},
+                                                        ]
+                                                    }
+                                                },
+                                                "required": ["route"],
+                                                "additionalProperties": False,
+                                            },
+                                            {"type": "null"},
+                                        ]
+                                    },
+                                },
+                                "required": [
+                                    "medication",
+                                    "medication_attributes",
+                                ],
+                                "additionalProperties": False,
+                            },
+                        ]
+                    },
+                }
+            },
+            "required": [data.EXTRACTIONS_KEY],
+            "additionalProperties": False,
+        },
+    )
+
+  def test_from_examples_preserves_list_attribute_schema(self):
+    """OpenAI schema accepts list attributes from examples."""
+    examples_data = [
+        data.ExampleData(
+            text="Patient has diabetes with fatigue.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="diabetes",
+                    extraction_class="condition",
+                    attributes={"symptoms": ["fatigue"]},
+                )
+            ],
+        )
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    self.assertEqual(
+        _openai_attribute_properties(openai_schema, "condition")["symptoms"],
+        {
+            "anyOf": [
+                {"type": "array", "items": {"type": "string"}},
+                {"type": "null"},
+            ]
+        },
+    )
+
+  def test_from_examples_empty_examples_allow_empty_extraction_objects(self):
+    """OpenAI schema handles empty example sets deterministically."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+
+    self.assertEqual(
+        _openai_extraction_items(openai_schema),
+        {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+    )
+
+  def test_validate_format_rejects_yaml(self):
+    """OpenAI structured outputs are JSON-only."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+    format_handler = fh.FormatHandler(format_type=data.FormatType.YAML)
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError,
+        "OpenAI structured output only supports JSON format",
+    ):
+      openai_schema.validate_format(format_handler)
+
+  def test_requires_raw_output_returns_true(self):
+    """OpenAI structured outputs emit raw JSON without fences."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+
+    self.assertTrue(openai_schema.requires_raw_output)
+
+  def test_validate_format_warns_when_fences_enabled(self):
+    """OpenAI schema warns when raw JSON would be wrapped in fences."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_fences=True,
+    )
+
+    with self.assertWarnsRegex(
+        UserWarning, "OpenAI structured outputs emit native JSON"
+    ):
+      openai_schema.validate_format(format_handler)
+
+  def test_validate_format_warns_with_wrong_wrapper_key(self):
+    """OpenAI schema warns when resolver wrapper settings drift."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+    format_handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_fences=False,
+        wrapper_key="items",
+    )
+
+    with self.assertWarnsRegex(
+        UserWarning,
+        f"response_format schema expects wrapper_key='{data.EXTRACTIONS_KEY}'",
+    ):
+      openai_schema.validate_format(format_handler)
+
+  def test_from_examples_preserves_scalar_attribute_types(self):
+    """Scalar attribute types map to their JSON-Schema equivalents.
+
+    Regression test: prior to this, every non-list attribute was
+    coerced to a string-only union, which forced OpenAI strict mode to
+    return scalars as strings even when examples used numbers/bools.
+    """
+    examples_data = [
+        data.ExampleData(
+            text="Aspirin 81 mg, daily, OTC.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="aspirin",
+                    extraction_class="medication",
+                    attributes={
+                        "dose_mg": 81,
+                        "doses_per_day": 1.0,
+                        "otc": True,
+                        "route": "oral",
+                    },
+                )
+            ],
+        )
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    self.assertEqual(
+        _openai_attribute_properties(openai_schema, "medication"),
+        {
+            "dose_mg": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+            "doses_per_day": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+            "otc": {"anyOf": [{"type": "boolean"}, {"type": "null"}]},
+            "route": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+    )
+
+  def test_from_examples_preserves_mixed_numeric_attribute_types(self):
+    """Mixed numeric-like examples keep each observed JSON type."""
+    examples_data = [
+        data.ExampleData(
+            text="Medication flag.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="flag",
+                    extraction_class="medication",
+                    attributes={"dose_or_flag": True},
+                )
+            ],
+        ),
+        data.ExampleData(
+            text="Medication count.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="count",
+                    extraction_class="medication",
+                    attributes={"dose_or_flag": 1},
+                )
+            ],
+        ),
+        data.ExampleData(
+            text="Medication dose.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="dose",
+                    extraction_class="medication",
+                    attributes={"dose_or_flag": 1.5},
+                )
+            ],
+        ),
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    self.assertEqual(
+        _openai_attribute_properties(openai_schema, "medication")[
+            "dose_or_flag"
+        ],
+        {
+            "anyOf": [
+                {"type": "boolean"},
+                {"type": "integer"},
+                {"type": "number"},
+                {"type": "null"},
+            ]
+        },
+    )
+
+  def test_from_examples_allows_none_attribute_values(self):
+    """None-valued example attributes keep the strict-mode null branch."""
+    examples_data = [
+        data.ExampleData(
+            text="Medication status is unspecified.",
+            extractions=[
+                data.Extraction(
+                    extraction_text="Medication",
+                    extraction_class="medication",
+                    attributes={"status": None},
+                )
+            ],
+        )
+    ]
+
+    openai_schema = schemas.openai.OpenAISchema.from_examples(examples_data)
+
+    self.assertEqual(
+        _openai_attribute_properties(openai_schema, "medication")["status"],
+        {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    )
+
+  def test_from_examples_strict_false_emits_non_strict_response_format(self):
+    """The strict kwarg threads through to response_format."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([], strict=False)
+
+    self.assertFalse(openai_schema.response_format["json_schema"]["strict"])
+
+  def test_response_format_returns_isolated_schema_dict(self):
+    """response_format callers cannot mutate the provider's schema."""
+    openai_schema = schemas.openai.OpenAISchema.from_examples([])
+    response_format = openai_schema.response_format
+
+    response_format["json_schema"]["schema"]["required"].append("extra")
+
+    self.assertEqual(
+        openai_schema.schema_dict["required"], [data.EXTRACTIONS_KEY]
+    )
+
+  def test_instance_is_frozen_and_dict_is_isolated(self):
+    """Frozen contract + deep-copy isolate the schema from caller mutation."""
+    source = {
+        "type": "object",
+        "properties": {"x": {"type": "string"}},
+        "required": ["x"],
+        "additionalProperties": False,
+    }
+    openai_schema = schemas.openai.OpenAISchema(schema_dict=source)
+
+    with self.assertRaises(dataclasses.FrozenInstanceError):
+      openai_schema.schema_dict = {}  # pylint: disable=attribute-defined-outside-init
+
+    source["properties"]["x"]["type"] = "integer"
+    self.assertEqual(
+        openai_schema.schema_dict["properties"]["x"], {"type": "string"}
+    )
+
+
 class SchemaValidationTest(parameterized.TestCase):
   """Tests for schema format validation."""
 
@@ -366,6 +760,253 @@ class SchemaValidationTest(parameterized.TestCase):
 
       self.assertEmpty(
           w, "FormatModeSchema should not issue validation warnings"
+      )
+
+
+class OutputSchemaHelperTest(parameterized.TestCase):
+  """Tests for the public lx.schema output-schema builders."""
+
+  def test_extraction_item_schema_without_attributes(self):
+    item = lx_schema.extraction_item_schema("condition")
+
+    self.assertEqual(
+        item,
+        {
+            "type": "object",
+            "properties": {"condition": {"type": "string"}},
+            "required": ["condition"],
+            "additionalProperties": False,
+        },
+    )
+
+  def test_extraction_item_schema_with_attributes(self):
+    item = lx_schema.extraction_item_schema(
+        "condition",
+        attributes={"status": {"type": "string", "enum": ["active"]}},
+    )
+
+    self.assertEqual(
+        item["properties"]["condition_attributes"],
+        {
+            "type": "object",
+            "properties": {"status": {"type": "string", "enum": ["active"]}},
+            "required": ["status"],
+            "additionalProperties": False,
+        },
+    )
+    self.assertCountEqual(
+        item["required"], ["condition", "condition_attributes"]
+    )
+
+  def test_extractions_schema_wraps_item_schema(self):
+    item = lx_schema.extraction_item_schema("condition")
+
+    envelope = lx_schema.extractions_schema(item)
+
+    self.assertEqual(
+        envelope["properties"][data.EXTRACTIONS_KEY]["items"], item
+    )
+    self.assertEqual(envelope["required"], [data.EXTRACTIONS_KEY])
+    self.assertIs(envelope["additionalProperties"], False)
+    lx_schema.validate_output_schema(envelope)
+
+  def test_extractions_schema_wraps_multiple_items_in_any_of(self):
+    condition = lx_schema.extraction_item_schema("condition")
+    medication = lx_schema.extraction_item_schema("medication")
+
+    envelope = lx_schema.extractions_schema(condition, medication)
+
+    self.assertEqual(
+        envelope["properties"][data.EXTRACTIONS_KEY]["items"],
+        {"anyOf": [condition, medication]},
+    )
+    lx_schema.validate_output_schema(envelope)
+
+  def test_builders_copy_input_schemas(self):
+    attribute_schema = {"type": "string"}
+
+    item = lx_schema.extraction_item_schema(
+        "condition", attributes={"status": attribute_schema}
+    )
+    attribute_schema["enum"] = ["mutated"]
+
+    status_schema = item["properties"]["condition_attributes"]["properties"][
+        "status"
+    ]
+    self.assertNotIn("enum", status_schema)
+
+  @parameterized.named_parameters(
+      dict(testcase_name="empty_class", extraction_class=""),
+      dict(testcase_name="reserved_suffix", extraction_class="foo_attributes"),
+      dict(testcase_name="reserved_key", extraction_class="extraction_text"),
+  )
+  def test_extraction_item_schema_rejects_invalid_class(self, extraction_class):
+    with self.assertRaises(exceptions.InferenceConfigError):
+      lx_schema.extraction_item_schema(extraction_class)
+
+
+class OutputSchemaValidationTest(parameterized.TestCase):
+  """Tests for validate_output_schema envelope checks."""
+
+  def test_accepts_envelope_and_returns_isolated_copy(self):
+    envelope = lx_schema.extractions_schema(
+        lx_schema.extraction_item_schema("condition")
+    )
+
+    validated = lx_schema.validate_output_schema(envelope)
+
+    self.assertEqual(validated, envelope)
+    validated["properties"]["extra"] = {"type": "string"}
+    self.assertNotIn("extra", envelope["properties"])
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="not_a_mapping",
+          output_schema=["extractions"],
+          error_regex="must be a mapping",
+      ),
+      dict(
+          testcase_name="empty",
+          output_schema={},
+          error_regex="must not be empty",
+      ),
+      dict(
+          testcase_name="non_object_root",
+          output_schema={"type": "array"},
+          error_regex="top-level type",
+      ),
+      dict(
+          testcase_name="missing_required_extractions",
+          output_schema={
+              "type": "object",
+              "properties": {
+                  "extractions": {
+                      "type": "array",
+                      "items": {
+                          "type": "object",
+                          "properties": {"condition": {"type": "string"}},
+                      },
+                  }
+              },
+          },
+          error_regex="required must include 'extractions'",
+      ),
+      dict(
+          testcase_name="extractions_not_array",
+          output_schema={
+              "type": "object",
+              "required": ["extractions"],
+              "properties": {"extractions": {"type": "object"}},
+          },
+          error_regex="array property",
+      ),
+      dict(
+          testcase_name="items_not_object_schema",
+          output_schema={
+              "type": "object",
+              "required": ["extractions"],
+              "properties": {
+                  "extractions": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                  }
+              },
+          },
+          error_regex="inline object schema",
+      ),
+      dict(
+          testcase_name="items_without_properties",
+          output_schema={
+              "type": "object",
+              "required": ["extractions"],
+              "properties": {
+                  "extractions": {
+                      "type": "array",
+                      "items": {"type": "object"},
+                  }
+              },
+          },
+          error_regex="extraction-class properties",
+      ),
+      dict(
+          testcase_name="reserved_item_keys",
+          output_schema={
+              "type": "object",
+              "required": ["extractions"],
+              "properties": {
+                  "extractions": {
+                      "type": "array",
+                      "items": {
+                          "type": "object",
+                          "properties": {
+                              "extraction_class": {"type": "string"},
+                              "extraction_text": {"type": "string"},
+                          },
+                      },
+                  }
+              },
+          },
+          error_regex="extraction_class, extraction_text",
+      ),
+  )
+  def test_rejects_invalid_envelopes(self, output_schema, error_regex):
+    with self.assertRaisesRegex(exceptions.InferenceConfigError, error_regex):
+      lx_schema.validate_output_schema(output_schema)
+
+
+class FromSchemaDictTest(absltest.TestCase):
+  """Tests for provider from_schema_dict implementations."""
+
+  def setUp(self):
+    super().setUp()
+    self.envelope = lx_schema.extractions_schema(
+        lx_schema.extraction_item_schema(
+            "condition",
+            attributes={
+                "status": {"type": "string", "enum": ["active", "resolved"]}
+            },
+        )
+    )
+
+  def test_base_schema_rejects_user_schemas_by_default(self):
+    with self.assertRaises(NotImplementedError):
+      schema.FormatModeSchema.from_schema_dict(self.envelope)
+
+  def test_gemini_from_schema_dict_targets_json_schema_field(self):
+    gemini_schema = schemas.gemini.GeminiSchema.from_schema_dict(self.envelope)
+
+    provider_config = gemini_schema.to_provider_config()
+
+    self.assertEqual(provider_config["response_json_schema"], self.envelope)
+    self.assertEqual(provider_config["response_mime_type"], "application/json")
+    self.assertTrue(gemini_schema.from_output_schema)
+    self.assertTrue(gemini_schema.requires_raw_output)
+
+  def test_gemini_from_schema_dict_validates_envelope(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "array property"
+    ):
+      schemas.gemini.GeminiSchema.from_schema_dict({
+          "type": "object",
+          "required": ["extractions"],
+          "properties": {"extractions": {"type": "object"}},
+      })
+
+  def test_openai_from_schema_dict_builds_response_format(self):
+    openai_schema = schemas.openai.OpenAISchema.from_schema_dict(self.envelope)
+
+    response_format = openai_schema.response_format
+
+    self.assertEqual(response_format["type"], "json_schema")
+    self.assertEqual(response_format["json_schema"]["schema"], self.envelope)
+    self.assertIs(response_format["json_schema"]["strict"], True)
+    self.assertTrue(openai_schema.from_output_schema)
+    self.assertTrue(openai_schema.requires_raw_output)
+
+  def test_openai_from_schema_dict_rejects_invalid_schema_name(self):
+    with self.assertRaisesRegex(exceptions.InferenceConfigError, "schema_name"):
+      schemas.openai.OpenAISchema.from_schema_dict(
+          self.envelope, schema_name="bad name!"
       )
 
 

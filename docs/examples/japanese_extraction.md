@@ -38,7 +38,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt_description,
     examples=examples,
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     tokenizer=unicode_tokenizer,   # <--- Pass the tokenizer here
     api_key="your-api-key-here"    # Optional if env var is set
 )

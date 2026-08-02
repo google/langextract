@@ -13,8 +13,22 @@
        beat 4  extract in parallel      9.2 – 13.0s  36.8  – 52%
        beat 5  extractions             13.0 – 15.6s  52    – 62.4%
        beat 6  source grounding        15.6 – 21.6s  62.4  – 86.4%
-       beat 7  wordmark                21.6 – 25.0s  86.4  – 100%          */
+       beat 7  wordmark                21.6 – 25.0s  86.4  – 100%
+
+     The table above is the AUTHORED timeline; --phase decides where the loop is
+     cut for playback. See the note on --phase below.                        */
   :root {
+    /* This asset replaces the README's logo, so the first frame a visitor sees
+       has to be the wordmark — not raw monospace text 21.6s from the payoff.
+       Rather than re-time 50 keyframe blocks, rotate the cut point: every
+       timeline animation shares the same 25s duration, so one uniform negative
+       delay shifts the whole composition in lockstep and stays in phase on
+       every iteration. (Per-element delays are what desync — see the rail.)
+       -23.3s lands frame 0 on the fully-coloured wordmark, so playback reads
+       wordmark (1.7s) → beats 1-6 → wordmark, with the mark sitting on the
+       loop seam and therefore both opening and closing every cycle. */
+    --phase: -23.3s;
+
     --doc:    #DADCE0;
     --panel:  #3C4043;
     --stroke: #5F6368;
@@ -50,7 +64,7 @@
      offsets the FIRST iteration, so a looping rail built on delays desyncs. */
   .rail {
     position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 6px; animation: railOut 25s infinite;
+    display: flex; gap: 6px; animation: railOut 25s var(--phase) infinite;
   }
   @keyframes railOut { 0%,85.44%{opacity:1} 88.80%,100%{opacity:0} }
   .seg {
@@ -60,7 +74,7 @@
   .seg::after {
     content: ''; position: absolute; inset: 0;
     background: var(--accent); transform: scaleX(0); transform-origin: left;
-    animation: 25s linear infinite;
+    animation: 25s var(--phase) linear infinite;
   }
   .g1::after { animation-name: f1 } .g2::after { animation-name: f2 }
   .g3::after { animation-name: f3 } .g4::after { animation-name: f4 }
@@ -76,7 +90,7 @@
   .caption { position: absolute; top: 26px; left: 0; width: 100%; text-align: center; }
   .step {
     position: absolute; left: 0; width: 100%; font-size: 14px;
-    opacity: 0; animation: 25s infinite;
+    opacity: 0; animation: 25s var(--phase) infinite;
   }
   .step b { font-weight: 600 } .step span { color: var(--muted) }
   .s1 { animation-name: c1 } .s2 { animation-name: c2 } .s3 { animation-name: c3 }
@@ -92,7 +106,7 @@
   .doc {
     position: absolute; left: 32px; top: 68px; width: 392px; height: 228px;
     background: var(--doc); border-radius: 18px; padding: 15px 18px;
-    opacity: 0; overflow: hidden; animation: docIn 25s infinite;
+    opacity: 0; overflow: hidden; animation: docIn 25s var(--phase) infinite;
   }
   @keyframes docIn {
     0%{opacity:0;transform:translateY(8px)} 1.92%,35.52%{opacity:1;transform:none}
@@ -106,7 +120,7 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 15px; line-height: 30px; color: var(--doc-ink); margin-top: 12px;
   }
-  .tok { border-radius: 4px; padding: 2px 2px; animation: 25s infinite; }
+  .tok { border-radius: 4px; padding: 2px 2px; animation: 25s var(--phase) infinite; }
   #tok-med{--hl:var(--blue-i);   animation-name: t1}
   #tok-cond{--hl:var(--yellow-i);animation-name: t2}
   #tok-symp{--hl:var(--red-i);   animation-name: t3}
@@ -117,7 +131,7 @@
   .scan {
     position: absolute; left: 0; right: 0; height: 44px; pointer-events: none;
     background: linear-gradient(180deg, transparent, rgba(66,133,244,.18), transparent);
-    opacity: 0; animation: scan 25s ease-in-out infinite;
+    opacity: 0; animation: scan 25s var(--phase) ease-in-out infinite;
   }
   @keyframes scan { 0%,25.92%{opacity:0;top:-44px} 26.88%{opacity:1;top:-44px} 34.56%{opacity:1;top:210px} 36%,100%{opacity:0;top:210px} }
 
@@ -131,7 +145,7 @@
     background: var(--panel); border-radius: 18px; padding: 15px 16px;
     border: 1px solid rgba(255,255,255,.07);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 12px 30px rgba(0,0,0,.18);
-    opacity: 0; animation: panelIn 25s infinite;
+    opacity: 0; animation: panelIn 25s var(--phase) infinite;
   }
   @keyframes panelIn {
     0%,8.64%{opacity:0;left:456px;width:392px;transform:translateY(8px)}
@@ -142,7 +156,7 @@
     89.76%,100%{opacity:0;left:456px;width:392px;transform:translateY(-6px)}
   }
   .heads { position: relative; height: 13px; }
-  .heads .lbl { position: absolute; top: 0; left: 0; color: #9AA0A6; opacity: 0; animation: 25s infinite; }
+  .heads .lbl { position: absolute; top: 0; left: 0; color: #9AA0A6; opacity: 0; animation: 25s var(--phase) infinite; }
   .heads .h-prompt { animation-name: swPrompt }
   .heads .h-chunks { animation-name: swChunks }
   .heads .h-llm    { animation-name: swLlm }
@@ -153,7 +167,7 @@
   @keyframes swExt { 0%,52%{opacity:0} 53.28%,84.48%{opacity:1} 88.32%,100%{opacity:0} }
 
   .body { position: relative; margin-top: 11px; height: 172px; }
-  .pane { position: absolute; inset: 0; opacity: 0; animation: 25s infinite; }
+  .pane { position: absolute; inset: 0; opacity: 0; animation: 25s var(--phase) infinite; }
   .p-prompt { animation-name: swPrompt } .p-chunks { animation-name: swChunks }
   .p-llm    { animation-name: swLlm }    .p-ext    { animation-name: swExt }
 
@@ -179,7 +193,7 @@
     border-radius: 9px; background: var(--doc);
     padding: 0 12px; margin-bottom: 8px;
     font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--doc-ink);
-    opacity: 0; animation: 25s ease-out infinite;
+    opacity: 0; animation: 25s var(--phase) ease-out infinite;
   }
   .k1 { animation-name: ch1 } .k2 { animation-name: ch2 } .k3 { animation-name: ch3 }
   @keyframes ch1 { 0%,27.36%{opacity:0;transform:translateX(-84px) scale(.84);animation-timing-function:cubic-bezier(.2,.75,.3,1)} 29.76%,35.42%{opacity:1;transform:none} 36.80%,100%{opacity:0;transform:none} }
@@ -197,7 +211,7 @@
     position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
     width: 210px; padding: 15px 0; border-radius: 14px; text-align: center;
     background: rgba(66,133,244,.12); border: 1px solid rgba(66,133,244,.55);
-    opacity: 0; animation: llmIn 25s infinite;
+    opacity: 0; animation: llmIn 25s var(--phase) infinite;
   }
   @keyframes llmIn { 0%,37.25%{opacity:0;transform:translate(-50%,-50%) scale(.9)} 38.59%,50.59%{opacity:1;transform:translate(-50%,-50%) scale(1)} 52%,100%{opacity:0;transform:translate(-50%,-50%) scale(.97)} }
   .llm-t { font-size: 19px; font-weight: 600; color: #fff; letter-spacing: .02em }
@@ -205,14 +219,14 @@
   /* Ring pulses as each pass lands. */
   .llm::after {
     content: ''; position: absolute; inset: -5px; border-radius: 16px;
-    border: 1px solid rgba(66,133,244,.5); opacity: 0; animation: ring 25s infinite;
+    border: 1px solid rgba(66,133,244,.5); opacity: 0; animation: ring 25s var(--phase) infinite;
   }
   @keyframes ring { 0%,42.72%{opacity:0;transform:scale(.94)} 44.64%{opacity:.9;transform:scale(1)} 47.52%{opacity:0;transform:scale(1.07)} 100%{opacity:0} }
 
   .fly {
     position: absolute; border-radius: 7px; padding: 5px 9px;
     font-family: ui-monospace, monospace; font-size: 10.5px; white-space: nowrap;
-    opacity: 0; animation: 25s cubic-bezier(.45,0,.55,1) infinite;
+    opacity: 0; animation: 25s var(--phase) cubic-bezier(.45,0,.55,1) infinite;
   }
   .fly.ck { background: var(--doc); color: var(--doc-ink) }
   .fly.pr { background: rgba(66,133,244,.16); color: var(--blue-i); border: 1px solid rgba(66,133,244,.45) }
@@ -231,7 +245,7 @@
   .ent {
     border-radius: 9px; padding: 7px 10px; margin-bottom: 7px;
     background: rgba(255,255,255,.06); border-left: 3px solid var(--dim);
-    opacity: 0; animation: 25s infinite, 25s infinite;
+    opacity: 0; animation: 25s var(--phase) infinite, 25s var(--phase) infinite;
   }
   #ent-med  { --c: var(--blue-i);   animation-name: e1, ig1 }
   #ent-cond { --c: var(--yellow-i); animation-name: e2, ig2 }
@@ -244,7 +258,7 @@
   @keyframes ig2 { 0%,65.76%{border-left-color:var(--dim)} 66.53%,100%{border-left-color:var(--c)} }
   @keyframes ig3 { 0%,66.72%{border-left-color:var(--dim)} 67.49%,100%{border-left-color:var(--c)} }
 
-  .ent-k { font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); animation: 25s infinite; }
+  .ent-k { font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); animation: 25s var(--phase) infinite; }
   #ent-med .ent-k { animation-name: kg1 } #ent-cond .ent-k { animation-name: kg2 }
   #ent-symp .ent-k { animation-name: kg3 }
   @keyframes kg1 { 0%,64.80%{color:var(--dim)} 65.57%,100%{color:var(--c)} }
@@ -255,7 +269,7 @@
   .ent-a { font-family: ui-monospace, monospace; font-size: 10.5px; color: #9AA0A6; margin-top: 1px }
   /* The literal char_interval the API returns — numbers are what "exact span"
      needs in front of an academic audience. */
-  .span { font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--c); opacity: 0; animation: 25s infinite; }
+  .span { font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--c); opacity: 0; animation: 25s var(--phase) infinite; }
   #ent-med .span { animation-name: sp1 } #ent-cond .span { animation-name: sp2 }
   #ent-symp .span { animation-name: sp3 }
   @keyframes sp1 { 0%,65.28%{opacity:0} 66.24%,84.48%{opacity:.95} 87.36%,100%{opacity:0} }
@@ -267,7 +281,7 @@
   .link {
     fill: none; stroke-width: 2.4; stroke-linecap: round;
     stroke-dasharray: var(--len); stroke-dashoffset: var(--len);
-    animation: 25s infinite;
+    animation: 25s var(--phase) infinite;
   }
   /* Staggered starts, COMMON end: a delay would push the last connector's fade
      past the wordmark and leave a stray curve on the closing card. */
@@ -282,11 +296,15 @@
   .logo {
     position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 10px;
-    opacity: 0; animation: logoIn 25s infinite;
+    opacity: 0; animation: logoIn 25s var(--phase) infinite;
   }
-  @keyframes logoIn { 0%,86.4%{opacity:0;transform:scale(.97)} 89.3%,96.5%{opacity:1;transform:none} 100%{opacity:0;transform:scale(.99)} }
+  /* Holds to 98.5%, not 96.5%: with --phase cutting the loop mid-wordmark, the
+     old fade-out finished a full 0.6s before the document faded back in, and
+     that gap — harmless when it straddled the loop seam — became a visible
+     stall right after the title card. */
+  @keyframes logoIn { 0%,86.4%{opacity:0;transform:scale(.97)} 89.3%,98.5%{opacity:1;transform:none} 100%{opacity:0;transform:scale(.99)} }
   .logo-w { font-size: 46px; font-weight: 500; letter-spacing: -.022em }
-  .logo-w span { animation: wordIn 25s infinite; }
+  .logo-w span { animation: wordIn 25s var(--phase) infinite; }
   /* Google's own wordmark sequence, carried per letter; one keyframe fades
      them all together over ~1.2s. */
   .logo-w .cb { --wc: #4285F4 } .logo-w .cr { --wc: #EA4335 }

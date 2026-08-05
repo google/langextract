@@ -29,6 +29,7 @@ from langextract import providers as providers_module
 from langextract.core import base_model
 from langextract.core import types
 from langextract.providers import builtin_registry
+from langextract.providers import patterns
 from langextract.providers import router
 
 
@@ -87,6 +88,14 @@ class RegistryTest(absltest.TestCase):
 
     self.assertEqual(router.resolve("gemini-pro"), FakeProvider)
     self.assertEqual(router.resolve("palm-2"), FakeProvider)
+
+  def test_openai_patterns_include_reasoning_and_gpt_3_5_models(self):
+    """OpenAI reasoning and GPT-3.5 model IDs resolve automatically."""
+    router.register(*patterns.OPENAI_PATTERNS)(FakeProvider)
+
+    for model_id in ("o1", "o3-mini", "o4-mini", "gpt-3.5-turbo"):
+      with self.subTest(model_id=model_id):
+        self.assertEqual(router.resolve(model_id), FakeProvider)
 
   def test_priority_resolution(self):
     """Test that higher priority wins on conflicts."""

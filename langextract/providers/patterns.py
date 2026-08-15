@@ -28,6 +28,8 @@ OPENAI_PATTERNS = (
     r'^gpt4\.',
     r'^gpt-5',
     r'^gpt5\.',
+    r'^gpt-3\.5',
+    r'^o[1-9]',
 )
 OPENAI_PRIORITY = 10
 

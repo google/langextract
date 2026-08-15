@@ -18,6 +18,7 @@ Note: This file tests the deprecated registry module which is now an alias
 for router. The no-name-in-module warning for providers.registry is expected.
 Test helper classes also intentionally have few public methods.
 """
+
 # pylint: disable=no-name-in-module
 
 import re
@@ -29,6 +30,9 @@ from langextract import providers as providers_module
 from langextract.core import base_model
 from langextract.core import types
 from langextract.providers import builtin_registry
+from langextract.providers import gemini
+from langextract.providers import ollama
+from langextract.providers import openai
 from langextract.providers import router
 
 
@@ -250,6 +254,45 @@ class RegistryTest(absltest.TestCase):
       with self.subTest(model_id=model_id):
         provider_class = router.resolve(model_id)
         self.assertEqual(provider_class, TestHFProvider)
+
+
+class BuiltinOpenAIRoutingTest(absltest.TestCase):
+  """Built-in OpenAI patterns cover reasoning and legacy model families.
+
+  Regression test for issue #492: o-series reasoning models and the legacy
+  gpt-3.5 family are not covered by OPENAI_PATTERNS, so resolve() raises
+  InferenceConfigError even though OpenAILanguageModel can serve them.
+  """
+
+  def setUp(self):
+    super().setUp()
+    router.clear()
+    providers_module.load_builtins_once()
+
+  def tearDown(self):
+    super().tearDown()
+    router.clear()
+
+  def test_openai_reasoning_models_route_to_openai(self):
+    for model_id in ("o1", "o1-mini", "o1-preview", "o3", "o3-mini", "o4-mini"):
+      with self.subTest(model_id=model_id):
+        self.assertIs(router.resolve(model_id), openai.OpenAILanguageModel)
+
+  def test_legacy_gpt35_models_route_to_openai(self):
+    for model_id in ("gpt-3.5", "gpt-3.5-turbo", "gpt-3.5-turbo-16k"):
+      with self.subTest(model_id=model_id):
+        self.assertIs(router.resolve(model_id), openai.OpenAILanguageModel)
+
+  def test_existing_openai_families_still_route(self):
+    for model_id in ("gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-5"):
+      with self.subTest(model_id=model_id):
+        self.assertIs(router.resolve(model_id), openai.OpenAILanguageModel)
+
+  def test_o_series_does_not_affect_other_providers(self):
+    self.assertIs(
+        router.resolve("gemini-2.0-flash"), gemini.GeminiLanguageModel
+    )
+    self.assertIs(router.resolve("llama3.2:1b"), ollama.OllamaLanguageModel)
 
 
 if __name__ == "__main__":

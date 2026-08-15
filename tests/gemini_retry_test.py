@@ -514,5 +514,83 @@ class TestGeminiHttpOptionsRetryGuard(_MockClientTest):
     self.assertEqual(model.max_retries, 3)
 
 
+class TestGeminiNoTextResponseHandling(_MockClientTest):
+  """Responses without text content must raise, not return empty success.
+
+  Regression test for issue #508: a safety-blocked prompt or a candidate
+  that stopped without producing text used to be reported as a successful
+  empty extraction (ScoredOutput(score=1.0, output=None)).
+  """
+
+  def setUp(self):
+    super().setUp()
+    self.model = _build_model()
+
+  def _make_no_text_response(self, candidates=None, block_reason=None):
+    """Build a GenerateContentResponse whose text property is None."""
+    response = mock.create_autospec(
+        genai.types.GenerateContentResponse, instance=True
+    )
+    response.text = None
+    response.candidates = [] if candidates is None else candidates
+    response.prompt_feedback = (
+        None if block_reason is None else mock.Mock(block_reason=block_reason)
+    )
+    return response
+
+  def test_text_response_returns_scored_output(self):
+    self.mock_client.models.generate_content.return_value = _make_response(
+        '{"ok": 1}'
+    )
+
+    result = self.model._process_single_prompt('prompt', {'temperature': 0.0})
+
+    self.assertEqual(result.output, '{"ok": 1}')
+    self.assertEqual(result.score, 1.0)
+
+  def test_blocked_prompt_raises_with_block_reason(self):
+    self.mock_client.models.generate_content.return_value = (
+        self._make_no_text_response(candidates=[], block_reason='SAFETY')
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, 'block_reason=SAFETY'
+    ):
+      self.model._process_single_prompt('prompt', {'temperature': 0.0})
+
+    self.mock_client.models.generate_content.assert_called_once()
+
+  def test_empty_candidate_raises_with_finish_reason(self):
+    candidate = mock.Mock(finish_reason='SAFETY')
+    self.mock_client.models.generate_content.return_value = (
+        self._make_no_text_response(candidates=[candidate])
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, 'finish_reason=SAFETY'
+    ):
+      self.model._process_single_prompt('prompt', {'temperature': 0.0})
+
+  def test_no_text_response_is_not_retried(self):
+    self.mock_client.models.generate_content.return_value = (
+        self._make_no_text_response()
+    )
+
+    with self.assertRaises(exceptions.InferenceRuntimeError):
+      self.model._process_single_prompt('prompt', {'temperature': 0.0})
+
+    self.assertEqual(self.mock_client.models.generate_content.call_count, 1)
+
+  def test_error_propagates_unwrapped(self):
+    self.mock_client.models.generate_content.return_value = (
+        self._make_no_text_response(candidates=[], block_reason='OTHER')
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, '^Gemini response contains no text'
+    ):
+      self.model._process_single_prompt('prompt', {'temperature': 0.0})
+
+
 if __name__ == '__main__':
   absltest.main()

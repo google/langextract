@@ -368,8 +368,25 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         response = self._client.models.generate_content(
             model=self.model_id, contents=prompt, config=call_config
         )
+
+        if response.text is None:
+          block_reason = None
+          prompt_feedback = getattr(response, 'prompt_feedback', None)
+          if prompt_feedback is not None:
+            block_reason = getattr(prompt_feedback, 'block_reason', None)
+          finish_reason = None
+          candidates = getattr(response, 'candidates', None)
+          if candidates:
+            finish_reason = getattr(candidates[0], 'finish_reason', None)
+          raise exceptions.InferenceRuntimeError(
+              'Gemini response contains no text content '
+              f'(block_reason={block_reason}, finish_reason={finish_reason})'
+          )
+
         return core_types.ScoredOutput(score=1.0, output=response.text)
 
+      except exceptions.InferenceRuntimeError:
+        raise
       except Exception as e:
         if attempt < self.max_retries and self._is_retryable_error(e):
           # Cap after jitter so the named maximum applies to the real sleep.

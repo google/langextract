@@ -112,6 +112,7 @@ _API_CONFIG_KEYS: Final[set[str]] = {
     'tools',
     'stop_sequences',
     'candidate_count',
+    'thinking_config',
 }
 
 

@@ -637,6 +637,96 @@ class TestGeminiLanguageModel(absltest.TestCase):
           config[key],
           f"Config value for {key} should match what was provided",
       )
+    for key in ["max_output_tokens", "top_p", "top_k"]:
+      self.assertNotIn(key, config)
+
+  @mock.patch("google.genai.Client", autospec=True)
+  def test_gemini_runtime_generation_params_override_constructor(
+      self, mock_client_class
+  ):
+    """Runtime generation settings override constructor defaults."""
+    mock_client = mock_client_class.return_value
+
+    mock_response = mock.Mock()
+    mock_response.text = '{"result": "test"}'
+    mock_client.models.generate_content.return_value = mock_response
+
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        api_key="test-key",
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+    )
+    runtime_params = {
+        "max_output_tokens": 4096,
+        "top_p": 0.8,
+        "top_k": 20,
+    }
+
+    list(model.infer(["Test prompt"], **runtime_params))
+
+    mock_client.models.generate_content.assert_called_once()
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    for key, value in runtime_params.items():
+      self.assertIn(key, config)
+      self.assertEqual(value, config[key])
+
+  @mock.patch("google.genai.Client", autospec=True)
+  def test_gemini_runtime_none_clears_constructor_generation_params(
+      self, mock_client_class
+  ):
+    """Runtime None uses provider defaults instead of constructor settings."""
+    mock_client = mock_client_class.return_value
+    mock_client.models.generate_content.return_value = mock.Mock(
+        text='{"result": "test"}'
+    )
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        api_key="test-key",
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+    )
+
+    list(
+        model.infer(
+            ["Test prompt"],
+            temperature=None,
+            max_output_tokens=None,
+            top_p=None,
+            top_k=None,
+        )
+    )
+
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    for key in ["temperature", "max_output_tokens", "top_p", "top_k"]:
+      self.assertNotIn(key, config)
+
+  @mock.patch("google.genai.Client", autospec=True)
+  def test_gemini_runtime_none_clears_only_selected_generation_param(
+      self, mock_client_class
+  ):
+    """Runtime None clears one constructor setting without clearing siblings."""
+    mock_client = mock_client_class.return_value
+    mock_client.models.generate_content.return_value = mock.Mock(
+        text='{"result": "test"}'
+    )
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        api_key="test-key",
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+    )
+
+    list(model.infer(["Test prompt"], max_output_tokens=None, top_p=0.8))
+
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    self.assertNotIn("max_output_tokens", config)
+    self.assertEqual(0.0, config["temperature"])
+    self.assertEqual(0.8, config["top_p"])
+    self.assertEqual(40, config["top_k"])
 
   @mock.patch("google.genai.Client")
   def test_gemini_runtime_kwargs_filtered(self, mock_client_class):

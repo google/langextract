@@ -64,7 +64,7 @@ class TestRateLimiter(absltest.TestCase):
     sleeps = []
     fake_time = mock.Mock()
     fake_time.monotonic.return_value = 100.0
-    fake_time.sleep.side_effect = lambda s: sleeps.append(s)
+    fake_time.sleep.side_effect = sleeps.append
     with mock.patch.object(gemini, 'time', fake_time):
       limiter.acquire()  # first slot == now, no wait
       limiter.acquire()  # +1s

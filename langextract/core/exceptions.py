@@ -20,6 +20,8 @@ foundational error types that are used throughout the codebase.
 
 from __future__ import annotations
 
+from typing import Any
+
 __all__ = [
     "LangExtractError",
     "InferenceError",
@@ -109,6 +111,8 @@ class InferenceRuntimeError(InferenceError):
       *,
       original: BaseException | None = None,
       provider: str | None = None,
+      partial_results: list[Any] | None = None,
+      failed_indices: list[int] | None = None,
   ) -> None:
     """Initialize the runtime error.
 
@@ -116,10 +120,16 @@ class InferenceRuntimeError(InferenceError):
       message: Error message.
       original: Original exception from the provider SDK.
       provider: Name of the provider that raised the error.
+      partial_results: Results that completed before the failure, aligned to the
+        input prompts (``None`` where a prompt failed or did not finish). Lets a
+        caller recover work already done instead of losing a whole batch.
+      failed_indices: Indices of the prompts that failed, when known.
     """
     super().__init__(message)
     self.original = original
     self.provider = provider
+    self.partial_results = partial_results
+    self.failed_indices = failed_indices
 
 
 class InferenceOutputError(LangExtractError):

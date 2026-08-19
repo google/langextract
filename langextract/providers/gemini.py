@@ -23,6 +23,7 @@ import dataclasses
 import numbers
 import random
 import re
+import threading
 import time
 from typing import Any, Final, Iterator, Sequence
 
@@ -46,6 +47,7 @@ _MIME_TYPE_JSON = 'application/json'
 _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_RETRY_DELAY = 1.0
 _DEFAULT_MAX_RETRY_DELAY = 16.0
+_DEFAULT_MAX_RPM = 0.0  # 0 disables client-side throttling
 
 _RETRYABLE_API_CODES = frozenset({408, 429, 500, 502, 503, 504})
 
@@ -159,6 +161,31 @@ def _no_text_diagnostic(
   return f'Gemini returned no text content{detail}.'
 
 
+class _RateLimiter:
+  """Thread-safe client-side throttle: at most ``max_rpm`` requests start per
+  minute, shared across every worker thread.
+
+  Under a short lock each caller reserves a distinct time slot, then sleeps to
+  that slot outside the lock, so N threads self-space instead of bursting into
+  the API and tripping 429s. A leaky bucket, not a token bucket: it smooths the
+  request *start* rate and does not bank unused capacity for a later burst.
+  """
+
+  def __init__(self, max_rpm: float) -> None:
+    self._min_interval = 60.0 / max_rpm
+    self._lock = threading.Lock()
+    self._next_slot = 0.0  # monotonic time the next request may start
+
+  def acquire(self) -> None:
+    """Block until this caller's slot, keeping the shared rate under the cap."""
+    with self._lock:
+      slot = max(time.monotonic(), self._next_slot)
+      self._next_slot = slot + self._min_interval
+    wait = slot - time.monotonic()
+    if wait > 0:
+      time.sleep(wait)
+
+
 _GENERATION_CONFIG_KEYS: Final[tuple[str, ...]] = (
     'max_output_tokens',
     'top_p',
@@ -201,6 +228,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
   max_retries: int = _DEFAULT_MAX_RETRIES
   retry_delay: float = _DEFAULT_RETRY_DELAY
   max_retry_delay: float = _DEFAULT_MAX_RETRY_DELAY
+  max_rpm: float = _DEFAULT_MAX_RPM
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
@@ -251,6 +279,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       max_retries: int = _DEFAULT_MAX_RETRIES,
       retry_delay: float = _DEFAULT_RETRY_DELAY,
       max_retry_delay: float = _DEFAULT_MAX_RETRY_DELAY,
+      max_rpm: float = _DEFAULT_MAX_RPM,
       **kwargs,
   ) -> None:
     """Initialize the Gemini language model.
@@ -274,6 +303,11 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       retry_delay: Initial delay in seconds before first retry.
         Subsequent delays increase exponentially.
       max_retry_delay: Maximum delay in seconds between retries.
+      max_rpm: Optional client-side rate limit. When greater than 0,
+        real-time requests are spaced so at most this many start per minute
+        (shared across all workers), keeping usage under provider quotas so
+        429s are avoided before they happen rather than only retried after.
+        0 (the default) disables throttling. Does not apply to the Batch API.
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
         forwarded to the API, including generation settings
         (max_output_tokens, top_p, top_k), response schemas, tools, safety
@@ -317,12 +351,19 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
             max_retry_delay,
             _is_non_bool_real(max_retry_delay) and max_retry_delay > 0,
         ),
+        (
+            'max_rpm',
+            max_rpm,
+            _is_non_bool_real(max_rpm) and max_rpm >= 0,
+        ),
     ):
       if not ok:
         raise exceptions.InferenceConfigError(f'{name} invalid: {value}')
     self.max_retries = max_retries
     self.retry_delay = retry_delay
     self.max_retry_delay = max_retry_delay
+    self.max_rpm = max_rpm
+    self._rate_limiter = _RateLimiter(max_rpm) if max_rpm > 0 else None
 
     # Avoid stacking with SDK-level retries (HttpOptions.retry_options).
     if max_retries > 0 and _has_sdk_retry_options(http_options):
@@ -443,6 +484,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
             for key, value in call_config.items()
             if value is not None
         }
+        if self._rate_limiter is not None:
+          self._rate_limiter.acquire()
         response = self._client.models.generate_content(
             model=self.model_id, contents=prompt, config=call_config
         )
@@ -585,6 +628,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         results: list[core_types.ScoredOutput | None] = [None] * len(
             batch_prompts
         )
+        errors: dict[int, Exception] = {}
         for future in concurrent.futures.as_completed(future_to_index):
           index = future_to_index[future]
           try:
@@ -592,15 +636,27 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           except exceptions.InferenceRuntimeError:
             raise
           except Exception as e:
-            raise exceptions.InferenceRuntimeError(
-                f'Parallel inference error: {str(e)}', original=e
-            ) from e
+            # Collect, don't raise mid-loop: raising here abandons the still
+            # running futures and throws away every chunk that already
+            # succeeded. Let the pool drain, then fail once with the completed
+            # work attached so the caller can recover it.
+            errors[index] = e
+
+        if errors:
+          completed = sum(1 for result in results if result is not None)
+          first_index = min(errors)
+          raise exceptions.InferenceRuntimeError(
+              f'Parallel inference failed for {len(errors)} of '
+              f'{len(batch_prompts)} prompt(s); {completed} completed chunk(s) '
+              f'preserved. First error: {errors[first_index]}',
+              original=errors[first_index],
+              partial_results=[
+                  [result] if result is not None else None for result in results
+              ],
+              failed_indices=sorted(errors),
+          )
 
         for result in results:
-          if result is None:
-            raise exceptions.InferenceRuntimeError(
-                'Failed to process one or more prompts'
-            )
           yield [result]
     else:
       # Sequential processing for single prompt or worker

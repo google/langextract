@@ -308,7 +308,12 @@ class Resolver(AbstractResolver):
 
     except exceptions.FormatError as e:
       if suppress_parse_errors:
-        logging.warning("Skipping chunk: parse error: %s", e)
+        logging.warning(
+            "Chunk dropped, no retry possible (parse error; pass"
+            " resolver_params={'suppress_parse_errors': False} to raise and"
+            " retry instead): %s",
+            e,
+        )
         return []
       raise ResolverParsingError(str(e)) from e
 
@@ -316,7 +321,12 @@ class Resolver(AbstractResolver):
       processed_extractions = self.extract_ordered_extractions(extraction_data)
     except ValueError as e:
       if suppress_parse_errors:
-        logging.warning("Skipping chunk: schema error: %s", e)
+        logging.warning(
+            "Chunk dropped, no retry possible (schema error; pass"
+            " resolver_params={'suppress_parse_errors': False} to raise and"
+            " retry instead): %s",
+            e,
+        )
         return []
       raise ResolverParsingError(str(e)) from e
 

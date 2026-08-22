@@ -102,7 +102,8 @@ live_api = pytest.mark.live_api
 GEMINI_MODEL_PARAMS = {
     "temperature": 0.0,
     "top_p": 0.0,
-    "max_output_tokens": 256,
+    # Leave enough room for model reasoning before the structured response.
+    "max_output_tokens": 4096,
 }
 
 OPENAI_MODEL_PARAMS = {

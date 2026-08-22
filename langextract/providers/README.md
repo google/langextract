@@ -197,16 +197,19 @@ result = lx.extract(
     max_char_buffer=3000,       # Document chunking
 )
 
-# 2. Provider-specific parameters passed via **kwargs:
+# 2. Provider-specific constructor parameters via language_model_params:
 result = lx.extract(
     text_or_documents="Your document",
     model_id="gemini-3.5-flash",
     prompt_description="Extract entities",
     examples=[...],
-    # These go directly to the Gemini provider:
-    temperature=0.7,          # Sampling temperature
-    api_key="your-key",      # Override environment variable
-    max_output_tokens=1000,  # Token limit
+    temperature=0.7,     # Common sampling parameter
+    api_key="your-key",  # Override environment variable
+    language_model_params={
+        "max_output_tokens": 1000,
+        "top_p": 0.95,
+        "top_k": 40,
+    },
 )
 ```
 

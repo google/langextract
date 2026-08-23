@@ -556,6 +556,33 @@ def _extract_text(resp: _TextResponse | dict[str, Any] | None) -> str | None:
   return text if isinstance(text, str) else None
 
 
+def _response_error(resp: dict[str, Any]) -> str | None:
+  """Return a diagnostic when Gemini returned no usable candidate text."""
+  feedback = resp.get("prompt_feedback")
+  if isinstance(feedback, dict):
+    block_reason = feedback.get("block_reason") or feedback.get("blockReason")
+    if block_reason:
+      block_message = feedback.get("block_reason_message") or feedback.get(
+          "blockReasonMessage"
+      )
+      detail = f": {block_message}" if block_message else ""
+      return f"prompt blocked ({block_reason}){detail}"
+
+  candidates = resp.get("candidates")
+  if not isinstance(candidates, list) or not candidates:
+    return None
+  candidate = candidates[0]
+  if not isinstance(candidate, dict):
+    return None
+  reason = candidate.get("finish_reason") or candidate.get("finishReason")
+  message = candidate.get("finish_message") or candidate.get("finishMessage")
+  reason_name = str(reason).rsplit(".", maxsplit=1)[-1]
+  if reason and reason_name != "STOP":
+    detail = f", message={message}" if message else ""
+    return f"finish reason={reason}{detail}"
+  return None
+
+
 def _poll_completion(
     client: genai.Client, job: genai.types.BatchJob, cfg: BatchConfig
 ) -> genai.types.BatchJob:
@@ -619,7 +646,14 @@ def _parse_batch_line(
       raise exceptions.InferenceRuntimeError(f"Batch item error: {error}")
 
   resp = obj.get("response", {})
-  text = _extract_text(resp) or ""
+  text = _extract_text(resp)
+  if text is None and isinstance(resp, dict) and not cfg.ignore_item_errors:
+    response_error = _response_error(resp)
+    if response_error:
+      raise exceptions.InferenceRuntimeError(
+          f"Batch item response error: {response_error}"
+      )
+  text = text or ""
 
   key = obj.get("key", "")
   try:

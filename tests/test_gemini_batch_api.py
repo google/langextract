@@ -566,6 +566,77 @@ class TestGeminiBatchAPI(absltest.TestCase):
     with self.assertRaisesRegex(Exception, "Batch item error"):
       list(model.infer(["test"]))
 
+  def test_batch_item_response_refusal_raises(self):
+    """A refusal without text is not treated as a successful empty result."""
+    cfg = gb.BatchConfig()
+    with self.assertRaisesRegex(Exception, "finish reason=SAFETY"):
+      gb._parse_batch_line(
+          json.dumps({
+              "key": "idx-0",
+              "response": {"candidates": [{"finish_reason": "SAFETY"}]},
+          }),
+          {},
+          cfg,
+      )
+
+  def test_batch_item_empty_response_remains_empty(self):
+    """A response without an error diagnostic remains an empty extraction."""
+    outputs = {}
+    gb._parse_batch_line(
+        json.dumps({"key": "idx-0", "response": {"candidates": []}}),
+        outputs,
+        gb.BatchConfig(),
+    )
+    self.assertEqual(outputs, {0: ""})
+
+  def test_batch_item_response_refusal_can_be_ignored(self):
+    """The existing ignore-item-errors option suppresses response errors."""
+    outputs = {}
+    gb._parse_batch_line(
+        json.dumps({
+            "key": "idx-0",
+            "response": {"candidates": [{"finish_reason": "SAFETY"}]},
+        }),
+        outputs,
+        gb.BatchConfig(ignore_item_errors=True),
+    )
+    self.assertEqual(outputs, {0: ""})
+
+  def test_batch_item_prompt_feedback_block_raises(self):
+    """A prompt block reason is surfaced with its optional message."""
+    with self.assertRaisesRegex(Exception, r"prompt blocked \(SAFETY\)"):
+      gb._parse_batch_line(
+          json.dumps({
+              "key": "idx-0",
+              "response": {
+                  "prompt_feedback": {
+                      "blockReason": "SAFETY",
+                      "blockReasonMessage": "blocked content",
+                  }
+              },
+          }),
+          {},
+          gb.BatchConfig(),
+      )
+
+  def test_batch_item_text_wins_over_finish_reason(self):
+    """A candidate with text is not rejected based on its finish reason."""
+    outputs = {}
+    gb._parse_batch_line(
+        json.dumps({
+            "key": "idx-0",
+            "response": {
+                "candidates": [{
+                    "content": {"parts": [{"text": "partial"}]},
+                    "finishReason": "SAFETY",
+                }]
+            },
+        }),
+        outputs,
+        gb.BatchConfig(),
+    )
+    self.assertEqual(outputs, {0: "partial"})
+
 
 class BatchConfigValidationTest(parameterized.TestCase):
   """Test BatchConfig validation logic."""

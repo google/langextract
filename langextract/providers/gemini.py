@@ -538,6 +538,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           # Extract top-level fields that don't belong in generationConfig
           system_instruction = batch_config.pop('system_instruction', None)
           safety_settings = batch_config.pop('safety_settings', None)
+          tools = batch_config.pop('tools', None)
           outputs = gemini_batch.infer_batch(
               client=self._client,
               model_id=self.model_id,
@@ -547,6 +548,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
               cfg=self._batch_cfg,
               system_instruction=system_instruction,
               safety_settings=safety_settings,
+              tools=tools,
               project=self.project,
               location=self.location,
           )

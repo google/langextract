@@ -262,6 +262,7 @@ def _build_request(
     gen_config: dict | None,
     system_instruction: str | None = None,
     safety_settings: Sequence[Any] | None = None,
+    tools: Sequence[Any] | None = None,
 ) -> dict:
   """Build a batch request in REST format for file-based submission.
 
@@ -279,12 +280,14 @@ def _build_request(
     gen_config: Optional generation configuration parameters.
     system_instruction: Optional system instruction text.
     safety_settings: Optional safety settings sequence.
+    tools: Optional tools sequence (e.g. google_search).
 
   Returns:
     A dictionary formatted for REST API file-based submission, containing:
       * contents: The prompt content.
       * systemInstruction: Optional system instructions.
       * safetySettings: Optional safety settings.
+      * tools: Optional tools.
       * generationConfig: Optional generation configuration and schema.
   """
   request = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
@@ -294,6 +297,9 @@ def _build_request(
 
   if safety_settings:
     request["safetySettings"] = safety_settings
+
+  if tools:
+    request["tools"] = tools
 
   if schema_config or gen_config:
     generation_config = {}
@@ -713,6 +719,7 @@ def infer_batch(
     cfg: BatchConfig,
     system_instruction: str | None = None,
     safety_settings: Sequence[Any] | None = None,
+    tools: Sequence[Any] | None = None,
     project: str | None = None,
     location: str | None = None,
 ) -> list[str]:
@@ -736,6 +743,7 @@ def infer_batch(
     cfg: Batch configuration including thresholds, timeouts, and error handling.
     system_instruction: Optional system instruction text.
     safety_settings: Optional safety settings sequence.
+    tools: Optional tools sequence (e.g. google_search).
     project: Google Cloud project ID (optional, overrides client/env).
     location: Vertex AI location (optional, overrides client/env).
 
@@ -797,6 +805,7 @@ def infer_batch(
           "system_instruction": system_instruction,
           "gen_config": gen_config,
           "safety_settings": safety_settings,
+          "tools": tools,
           "schema": schema_config,
       })
 
@@ -829,7 +838,7 @@ def infer_batch(
     batch_prompts = [p for _, p in batch_items]
     requests = [
         _build_request(
-            p, schema_config, gen_config, system_instruction, safety_settings
+            p, schema_config, gen_config, system_instruction, safety_settings, tools
         )
         for p in batch_prompts
     ]
@@ -888,6 +897,7 @@ def infer_batch(
           "system_instruction": system_instruction,
           "gen_config": gen_config,
           "safety_settings": safety_settings,
+          "tools": tools,
           "schema": schema_config,
       }
       upload_list.append((key_data, text))

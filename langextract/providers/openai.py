@@ -251,7 +251,22 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
       output_text = response.choices[0].message.content
 
-      return core_types.ScoredOutput(score=1.0, output=output_text)
+      usage = getattr(response, 'usage', None)
+      token_usage = None
+      if usage is not None:
+        token_usage = core_types.TokenUsage(
+            prompt_tokens=getattr(usage, 'prompt_tokens', None),
+            completion_tokens=getattr(usage, 'completion_tokens', None),
+            total_tokens=getattr(usage, 'total_tokens', None),
+        )
+      request_id = getattr(response, 'id', None)
+
+      return core_types.ScoredOutput(
+          score=1.0,
+          output=output_text,
+          token_usage=token_usage,
+          request_id=request_id,
+      )
 
     except exceptions.InferenceConfigError:
       raise

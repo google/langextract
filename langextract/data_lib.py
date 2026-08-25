@@ -79,6 +79,9 @@ def annotated_document_to_dict(
 
   result["document_id"] = adoc.document_id
 
+  if adoc.metadata is None:
+    result.pop("metadata", None)
+
   return result
 
 
@@ -121,4 +124,5 @@ def dict_to_annotated_document(
       extractions=[
           data.Extraction(**ent) for ent in adoc_dic.get("extractions", [])
       ],
+      metadata=adoc_dic.get("metadata"),
   )

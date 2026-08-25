@@ -838,7 +838,12 @@ def infer_batch(
     batch_prompts = [p for _, p in batch_items]
     requests = [
         _build_request(
-            p, schema_config, gen_config, system_instruction, safety_settings, tools
+            p,
+            schema_config,
+            gen_config,
+            system_instruction,
+            safety_settings,
+            tools,
         )
         for p in batch_prompts
     ]

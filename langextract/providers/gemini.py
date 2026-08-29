@@ -96,7 +96,14 @@ def _has_sdk_retry_options(http_options: Any) -> bool:
   return attempts is None or attempts > 1
 
 
+_GENERATION_CONFIG_KEYS: Final[tuple[str, ...]] = (
+    'max_output_tokens',
+    'top_p',
+    'top_k',
+)
+
 _API_CONFIG_KEYS: Final[set[str]] = {
+    *_GENERATION_CONFIG_KEYS,
     'response_mime_type',
     'response_schema',
     'response_json_schema',
@@ -205,8 +212,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         Subsequent delays increase exponentially.
       max_retry_delay: Maximum delay in seconds between retries.
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
-        forwarded to the API (response_schema, response_mime_type, tools,
-        safety_settings, stop_sequences, candidate_count, system_instruction).
+        forwarded to the API, including generation settings
+        (max_output_tokens, top_p, top_k), response schemas, tools, safety
+        settings, stop sequences, candidate count, and system instructions.
         See https://ai.google.dev/api/generate-content for details.
     """
     try:
@@ -365,6 +373,13 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           for key, value in self.gemini_schema.to_provider_config().items():
             call_config.setdefault(key, value)
 
+        # Generation-setting None markers suppress constructor fallbacks above
+        # but must not reach the SDK.
+        call_config = {
+            key: value
+            for key, value in call_config.items()
+            if value is not None
+        }
         response = self._client.models.generate_content(
             model=self.model_id, contents=prompt, config=call_config
         )
@@ -407,11 +422,12 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     config = {
         'temperature': merged_kwargs.get('temperature', self.temperature),
     }
-    for key in ('max_output_tokens', 'top_p', 'top_k'):
+    # Preserve None here as an explicit marker that clears a constructor value.
+    for key in _GENERATION_CONFIG_KEYS:
       if key in merged_kwargs:
         config[key] = merged_kwargs[key]
 
-    handled_keys = {'temperature', 'max_output_tokens', 'top_p', 'top_k'}
+    handled_keys = {'temperature', *_GENERATION_CONFIG_KEYS}
     for key, value in merged_kwargs.items():
       if (
           key not in handled_keys
@@ -431,9 +447,11 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
               if self.gemini_schema
               else None
           )
-          # Remove schema fields from config for batch API - they're handled
-          # via schema_config
-          batch_config = dict(config)
+          # None markers implement clearing but must not reach the batch SDK.
+          batch_config = {
+              key: value for key, value in config.items() if value is not None
+          }
+          # Schema fields use the separate schema_config argument.
           batch_config.pop('response_mime_type', None)
           batch_config.pop('response_schema', None)
           batch_config.pop('response_json_schema', None)

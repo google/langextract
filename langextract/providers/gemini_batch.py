@@ -556,6 +556,44 @@ def _extract_text(resp: _TextResponse | dict[str, Any] | None) -> str | None:
   return text if isinstance(text, str) else None
 
 
+def _no_text_block_diagnostic(resp: Any) -> str | None:
+  """Return a block diagnostic when a textless response was refused.
+
+  A safety-blocked or refused batch item has no extractable text, so it is
+  indistinguishable from a genuinely empty generation by ``_extract_text``
+  alone. Vertex batch output uses REST-style (camelCase) keys, while inline
+  responses may arrive snake_case; accept both.
+
+  Args:
+    resp: The parsed ``response`` object from a batch output JSONL line.
+
+  Returns:
+    A human-readable reason when the response itself signals a block/refusal,
+    or None when it simply lacks text without a diagnostic.
+  """
+  if not isinstance(resp, dict):
+    return None
+
+  prompt_feedback = resp.get("promptFeedback") or resp.get("prompt_feedback")
+  if isinstance(prompt_feedback, dict):
+    block_reason = prompt_feedback.get("blockReason") or prompt_feedback.get(
+        "block_reason"
+    )
+    if block_reason:
+      return f"block_reason={block_reason}"
+
+  candidates = resp.get("candidates")
+  if isinstance(candidates, list) and candidates:
+    candidate = candidates[0]
+    if isinstance(candidate, dict):
+      finish_reason = candidate.get("finishReason") or candidate.get(
+          "finish_reason"
+      )
+      if finish_reason and finish_reason != "STOP":
+        return f"finish_reason={finish_reason}"
+  return None
+
+
 def _poll_completion(
     client: genai.Client, job: genai.types.BatchJob, cfg: BatchConfig
 ) -> genai.types.BatchJob:
@@ -620,6 +658,16 @@ def _parse_batch_line(
 
   resp = obj.get("response", {})
   text = _extract_text(resp) or ""
+
+  if not text and not cfg.ignore_item_errors:
+    # A safety-blocked or refused item has no text but still reports a block
+    # reason in the response. Surface that instead of silently treating the
+    # item as a successful empty extraction.
+    diagnostic = _no_text_block_diagnostic(resp)
+    if diagnostic:
+      raise exceptions.InferenceRuntimeError(
+          f"Batch item blocked or refused: {diagnostic}"
+      )
 
   key = obj.get("key", "")
   try:

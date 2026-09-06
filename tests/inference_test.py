@@ -870,7 +870,12 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"name": "John", "age": 30}'))
+        mock.Mock(
+            message=mock.Mock(
+                content='{"name": "John", "age": 30}', refusal=None
+            ),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -941,7 +946,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -967,7 +975,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -990,7 +1001,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -1014,7 +1028,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -1036,7 +1053,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -1059,7 +1079,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -1082,7 +1105,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content="test output"))
+        mock.Mock(
+            message=mock.Mock(content="test output", refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -1108,7 +1134,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 

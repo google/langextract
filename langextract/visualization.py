@@ -75,7 +75,7 @@ _PALETTE: list[str] = [
 
 _VISUALIZATION_CSS = textwrap.dedent("""\
     <style>
-    .lx-highlight { position: relative; border-radius:3px; padding:1px 2px;}
+    .lx-highlight { position: relative; border-radius:3px; padding:1px 2px; cursor: pointer;}
     .lx-highlight .lx-tooltip {
       visibility: hidden;
       opacity: 0;
@@ -543,6 +543,13 @@ def _build_visualization_html(
         window.nextExtraction = nextExtraction;
         window.prevExtraction = prevExtraction;
         window.jumpToExtraction = jumpToExtraction;
+
+        document.getElementById('textWindow').addEventListener('click', (event) => {{
+          const highlight = event.target.closest('.lx-highlight');
+          if (highlight && highlight.dataset.idx !== undefined) {{
+            jumpToExtraction(highlight.dataset.idx);
+          }}
+        }});
 
         updateDisplay();
       }})();

@@ -14,6 +14,8 @@
 
 """Tests for the main package functions in __init__.py."""
 
+import os
+import tempfile
 import textwrap
 from unittest import mock
 import warnings
@@ -947,6 +949,50 @@ class FetchUrlsOptInTest(absltest.TestCase):
       self._extract(fetch_urls=True)
     self.assertIs(cm.exception, sentinel)
     downloader.assert_called_once_with("http://example.com/doc")
+
+
+class FilePathInputWarningTest(absltest.TestCase):
+  """String input matching an existing file path should warn, not be read."""
+
+  def setUp(self):
+    super().setUp()
+    self._example = lx.data.ExampleData(
+        text="hi",
+        extractions=[
+            lx.data.Extraction(extraction_class="thing", extraction_text="hi")
+        ],
+    )
+
+  def _extract(self, text):
+    return lx.extract(
+        text_or_documents=text,
+        prompt_description="x",
+        examples=[self._example],
+        model_id="gemini-3.5-flash",
+        api_key="fake",
+    )
+
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_existing_file_path_warns(self, create_model):
+    sentinel = RuntimeError("short-circuit after path check")
+    create_model.side_effect = sentinel
+    fd, path = tempfile.mkstemp(suffix=".txt")
+    os.close(fd)
+    self.addCleanup(os.unlink, path)
+    with self.assertWarnsRegex(UserWarning, "path to an existing file"):
+      with self.assertRaises(RuntimeError) as cm:
+        self._extract(path)
+    self.assertIs(cm.exception, sentinel)
+
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_plain_text_does_not_warn(self, create_model):
+    sentinel = RuntimeError("short-circuit after path check")
+    create_model.side_effect = sentinel
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      with self.assertRaises(RuntimeError) as cm:
+        self._extract("The patient was given 250 mg of amoxicillin.")
+    self.assertIs(cm.exception, sentinel)
 
 
 if __name__ == "__main__":

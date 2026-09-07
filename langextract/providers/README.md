@@ -378,6 +378,14 @@ class MyProviderLanguageModel(base_model.BaseLanguageModel):
             yield [types.ScoredOutput(score=1.0, output=result)]
 ```
 
+The built-in providers keep SDK response types inside the provider. A local
+helper such as `_response_to_scored_output()` translates usable text into
+`ScoredOutput` and raises a provider-tagged `InferenceRuntimeError` for blocked,
+refused, truncated, or otherwise unusable responses. `infer()` remains the
+public plugin contract; the helper is a convention, not a required base method.
+Providers using this pattern should re-raise `InferenceRuntimeError` before any
+retry or blanket exception handler so the diagnostic is preserved.
+
 **Pattern Registration Explained:**
 - The `@router.register` decorator patterns (e.g., `r'^mymodel'`, `r'^custom'`) define which model IDs your provider supports
 - When users call `lx.extract(model_id="mymodel-3b")`, the router matches against these patterns

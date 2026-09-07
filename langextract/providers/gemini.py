@@ -27,6 +27,7 @@ import time
 from typing import Any, Final, Iterator, Sequence
 
 from absl import logging
+from google.genai import types as genai_types
 
 from langextract.core import base_model
 from langextract.core import data
@@ -94,6 +95,68 @@ def _has_sdk_retry_options(http_options: Any) -> bool:
     attempts = getattr(retry_options, 'attempts', None)
   # attempts=None means SDK default (which is >1); 0 or 1 means no retries.
   return attempts is None or attempts > 1
+
+
+_MAX_TOKENS_HINT: Final[str] = (
+    ' The output token budget was exhausted before any text was emitted;'
+    ' consider raising max_output_tokens (thinking models may consume the'
+    ' budget on reasoning before any text is produced).'
+)
+
+
+def _no_text_diagnostic(
+    response: genai_types.GenerateContentResponse, text: str | None
+) -> str | None:
+  """Diagnose missing output that the SDK reports without raising.
+
+  Returning missing text as success can silently drop a blocked chunk.
+
+  Returns:
+    A provider diagnostic, or None for text and empty completions without a
+    block or abnormal finish reason, which retain existing resolver handling.
+  """
+  if text:
+    return None
+
+  prompt_feedback = response.prompt_feedback
+  block_reason = prompt_feedback.block_reason if prompt_feedback else None
+  candidate = response.candidates[0] if response.candidates else None
+  finish_reason = candidate.finish_reason if candidate else None
+  if block_reason == genai_types.BlockedReason.BLOCKED_REASON_UNSPECIFIED:
+    block_reason = None
+  if finish_reason == genai_types.FinishReason.FINISH_REASON_UNSPECIFIED:
+    finish_reason = None
+
+  if (
+      text == ''
+      and block_reason is None
+      and finish_reason in (None, genai_types.FinishReason.STOP)
+  ):
+    return None
+
+  if block_reason:
+    block_message = prompt_feedback.block_reason_message
+    detail = f': {block_message}' if block_message else ''
+    return (
+        'Gemini blocked the prompt'
+        f' (block_reason={block_reason.value}{detail}).'
+    )
+  if finish_reason and finish_reason != genai_types.FinishReason.STOP:
+    hint = (
+        _MAX_TOKENS_HINT
+        if finish_reason == genai_types.FinishReason.MAX_TOKENS
+        else ''
+    )
+    return (
+        f'Gemini returned no text (finish_reason={finish_reason.value}).{hint}'
+    )
+  if candidate and candidate.content and candidate.content.parts:
+    return (
+        'Gemini returned only non-text parts (e.g. a function call or'
+        ' thought-only output) where text output was expected.'
+    )
+  detail = f' (finish_reason={finish_reason.value})' if finish_reason else ''
+  return f'Gemini returned no text content{detail}.'
 
 
 _GENERATION_CONFIG_KEYS: Final[tuple[str, ...]] = (
@@ -383,8 +446,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         response = self._client.models.generate_content(
             model=self.model_id, contents=prompt, config=call_config
         )
-        return core_types.ScoredOutput(score=1.0, output=response.text)
+        return self._response_to_scored_output(response)
 
+      except exceptions.InferenceRuntimeError:
+        raise
       except Exception as e:
         if attempt < self.max_retries and self._is_retryable_error(e):
           # Cap after jitter so the named maximum applies to the real sleep.
@@ -402,8 +467,23 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           delay = min(delay * 2, self.max_retry_delay)
           continue
         raise exceptions.InferenceRuntimeError(
-            f'Gemini API error: {e}', original=e
+            f'Gemini API error: {e}', original=e, provider='Gemini'
         ) from e
+
+  @staticmethod
+  def _response_to_scored_output(
+      response: genai_types.GenerateContentResponse,
+  ) -> core_types.ScoredOutput:
+    """Translate one Gemini SDK response into LangExtract output.
+
+    Raises:
+      InferenceRuntimeError: If the response has no usable text.
+    """
+    output_text = response.text
+    diagnostic = _no_text_diagnostic(response, output_text)
+    if diagnostic is not None:
+      raise exceptions.InferenceRuntimeError(diagnostic, provider='Gemini')
+    return core_types.ScoredOutput(score=1.0, output=output_text)
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
@@ -509,6 +589,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           index = future_to_index[future]
           try:
             results[index] = future.result()
+          except exceptions.InferenceRuntimeError:
+            raise
           except Exception as e:
             raise exceptions.InferenceRuntimeError(
                 f'Parallel inference error: {str(e)}', original=e

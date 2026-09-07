@@ -145,16 +145,22 @@ class TokenizedText:
   tokens: list[Token] = dataclasses.field(default_factory=list)
 
 
-_LETTERS_PATTERN = r"[^\W\d_]+"
+_CJK_CHARS_PATTERN = r"\p{Is_Han}\p{Is_Hiragana}\p{Is_Katakana}\p{Is_Hangul}"
+_LETTERS_PATTERN = rf"[[^\W\d_]--[{_CJK_CHARS_PATTERN}]]+"
 _DIGITS_PATTERN = r"\d+"
+_CJK_PATTERN = rf"[{_CJK_CHARS_PATTERN}]+"
 # Group identical symbols (e.g. "!!") but split mixed ones.
 _SYMBOLS_PATTERN = r"([^\w\s]|_)\1*"
 _END_OF_SENTENCE_PATTERN = regex.compile(r"[.?!。！？\u0964][\"'”’»)\]}]*$")
 
 _TOKEN_PATTERN = regex.compile(
-    rf"{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_SYMBOLS_PATTERN}"
+    rf"{_CJK_PATTERN}|{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_SYMBOLS_PATTERN}",
+    flags=regex.V1,
 )
-_WORD_PATTERN = regex.compile(rf"(?:{_LETTERS_PATTERN}|{_DIGITS_PATTERN})\Z")
+_WORD_PATTERN = regex.compile(
+    rf"(?:{_CJK_PATTERN}|{_LETTERS_PATTERN}|{_DIGITS_PATTERN})\Z",
+    flags=regex.V1,
+)
 
 # Abbreviations that do not end sentences.
 # TODO: Evaluate removal for large-context use cases.
@@ -246,9 +252,7 @@ def tokenize(
   return tokenizer.tokenize(text)
 
 
-_CJK_PATTERN = regex.compile(
-    r"\p{Is_Han}|\p{Is_Hiragana}|\p{Is_Katakana}|\p{Is_Hangul}"
-)
+_CJK_REGEX = regex.compile(_CJK_PATTERN)
 _NON_SPACED_PATTERN = regex.compile(
     r"\p{Is_Thai}|\p{Is_Lao}|\p{Is_Khmer}|\p{Is_Myanmar}"
 )
@@ -380,7 +384,7 @@ class UnicodeTokenizer(Tokenizer):
               should_merge = False
 
             # CJK and Non-Spaced scripts require fragmentation.
-            elif _CJK_PATTERN.match(first_char) or _NON_SPACED_PATTERN.match(
+            elif _CJK_REGEX.match(first_char) or _NON_SPACED_PATTERN.match(
                 first_char
             ):
               should_merge = False
@@ -426,7 +430,7 @@ class UnicodeTokenizer(Tokenizer):
         # Determine script for the new token
         if current_type == TokenType.WORD:
           c = grapheme[0]
-          if _CJK_PATTERN.match(c) or _NON_SPACED_PATTERN.match(c):
+          if _CJK_REGEX.match(c) or _NON_SPACED_PATTERN.match(c):
             current_script = _NO_GROUP_SCRIPT
           else:
             current_script = _get_script_fast(c)

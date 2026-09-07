@@ -87,7 +87,12 @@ Ships with langextract, but requires extra installation:
 - **OpenAI** (`openai.py`): OpenAI's GPT models
   - Code included in package
   - Requires: `pip install langextract[openai]` to install OpenAI SDK
-  - Future: May be moved to external plugin package
+- **Anthropic / Claude** (`anthropic.py`): Claude 5 (`claude-sonnet-5`, `claude-opus-5`, `claude-fable-5`) and Haiku 4.5
+  - Requires: `pip install anthropic`
+  - Env: `ANTHROPIC_API_KEY`
+- **xAI / Grok** (`xai.py`): Grok 4.6 (`grok-4.6`) via `https://api.x.ai/v1`
+  - Requires: `pip install langextract[xai]` (OpenAI SDK)
+  - Env: `XAI_API_KEY`
 
 ### 3. External Plugins (Third-party)
 Separate packages that extend LangExtract with new providers:

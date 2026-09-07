@@ -16,6 +16,44 @@ result = lx.extract(
 
 Env: `GEMINI_API_KEY` (falls back to `LANGEXTRACT_API_KEY`).
 
+## Claude (Anthropic)
+
+Current generation: **Claude Sonnet 5** (default), **Claude Opus 5** (flagship),
+**Claude Fable 5** (frontier), **Claude Haiku 4.5** (fast).
+
+```python
+result = lx.extract(
+    text_or_documents=text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="claude-sonnet-5",
+)
+```
+
+Env: `ANTHROPIC_API_KEY` (falls back to `LANGEXTRACT_API_KEY`).
+Install: `pip install anthropic`.
+
+`claude-*` and `anthropic*` model IDs auto-route to `AnthropicLanguageModel`.
+
+## Grok (xAI)
+
+Current generation: **Grok 4.6** (default). Previous: `grok-4.5`.
+
+```python
+result = lx.extract(
+    text_or_documents=text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="grok-4.6",
+)
+```
+
+Env: `XAI_API_KEY` (falls back to `LANGEXTRACT_API_KEY`).
+Base URL: `XAI_BASE_URL` or `https://api.x.ai/v1`.
+Install: `pip install langextract[xai]` (pulls the OpenAI SDK).
+
+`grok-*` and `xai*` model IDs auto-route to `XAILanguageModel`.
+
 ## OpenAI
 
 ```python

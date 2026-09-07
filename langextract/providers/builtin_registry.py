@@ -48,4 +48,14 @@ BUILTIN_PROVIDERS: list[ProviderConfig] = [
         'target': 'langextract.providers.openai:OpenAILanguageModel',
         'priority': patterns.OPENAI_PRIORITY,
     },
+    {
+        'patterns': patterns.ANTHROPIC_PATTERNS,
+        'target': 'langextract.providers.anthropic:AnthropicLanguageModel',
+        'priority': patterns.ANTHROPIC_PRIORITY,
+    },
+    {
+        'patterns': patterns.XAI_PATTERNS,
+        'target': 'langextract.providers.xai:XAILanguageModel',
+        'priority': patterns.XAI_PRIORITY,
+    },
 ]

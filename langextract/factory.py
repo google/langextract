@@ -66,16 +66,23 @@ def _kwargs_with_environment_defaults(
     Updated kwargs with environment defaults.
   """
   resolved = dict(kwargs)
+  model_lower = (model_id or "").lower()
 
   if "api_key" not in resolved and not resolved.get("vertexai", False):
-    model_lower = model_id.lower()
     env_vars_by_provider = {
+        "claude": ("ANTHROPIC_API_KEY", "LANGEXTRACT_API_KEY"),
+        "anthropic": ("ANTHROPIC_API_KEY", "LANGEXTRACT_API_KEY"),
+        "grok": ("XAI_API_KEY", "LANGEXTRACT_API_KEY"),
+        "xai": ("XAI_API_KEY", "LANGEXTRACT_API_KEY"),
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
         "gpt": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
     }
 
     for provider_prefix, env_vars in env_vars_by_provider.items():
-      if provider_prefix in model_lower:
+      if (
+          model_lower.startswith(provider_prefix)
+          or provider_prefix in model_lower
+      ):
         found_keys = []
         for env_var in env_vars:
           key_val = os.getenv(env_var)
@@ -99,6 +106,12 @@ def _kwargs_with_environment_defaults(
     resolved["base_url"] = os.getenv(
         "OLLAMA_BASE_URL", "http://localhost:11434"
     )
+
+  if (
+      any(token in model_lower for token in ("grok", "xai"))
+      and "base_url" not in resolved
+  ):
+    resolved["base_url"] = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1")
 
   return resolved
 

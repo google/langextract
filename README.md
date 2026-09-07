@@ -20,6 +20,8 @@
 - [Installation](#installation)
 - [API Key Setup for Cloud Models](#api-key-setup-for-cloud-models)
 - [Adding Custom Model Providers](#adding-custom-model-providers)
+- [Using Claude (Anthropic) Models](#using-claude-anthropic-models)
+- [Using Grok (xAI) Models](#using-grok-xai-models)
 - [Using OpenAI Models](#using-openai-models)
 - [Using Local LLMs with Ollama](#using-local-llms-with-ollama)
 - [More Examples](#more-examples)
@@ -229,10 +231,11 @@ docker run --rm -e LANGEXTRACT_API_KEY="your-api-key" langextract python your_sc
 
 ## API Key Setup for Cloud Models
 
-When using LangExtract with cloud-hosted models (like Gemini or OpenAI), you'll need to
-set up an API key. On-device models don't require an API key. For developers
-using local LLMs, LangExtract offers built-in support for Ollama and can be
-extended to other third-party APIs by updating the inference endpoints.
+When using LangExtract with cloud-hosted models (like Gemini, Claude, Grok, or
+OpenAI), you'll need to set up an API key. On-device models don't require an
+API key. For developers using local LLMs, LangExtract offers built-in support
+for Ollama and can be extended to other third-party APIs by updating the
+inference endpoints.
 
 ### API Key Sources
 
@@ -240,6 +243,8 @@ Get API keys from:
 
 *   [AI Studio](https://aistudio.google.com/app/apikey) for Gemini models
 *   [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview) for enterprise use
+*   [Anthropic Console](https://console.anthropic.com/settings/keys) for Claude models (`ANTHROPIC_API_KEY`)
+*   [xAI Console](https://console.x.ai) for Grok models (`XAI_API_KEY`)
 *   [OpenAI Platform](https://platform.openai.com/api-keys) for OpenAI models
 
 ### Setting up API key in your environment
@@ -323,6 +328,51 @@ See the detailed guide in [Provider System Documentation](langextract/providers/
 - Publish an entry point for discovery
 - Optionally provide a schema with `get_schema_class()` for structured output
 - Integrate with the factory via `create_model(...)`
+
+## Using Claude (Anthropic) Models
+
+LangExtract routes `claude-*` model IDs to the Anthropic Messages API
+(requires `pip install anthropic`). Current-generation defaults:
+
+| Role | Model ID |
+|---|---|
+| Default (speed + intelligence) | `claude-sonnet-5` |
+| Flagship agentic / extraction | `claude-opus-5` |
+| Frontier | `claude-fable-5` |
+| Fast / cheap | `claude-haiku-4-5` |
+
+```python
+import langextract as lx
+
+# ANTHROPIC_API_KEY in the environment is picked up automatically.
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="claude-sonnet-5",
+)
+```
+
+## Using Grok (xAI) Models
+
+LangExtract routes `grok-*` model IDs to xAI's OpenAI-compatible API
+(requires `pip install langextract[openai]`). The current default is
+**Grok 4.6**.
+
+```python
+import langextract as lx
+
+# XAI_API_KEY in the environment is picked up automatically.
+result = lx.extract(
+    text_or_documents=input_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="grok-4.6",
+)
+```
+
+The xAI base URL defaults to `https://api.x.ai/v1` (override with `XAI_BASE_URL`
+or `provider_kwargs={"base_url": "..."}`).
 
 ## Using OpenAI Models
 

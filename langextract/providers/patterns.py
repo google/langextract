@@ -31,6 +31,20 @@ OPENAI_PATTERNS = (
 )
 OPENAI_PRIORITY = 10
 
+# Anthropic / Claude provider patterns (Claude 4.x and Claude 5)
+ANTHROPIC_PATTERNS = (
+    r'^claude',
+    r'^anthropic',
+)
+ANTHROPIC_PRIORITY = 10
+
+# xAI / Grok provider patterns
+XAI_PATTERNS = (
+    r'^grok',
+    r'^xai',
+)
+XAI_PRIORITY = 10
+
 # Ollama provider patterns
 OLLAMA_PATTERNS = (
     # Standard Ollama naming patterns

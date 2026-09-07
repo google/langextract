@@ -29,15 +29,16 @@ result = lx.extract(
 
 Env: `OPENAI_API_KEY` (falls back to `LANGEXTRACT_API_KEY`).
 
-The OpenAI provider uses JSON mode (`response_format={"type":"json_object"}`)
-and reports `requires_fence_output=False`. Leave `fence_output` unset —
-`extract()` and the factory/provider layer auto-determine fence behavior
-from the provider's schema. The OpenAI provider parallelizes batched
-prompts with a `ThreadPoolExecutor` when `max_workers > 1`.
+The OpenAI provider exposes `OpenAISchema` for structured outputs. By default,
+`extract()` derives schema constraints from the examples and sends them through
+OpenAI's JSON Schema response format. Explicit `output_schema` constraints are
+also supported when the selected model supports structured outputs.
 
-The OpenAI provider does not expose a schema class, so
-`use_schema_constraints` is a no-op here. You can omit it (as shown above)
-or leave it at its default.
+Leave `fence_output` and `use_schema_constraints` unset so `extract()` and the
+factory/provider layer configure them automatically. Without an active schema,
+the provider falls back to JSON mode (`response_format={"type":"json_object"}`).
+The OpenAI provider parallelizes batched prompts with a `ThreadPoolExecutor`
+when `max_workers > 1`.
 
 **Auto-routing scope:** the built-in OpenAI provider only auto-matches
 GPT-style `model_id`s (`^gpt-4`, `^gpt4\.`, `^gpt-5`, `^gpt5\.`), and the

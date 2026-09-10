@@ -23,6 +23,8 @@ from google import genai
 from google.genai import errors as genai_errors
 import httpx
 
+import langextract as lx
+from langextract.core import data
 from langextract.core import exceptions
 from langextract.providers import gemini
 
@@ -512,6 +514,311 @@ class TestGeminiHttpOptionsRetryGuard(_MockClientTest):
     http_options = mock.MagicMock(spec=['retry_options'], retry_options=None)
     model = _build_model(http_options=http_options, max_retries=3)
     self.assertEqual(model.max_retries, 3)
+
+
+def _make_no_text_response(
+    *,
+    text=None,
+    block_reason=None,
+    block_reason_message=None,
+    finish_reason=None,
+    parts=None,
+):
+  """Build a response whose `.text` reports no usable output."""
+  response = mock.create_autospec(
+      genai.types.GenerateContentResponse, instance=True
+  )
+  response.text = text
+  if block_reason is not None:
+    response.prompt_feedback = (
+        genai.types.GenerateContentResponsePromptFeedback(
+            block_reason=block_reason, block_reason_message=block_reason_message
+        )
+    )
+  else:
+    response.prompt_feedback = None
+  if finish_reason is not None or parts is not None:
+    response.candidates = [
+        genai.types.Candidate(
+            finish_reason=finish_reason,
+            content=genai.types.Content(parts=parts),
+        )
+    ]
+  else:
+    response.candidates = []
+  return response
+
+
+class TestGeminiNoTextResponse(_MockClientTest):
+  """Responses without text must raise, not report empty success (#508)."""
+
+  def setUp(self):
+    super().setUp()
+    self.model = _build_model()
+
+  @parameterized.named_parameters(
+      ('text', '{"ok": 1}'),
+      ('empty_text', ''),
+  )
+  def test_text_is_read_once(self, text):
+    self.mock_client.models.generate_content.return_value = (
+        genai.types.GenerateContentResponse()
+    )
+    mock_text = self.enter_context(
+        mock.patch.object(
+            genai.types.GenerateContentResponse,
+            'text',
+            new_callable=mock.PropertyMock,
+            return_value=text,
+        )
+    )
+
+    result = self.model._process_single_prompt('prompt', {})
+
+    self.assertEqual(result.output, text)
+    self.assertEqual(result.score, 1.0)
+    mock_text.assert_called_once()
+
+  @parameterized.named_parameters(
+      dict(testcase_name='none_text', text=None),
+      dict(testcase_name='empty_text', text=''),
+  )
+  def test_blocked_prompt_raises_with_block_reason(self, text):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(
+            text=text,
+            block_reason=genai.types.BlockedReason.SAFETY,
+            block_reason_message='unsafe request',
+        )
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        r'blocked the prompt \(block_reason=SAFETY: unsafe request\)',
+    ) as cm:
+      self.model._process_single_prompt('prompt', {})
+
+    self.assertEqual(cm.exception.provider, 'Gemini')
+
+  @parameterized.named_parameters(
+      dict(testcase_name='none_text', text=None),
+      dict(testcase_name='empty_text', text=''),
+  )
+  def test_non_stop_finish_reason_raises(self, text):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(
+            text=text, finish_reason=genai.types.FinishReason.SAFETY
+        )
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        r'no text \(finish_reason=SAFETY\)',
+    ):
+      self.model._process_single_prompt('prompt', {})
+
+  @parameterized.named_parameters(
+      dict(testcase_name='none_text', text=None),
+      dict(testcase_name='empty_text', text=''),
+  )
+  def test_exhausted_token_budget_raises_with_hint(self, text):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(
+            text=text, finish_reason=genai.types.FinishReason.MAX_TOKENS
+        )
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        r'finish_reason=MAX_TOKENS.*max_output_tokens',
+    ):
+      self.model._process_single_prompt('prompt', {})
+
+  def test_empty_text_with_normal_stop_passes_through(self):
+    self.mock_client.models.generate_content.return_value = (
+        genai.types.GenerateContentResponse(
+            candidates=[
+                genai.types.Candidate(
+                    finish_reason=genai.types.FinishReason.STOP,
+                    content=genai.types.Content(
+                        parts=[genai.types.Part(text='')]
+                    ),
+                )
+            ]
+        )
+    )
+
+    result = self.model._process_single_prompt('prompt', {})
+
+    self.assertEqual(result.output, '')
+
+  def test_extract_accepts_empty_text_with_normal_stop(self):
+    self.mock_client.models.generate_content.return_value = (
+        genai.types.GenerateContentResponse(
+            candidates=[
+                genai.types.Candidate(
+                    finish_reason=genai.types.FinishReason.STOP,
+                    content=genai.types.Content(
+                        parts=[genai.types.Part(text='')]
+                    ),
+                )
+            ]
+        )
+    )
+    examples = [
+        data.ExampleData(
+            text='Alice lives in Paris.',
+            extractions=[
+                data.Extraction(
+                    extraction_class='person', extraction_text='Alice'
+                )
+            ],
+        )
+    ]
+
+    result = lx.extract(
+        text_or_documents='Bob lives in London.',
+        prompt_description='Extract person names.',
+        examples=examples,
+        model=self.model,
+        use_schema_constraints=False,
+        show_progress=False,
+    )
+
+    self.assertEmpty(result.extractions)
+
+  def test_non_text_parts_raise(self):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(
+            parts=[genai.types.Part(function_call={'name': 'extract'})]
+        )
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, 'only non-text parts'
+    ):
+      self.model._process_single_prompt('prompt', {})
+
+  def test_no_diagnostic_raises_generic_message(self):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response()
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, 'no text content'
+    ):
+      self.model._process_single_prompt('prompt', {})
+
+  def test_blocked_prompt_without_message_preserves_error_without_retry(self):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(block_reason=genai.types.BlockedReason.SAFETY)
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        r'^Gemini blocked the prompt \(block_reason=SAFETY\)\.$',
+    ):
+      self.model._process_single_prompt('prompt', {})
+
+    self.mock_client.models.generate_content.assert_called_once()
+
+  def test_unspecified_block_reason_is_not_reported_as_blocked(self):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(
+            text='',
+            block_reason=genai.types.BlockedReason.BLOCKED_REASON_UNSPECIFIED,
+            finish_reason=genai.types.FinishReason.STOP,
+        )
+    )
+
+    result = self.model._process_single_prompt('prompt', {})
+
+    self.assertEqual(result.output, '')
+
+  def test_unspecified_finish_reason_allows_empty_text(self):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(
+            text='',
+            finish_reason=(genai.types.FinishReason.FINISH_REASON_UNSPECIFIED),
+        )
+    )
+
+    result = self.model._process_single_prompt('prompt', {})
+
+    self.assertEqual(result.output, '')
+
+  def test_none_text_with_stop_finish_reason_names_the_reason(self):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(finish_reason=genai.types.FinishReason.STOP)
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        r'no text content \(finish_reason=STOP\)',
+    ):
+      self.model._process_single_prompt('prompt', {})
+
+  def test_parallel_infer_preserves_no_text_error(self):
+    self.mock_client.models.generate_content.return_value = (
+        _make_no_text_response(block_reason=genai.types.BlockedReason.SAFETY)
+    )
+    model = _build_model(max_workers=2)
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, r'^Gemini blocked the prompt'
+    ) as cm:
+      list(model.infer(['prompt one', 'prompt two']))
+
+    self.assertEqual(cm.exception.provider, 'Gemini')
+
+  @parameterized.named_parameters(
+      dict(testcase_name='sequential', max_workers=1),
+      dict(testcase_name='parallel', max_workers=2),
+  )
+  def test_extract_propagates_thought_only_response(self, max_workers):
+    self.mock_client.models.generate_content.return_value = (
+        genai.types.GenerateContentResponse(
+            candidates=[
+                genai.types.Candidate(
+                    finish_reason=genai.types.FinishReason.MAX_TOKENS,
+                    content=genai.types.Content(
+                        parts=[genai.types.Part(text='Thinking', thought=True)]
+                    ),
+                )
+            ]
+        )
+    )
+    examples = [
+        data.ExampleData(
+            text='Alice lives in Paris.',
+            extractions=[
+                data.Extraction(
+                    extraction_class='person', extraction_text='Alice'
+                )
+            ],
+        )
+    ]
+    model = _build_model(max_workers=max_workers)
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, r'^Gemini.*MAX_TOKENS'
+    ) as cm:
+      lx.extract(
+          text_or_documents='Alice lives in Paris. Bob lives in London.',
+          prompt_description='Extract person names.',
+          examples=examples,
+          model=model,
+          use_schema_constraints=False,
+          max_char_buffer=24,
+          batch_length=2,
+          max_workers=max_workers,
+          show_progress=False,
+      )
+
+    self.assertEqual(cm.exception.provider, 'Gemini')
+    self.assertEqual(
+        self.mock_client.models.generate_content.call_count, max_workers
+    )
 
 
 if __name__ == '__main__':

@@ -351,7 +351,7 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
         def __init__(
             self,
-            model_id="gemini-2.5-flash",
+            model_id="gemini-3.5-flash",
             api_key=None,
             vertexai=False,
             credentials=None,
@@ -399,7 +399,7 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
       class MockGeminiWithCredentials(base_model.BaseLanguageModel):  # pylint: disable=unused-variable
 
         def __init__(
-            self, model_id="gemini-2.5-flash", credentials=None, **kwargs
+            self, model_id="gemini-3.5-flash", credentials=None, **kwargs
         ):
           self.model_id = model_id
           self.credentials = credentials
@@ -410,7 +410,7 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
       mock_credentials = {"type": "service_account"}  # Simplified mock
       config = factory.ModelConfig(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           provider_kwargs={"credentials": mock_credentials},
       )
       model = factory.create_model(config)

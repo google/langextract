@@ -13,15 +13,21 @@
 # limitations under the License.
 
 """Gemini provider for LangExtract."""
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
+import numbers
+import random
+import re
+import time
 from typing import Any, Final, Iterator, Sequence
 
 from absl import logging
+from google.genai import types as genai_types
 
 from langextract.core import base_model
 from langextract.core import data
@@ -33,13 +39,137 @@ from langextract.providers import patterns
 from langextract.providers import router
 from langextract.providers import schemas
 
-_DEFAULT_MODEL_ID = 'gemini-2.5-flash'
+_DEFAULT_MODEL_ID = 'gemini-3.5-flash'
 _DEFAULT_LOCATION = 'us-central1'
 _MIME_TYPE_JSON = 'application/json'
 
+_DEFAULT_MAX_RETRIES = 3
+_DEFAULT_RETRY_DELAY = 1.0
+_DEFAULT_MAX_RETRY_DELAY = 16.0
+
+_RETRYABLE_API_CODES = frozenset({408, 429, 500, 502, 503, 504})
+
+# Phrases are narrow on purpose: bare "quota" or "unavailable" can be permanent
+# (denied quota, region out of service); we only match the transient forms.
+_RETRYABLE_MESSAGE_RE = re.compile(
+    r'503|overloaded|429|rate[ _]limit|quota exceeded|500.*internal'
+    r'|temporarily unavailable|timeout|connection reset',
+    re.IGNORECASE,
+)
+
+
+def _is_non_bool_integral(value: Any) -> bool:
+  """Return True when `value` is an integer-like value, excluding bool."""
+  return isinstance(value, numbers.Integral) and not isinstance(value, bool)
+
+
+def _is_non_bool_real(value: Any) -> bool:
+  """Return True when `value` is a real number, excluding bool."""
+  return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+
+def _has_sdk_retry_options(http_options: Any) -> bool:
+  """Return True if http_options enables SDK-level retries.
+
+  Only reports True when SDK retries would *actually* execute: the google-genai
+  SDK normalizes `HttpRetryOptions.attempts` of 0 or 1 to `stop_after_attempt(1)`,
+  i.e. no retries, so those values do not stack with our provider loop.
+
+  Accepts both HttpOptions (attribute access) and HttpOptionsDict (dict); the
+  dict form validates through pydantic camelCase aliases, so both
+  `retry_options` and `retryOptions` reach the same field.
+  """
+  if http_options is None:
+    return False
+  if isinstance(http_options, dict):
+    retry_options = http_options.get('retry_options')
+    if retry_options is None:
+      retry_options = http_options.get('retryOptions')
+  else:
+    retry_options = getattr(http_options, 'retry_options', None)
+  if retry_options is None:
+    return False
+  if isinstance(retry_options, dict):
+    attempts = retry_options.get('attempts')
+  else:
+    attempts = getattr(retry_options, 'attempts', None)
+  # attempts=None means SDK default (which is >1); 0 or 1 means no retries.
+  return attempts is None or attempts > 1
+
+
+_MAX_TOKENS_HINT: Final[str] = (
+    ' The output token budget was exhausted before any text was emitted;'
+    ' consider raising max_output_tokens (thinking models may consume the'
+    ' budget on reasoning before any text is produced).'
+)
+
+
+def _no_text_diagnostic(
+    response: genai_types.GenerateContentResponse, text: str | None
+) -> str | None:
+  """Diagnose missing output that the SDK reports without raising.
+
+  Returning missing text as success can silently drop a blocked chunk.
+
+  Returns:
+    A provider diagnostic, or None for text and empty completions without a
+    block or abnormal finish reason, which retain existing resolver handling.
+  """
+  if text:
+    return None
+
+  prompt_feedback = response.prompt_feedback
+  block_reason = prompt_feedback.block_reason if prompt_feedback else None
+  candidate = response.candidates[0] if response.candidates else None
+  finish_reason = candidate.finish_reason if candidate else None
+  if block_reason == genai_types.BlockedReason.BLOCKED_REASON_UNSPECIFIED:
+    block_reason = None
+  if finish_reason == genai_types.FinishReason.FINISH_REASON_UNSPECIFIED:
+    finish_reason = None
+
+  if (
+      text == ''
+      and block_reason is None
+      and finish_reason in (None, genai_types.FinishReason.STOP)
+  ):
+    return None
+
+  if block_reason:
+    block_message = prompt_feedback.block_reason_message
+    detail = f': {block_message}' if block_message else ''
+    return (
+        'Gemini blocked the prompt'
+        f' (block_reason={block_reason.value}{detail}).'
+    )
+  if finish_reason and finish_reason != genai_types.FinishReason.STOP:
+    hint = (
+        _MAX_TOKENS_HINT
+        if finish_reason == genai_types.FinishReason.MAX_TOKENS
+        else ''
+    )
+    return (
+        f'Gemini returned no text (finish_reason={finish_reason.value}).{hint}'
+    )
+  if candidate and candidate.content and candidate.content.parts:
+    return (
+        'Gemini returned only non-text parts (e.g. a function call or'
+        ' thought-only output) where text output was expected.'
+    )
+  detail = f' (finish_reason={finish_reason.value})' if finish_reason else ''
+  return f'Gemini returned no text content{detail}.'
+
+
+_GENERATION_CONFIG_KEYS: Final[tuple[str, ...]] = (
+    'max_output_tokens',
+    'top_p',
+    'top_k',
+)
+
 _API_CONFIG_KEYS: Final[set[str]] = {
+    *_GENERATION_CONFIG_KEYS,
     'response_mime_type',
     'response_schema',
+    'response_json_schema',
     'safety_settings',
     'system_instruction',
     'tools',
@@ -68,6 +198,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
   temperature: float = 0.0
   max_workers: int = 10
   fence_output: bool = False
+  max_retries: int = _DEFAULT_MAX_RETRIES
+  retry_delay: float = _DEFAULT_RETRY_DELAY
+  max_retry_delay: float = _DEFAULT_MAX_RETRY_DELAY
   _extra_kwargs: dict[str, Any] = dataclasses.field(
       default_factory=dict, repr=False, compare=False
   )
@@ -86,10 +219,19 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
     Args:
       schema_instance: The schema instance to apply, or None to clear.
+
+    Raises:
+      InferenceConfigError: If schema_instance belongs to another provider.
     """
+    if schema_instance is not None and not isinstance(
+        schema_instance, schemas.gemini.GeminiSchema
+    ):
+      raise exceptions.InferenceConfigError(
+          'GeminiLanguageModel only accepts GeminiSchema instances; got '
+          f'{type(schema_instance).__name__}.'
+      )
     super().apply_schema(schema_instance)
-    if isinstance(schema_instance, schemas.gemini.GeminiSchema):
-      self.gemini_schema = schema_instance
+    self.gemini_schema = schema_instance
 
   def __init__(
       self,
@@ -105,6 +247,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       temperature: float = 0.0,
       max_workers: int = 10,
       fence_output: bool = False,
+      *,
+      max_retries: int = _DEFAULT_MAX_RETRIES,
+      retry_delay: float = _DEFAULT_RETRY_DELAY,
+      max_retry_delay: float = _DEFAULT_MAX_RETRY_DELAY,
       **kwargs,
   ) -> None:
     """Initialize the Gemini language model.
@@ -123,9 +269,15 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       max_workers: Maximum number of parallel API calls.
       fence_output: Whether to wrap output in markdown fences (ignored,
         Gemini handles this based on schema).
+      max_retries: Maximum number of retry attempts for transient errors
+        (503, 429, network errors). Set to 0 to disable retries.
+      retry_delay: Initial delay in seconds before first retry.
+        Subsequent delays increase exponentially.
+      max_retry_delay: Maximum delay in seconds between retries.
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
-        forwarded to the API (response_schema, response_mime_type, tools,
-        safety_settings, stop_sequences, candidate_count, system_instruction).
+        forwarded to the API, including generation settings
+        (max_output_tokens, top_p, top_k), response schemas, tools, safety
+        settings, stop sequences, candidate count, and system instructions.
         See https://ai.google.dev/api/generate-content for details.
     """
     try:
@@ -144,11 +296,40 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.project = project
     self.location = location
     self.http_options = http_options
-    self.gemini_schema = gemini_schema
+    self.gemini_schema = None
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
     self.fence_output = fence_output
+    for name, value, ok in (
+        (
+            'max_retries',
+            max_retries,
+            _is_non_bool_integral(max_retries) and max_retries >= 0,
+        ),
+        (
+            'retry_delay',
+            retry_delay,
+            _is_non_bool_real(retry_delay) and retry_delay >= 0,
+        ),
+        (
+            'max_retry_delay',
+            max_retry_delay,
+            _is_non_bool_real(max_retry_delay) and max_retry_delay > 0,
+        ),
+    ):
+      if not ok:
+        raise exceptions.InferenceConfigError(f'{name} invalid: {value}')
+    self.max_retries = max_retries
+    self.retry_delay = retry_delay
+    self.max_retry_delay = max_retry_delay
+
+    # Avoid stacking with SDK-level retries (HttpOptions.retry_options).
+    if max_retries > 0 and _has_sdk_retry_options(http_options):
+      raise exceptions.InferenceConfigError(
+          'http_options.retry_options and max_retries>0 both configured; '
+          'retries would stack. Set max_retries=0 or clear retry_options.'
+      )
 
     # Extract batch config before we filter kwargs into _extra_kwargs
     batch_cfg_dict = kwargs.pop('batch', None)
@@ -186,6 +367,10 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self._extra_kwargs = {
         k: v for k, v in (kwargs or {}).items() if k in _API_CONFIG_KEYS
     }
+    # Route through apply_schema so self._schema stays in sync and
+    # apply_output_schema() can detect the pre-configured schema.
+    if gemini_schema is not None:
+      self.apply_schema(gemini_schema)
 
   def _validate_schema_config(self) -> None:
     """Validate that schema configuration is compatible with format type.
@@ -199,31 +384,106 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           'Set format_type=JSON or use_schema_constraints=False.'
       )
 
+  def _is_retryable_error(self, error: Exception) -> bool:
+    """Return True if `error` is a transient failure worth retrying."""
+    try:
+      from google.genai import errors as genai_errors  # pylint: disable=import-outside-toplevel
+
+      if isinstance(error, genai_errors.APIError):
+        return error.code in _RETRYABLE_API_CODES
+    except ImportError:
+      pass
+
+    # httpx transient subclasses only. LocalProtocolError / UnsupportedProtocol
+    # are client/config bugs and not included.
+    try:
+      import httpx  # pylint: disable=import-outside-toplevel
+
+      if isinstance(
+          error,
+          (
+              httpx.TimeoutException,
+              httpx.NetworkError,
+              httpx.RemoteProtocolError,
+              httpx.ProxyError,
+          ),
+      ):
+        return True
+    except ImportError:
+      pass
+
+    # Specifically ConnectionError / TimeoutError. Bare OSError is excluded:
+    # it also covers file/permission errors that won't resolve by retrying.
+    if isinstance(error, (ConnectionError, TimeoutError)):
+      return True
+
+    return bool(_RETRYABLE_MESSAGE_RE.search(str(error)))
+
   def _process_single_prompt(
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:
-    """Process a single prompt and return a ScoredOutput."""
-    try:
-      # Apply stored kwargs that weren't already set in config
-      for key, value in self._extra_kwargs.items():
-        if key not in config and value is not None:
-          config[key] = value
+    """Run one Gemini request with per-chunk retries for transient failures."""
+    delay = self.retry_delay
+    for attempt in range(self.max_retries + 1):
+      try:
+        call_config = dict(config)
+        for key, value in self._extra_kwargs.items():
+          if key not in call_config and value is not None:
+            call_config[key] = value
 
-      if self.gemini_schema:
-        self._validate_schema_config()
-        config.setdefault('response_mime_type', 'application/json')
-        config.setdefault('response_schema', self.gemini_schema.schema_dict)
+        if self.gemini_schema:
+          self._validate_schema_config()
+          for key, value in self.gemini_schema.to_provider_config().items():
+            call_config.setdefault(key, value)
 
-      response = self._client.models.generate_content(
-          model=self.model_id, contents=prompt, config=config
-      )
+        # Generation-setting None markers suppress constructor fallbacks above
+        # but must not reach the SDK.
+        call_config = {
+            key: value
+            for key, value in call_config.items()
+            if value is not None
+        }
+        response = self._client.models.generate_content(
+            model=self.model_id, contents=prompt, config=call_config
+        )
+        return self._response_to_scored_output(response)
 
-      return core_types.ScoredOutput(score=1.0, output=response.text)
+      except exceptions.InferenceRuntimeError:
+        raise
+      except Exception as e:
+        if attempt < self.max_retries and self._is_retryable_error(e):
+          # Cap after jitter so the named maximum applies to the real sleep.
+          sleep_for = min(
+              delay * random.uniform(0.5, 1.5), self.max_retry_delay
+          )
+          logging.info(
+              'Retryable error on attempt %d/%d: %s. Retrying in %.1fs...',
+              attempt + 1,
+              self.max_retries + 1,
+              e,
+              sleep_for,
+          )
+          time.sleep(sleep_for)
+          delay = min(delay * 2, self.max_retry_delay)
+          continue
+        raise exceptions.InferenceRuntimeError(
+            f'Gemini API error: {e}', original=e, provider='Gemini'
+        ) from e
 
-    except Exception as e:
-      raise exceptions.InferenceRuntimeError(
-          f'Gemini API error: {str(e)}', original=e
-      ) from e
+  @staticmethod
+  def _response_to_scored_output(
+      response: genai_types.GenerateContentResponse,
+  ) -> core_types.ScoredOutput:
+    """Translate one Gemini SDK response into LangExtract output.
+
+    Raises:
+      InferenceRuntimeError: If the response has no usable text.
+    """
+    output_text = response.text
+    diagnostic = _no_text_diagnostic(response, output_text)
+    if diagnostic is not None:
+      raise exceptions.InferenceRuntimeError(diagnostic, provider='Gemini')
+    return core_types.ScoredOutput(score=1.0, output=output_text)
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
@@ -242,11 +502,12 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     config = {
         'temperature': merged_kwargs.get('temperature', self.temperature),
     }
-    for key in ('max_output_tokens', 'top_p', 'top_k'):
+    # Preserve None here as an explicit marker that clears a constructor value.
+    for key in _GENERATION_CONFIG_KEYS:
       if key in merged_kwargs:
         config[key] = merged_kwargs[key]
 
-    handled_keys = {'temperature', 'max_output_tokens', 'top_p', 'top_k'}
+    handled_keys = {'temperature', *_GENERATION_CONFIG_KEYS}
     for key, value in merged_kwargs.items():
       if (
           key not in handled_keys
@@ -261,13 +522,19 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         try:
           if self.gemini_schema:
             self._validate_schema_config()
-          schema_dict = (
-              self.gemini_schema.schema_dict if self.gemini_schema else None
+          schema_config = (
+              self.gemini_schema.to_provider_config()
+              if self.gemini_schema
+              else None
           )
-          # Remove schema fields from config for batch API - they're handled via schema_dict
-          batch_config = dict(config)
+          # None markers implement clearing but must not reach the batch SDK.
+          batch_config = {
+              key: value for key, value in config.items() if value is not None
+          }
+          # Schema fields use the separate schema_config argument.
           batch_config.pop('response_mime_type', None)
           batch_config.pop('response_schema', None)
+          batch_config.pop('response_json_schema', None)
           # Extract top-level fields that don't belong in generationConfig
           system_instruction = batch_config.pop('system_instruction', None)
           safety_settings = batch_config.pop('safety_settings', None)
@@ -275,7 +542,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
               client=self._client,
               model_id=self.model_id,
               prompts=batch_prompts,
-              schema_dict=schema_dict,
+              schema_config=schema_config,
               gen_config=batch_config,
               cfg=self._batch_cfg,
               system_instruction=system_instruction,
@@ -322,6 +589,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           index = future_to_index[future]
           try:
             results[index] = future.result()
+          except exceptions.InferenceRuntimeError:
+            raise
           except Exception as e:
             raise exceptions.InferenceRuntimeError(
                 f'Parallel inference error: {str(e)}', original=e

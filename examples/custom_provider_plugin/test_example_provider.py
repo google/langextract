@@ -36,7 +36,7 @@ def main():
     return
 
   config = lx.factory.ModelConfig(
-      model_id="gemini-2.5-flash",
+      model_id="gemini-3.5-flash",
       provider="CustomGeminiProvider",
       provider_kwargs={"api_key": api_key},
   )

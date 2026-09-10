@@ -32,7 +32,9 @@ echo
 # Check for required tools
 check_tool() {
     if ! command -v "$1" &> /dev/null; then
-        echo "Error: $1 not found. Please install with: pip install $1"
+        echo "Error: $1 not found."
+        echo "Install the repo's pinned formatter versions with:"
+        echo "  pip install -e \".[dev]\""
         exit 1
     fi
 }

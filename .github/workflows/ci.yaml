@@ -16,6 +16,17 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Fork PR number for secure live API testing"
+        required: false
+        type: string
+        default: ""
+      pr_head_sha:
+        description: "Exact fork PR head SHA to test"
+        required: false
+        type: string
+        default: ""
   push:
     branches: ["main"]
   pull_request:
@@ -24,8 +35,15 @@ on:
     types: [labeled]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.inputs.pr_number || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+# Keep ordinary PR formatting and secure fork formatting on the same
+# pyink/isort versions. The regular format-check job installs lint-imports
+# separately because only that path runs the import-structure check.
+env:
+  FORMATTER_PIP_PACKAGES: pyink==24.3.0 isort==5.13.2
+  IMPORT_LINTER_PIP_PACKAGE: import-linter==2.11
 
 permissions:
   contents: read
@@ -39,21 +57,21 @@ jobs:
       issues: write
     steps:
       - name: Checkout PR branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install format tools
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install ${FORMATTER_PIP_PACKAGES} ${IMPORT_LINTER_PIP_PACKAGE}
 
       - name: Check formatting
         id: format-check
@@ -74,7 +92,7 @@ jobs:
 
       - name: Comment on PR if formatting fails
         if: failure() && steps.format-check.outcome == 'failure'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         continue-on-error: true
         with:
           script: |
@@ -93,12 +111,12 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -123,12 +141,12 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository)
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -161,14 +179,14 @@ jobs:
       pull-requests: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Detect provider-related changes
         id: provider-changes
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v47
         with:
           files: |
             langextract/providers/**
@@ -185,7 +203,7 @@ jobs:
           exit 0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -209,14 +227,14 @@ jobs:
       pull-requests: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Detect file changes
         id: changes
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v47
         with:
           files: |
             langextract/inference.py
@@ -231,7 +249,7 @@ jobs:
           exit 0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -262,20 +280,30 @@ jobs:
     timeout-minutes: 30
     environment:
       name: live-keys
-    # Triggered when a maintainer adds 'ready-to-merge' label to fork PRs only
+    # Triggered by maintainer label on a fork PR or secure manual dispatch from
+    # main with an exact PR SHA.
     if: |
-      github.event_name == 'pull_request_target' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'ready-to-merge' &&
-      github.event.pull_request.head.repo.full_name != github.repository
+      (
+        github.event_name == 'pull_request_target' &&
+        github.event.action == 'labeled' &&
+        github.event.label.name == 'ready-to-merge' &&
+        github.event.pull_request.head.repo.full_name != github.repository
+      ) || (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        github.event.inputs.pr_number != '' &&
+        github.event.inputs.pr_head_sha != ''
+      )
 
     permissions:
       contents: read
       issues: write
+      pull-requests: read
 
     steps:
-      - name: Check if user is maintainer
-        uses: actions/github-script@v7
+      - name: Resolve secure PR metadata
+        id: pr-metadata
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
@@ -289,15 +317,78 @@ jobs:
               throw new Error(`User ${context.actor} does not have maintainer permissions.`);
             }
 
+            let prNumber;
+            let shaToTest;
+            if (context.eventName === 'pull_request_target') {
+              prNumber = context.payload.pull_request.number;
+              shaToTest = context.payload.pull_request.head.sha;
+            } else {
+              const dispatchInputs = context.payload.inputs ?? {};
+              const prNumberInput = (dispatchInputs.pr_number || '').trim();
+              shaToTest = (dispatchInputs.pr_head_sha || '').trim();
+              if (!/^[1-9]\d*$/.test(prNumberInput)) {
+                throw new Error(`Invalid pr_number input: ${dispatchInputs.pr_number}`);
+              }
+              prNumber = Number.parseInt(prNumberInput, 10);
+              if (!/^[0-9a-f]{40}$/i.test(shaToTest)) {
+                throw new Error(`Invalid pr_head_sha input: ${shaToTest}`);
+              }
+            }
+
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            if (pullRequest.state !== 'open') {
+              throw new Error(`PR #${prNumber} is ${pullRequest.state}, expected open.`);
+            }
+
+            if (pullRequest.base.ref !== 'main') {
+              throw new Error(
+                  `PR #${prNumber} targets ${pullRequest.base.ref}, expected main.`
+              );
+            }
+
+            const headRepoFullName = pullRequest.head.repo?.full_name;
+            if (!headRepoFullName) {
+              throw new Error(
+                  `PR #${prNumber} head repository is unavailable. ` +
+                  `The fork may have been deleted.`
+              );
+            }
+
+            // Repeat this check here because workflow_dispatch does not carry
+            // the pull_request_target fork filter.
+            if (headRepoFullName === `${context.repo.owner}/${context.repo.repo}`) {
+              throw new Error(
+                  `PR #${prNumber} is from the base repository; use normal PR checks instead.`
+              );
+            }
+
+            if (context.eventName === 'workflow_dispatch' &&
+                pullRequest.head.sha !== shaToTest) {
+              throw new Error(
+                  `PR #${prNumber} head moved to ${pullRequest.head.sha}. ` +
+                  `Re-run workflow_dispatch with the latest SHA.`
+              );
+            }
+
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('sha_to_test', shaToTest);
+
       - name: Pin commit SHA for security
         id: sha-pin
+        env:
+          STEPS_PR_METADATA_OUTPUTS_SHA_TO_TEST: ${{ steps.pr-metadata.outputs.sha_to_test }}
         run: |
-          SHA_TO_TEST="${{ github.event.pull_request.head.sha }}"
+          SHA_TO_TEST="${STEPS_PR_METADATA_OUTPUTS_SHA_TO_TEST}"
           echo "SHA_TO_TEST=${SHA_TO_TEST}" >> $GITHUB_OUTPUT
           echo "::notice title=Security::Pinned commit SHA for testing: ${SHA_TO_TEST}"
 
       - name: Checkout base repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
@@ -329,15 +420,14 @@ jobs:
           STEPS_SHA_PIN_OUTPUTS_SHA_TO_TEST: ${{ steps.sha-pin.outputs.SHA_TO_TEST }}
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install format tools
         run: |
           python -m pip install --upgrade pip
-          # Install formatter tools with pinned versions
-          pip install pyink==24.3.0 isort==5.13.2 lint-imports==0.3.1
+          pip install ${FORMATTER_PIP_PACKAGES}
 
       - name: Validate PR formatting
         run: |
@@ -353,7 +443,7 @@ jobs:
           }
 
       - name: Checkout main branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
@@ -379,14 +469,19 @@ jobs:
           STEPS_SHA_PIN_OUTPUTS_SHA_TO_TEST: ${{ steps.sha-pin.outputs.SHA_TO_TEST }}
 
       - name: Add status comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
           script: |
             github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
+              issue_number: Number(process.env.PR_NUMBER),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: 'Preparing to run live API tests (pending environment approval and API key availability)...'
+            }).catch(err => {
+              console.log('Comment posting failed:', err.message);
             });
 
       - name: Run live API tests
@@ -408,24 +503,34 @@ jobs:
 
       - name: Report success
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
           script: |
             github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
+              issue_number: Number(process.env.PR_NUMBER),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: '✅ Live API tests passed! All endpoints are working correctly.'
+            }).catch(err => {
+              console.log('Comment posting failed:', err.message);
             });
 
       - name: Report failure
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ steps.pr-metadata.outputs.pr_number }}
         with:
           script: |
             github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
+              issue_number: Number(process.env.PR_NUMBER),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: '❌ Live API tests failed. Please check the workflow logs for details.'
+            }).catch(err => {
+              console.log('Comment posting failed:', err.message);
             });

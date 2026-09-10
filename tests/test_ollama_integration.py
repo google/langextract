@@ -20,6 +20,8 @@ import requests
 
 import langextract as lx
 
+pytestmark = pytest.mark.integration
+
 
 def _ollama_available():
   """Check if Ollama is running on localhost:11434."""
@@ -183,6 +185,49 @@ def _model_available(model_name):
     return any(model_name in m for m in models)
   except (requests.RequestException, KeyError, TypeError):
     return False
+
+
+@pytest.mark.skipif(
+    not _model_available("gpt-oss:20b"),
+    reason="gpt-oss:20b not available in Ollama",
+)
+def test_gpt_oss_20b_extraction():
+  """Test GPT-OSS extraction through Ollama's chat compatibility path."""
+  input_text = "Alice met Dana at the clinic."
+  prompt = "Extract only person names."
+
+  examples = [
+      lx.data.ExampleData(
+          text="Bob met Carol at the library.",
+          extractions=[
+              lx.data.Extraction(
+                  extraction_class="person",
+                  extraction_text="Bob",
+              )
+          ],
+      )
+  ]
+
+  result = lx.extract(
+      text_or_documents=input_text,
+      prompt_description=prompt,
+      examples=examples,
+      model_id="gpt-oss:20b",
+      model_url="http://localhost:11434",
+      temperature=0.0,
+      language_model_params={"timeout": 300},
+      resolver_params={"suppress_parse_errors": False},
+      max_workers=1,
+      batch_length=1,
+      show_progress=False,
+  )
+
+  person_extractions = [
+      extraction.extraction_text
+      for extraction in result.extractions
+      if extraction.extraction_class == "person"
+  ]
+  assert "Alice" in person_extractions
 
 
 @pytest.mark.skipif(

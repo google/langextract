@@ -21,13 +21,17 @@ transform the textual output of an LLM into structured data.
 from __future__ import annotations
 
 import abc
+import bisect
 import collections
 from collections.abc import Iterator, Mapping, Sequence
 import difflib
 import functools
 import itertools
+import math
 import operator
+import typing
 from typing import Final
+import warnings
 
 from absl import logging
 
@@ -37,7 +41,35 @@ from langextract.core import format_handler as fh
 from langextract.core import schema
 from langextract.core import tokenizer as tokenizer_lib
 
+
+class LcsSpan(typing.NamedTuple):
+  """Result of _best_lcs_span: matched token count and source span."""
+
+  matches: int
+  start: int
+  end: int
+
+  @property
+  def span_len(self) -> int:
+    return 0 if self.start < 0 else self.end - self.start + 1
+
+
 _FUZZY_ALIGNMENT_MIN_THRESHOLD = 0.75
+_FUZZY_ALIGNMENT_MIN_DENSITY = 1 / 3
+_FUZZY_ALGORITHM_LCS = "lcs"
+_FUZZY_ALGORITHM_LEGACY = "legacy"
+_DEFAULT_FUZZY_ALGORITHM = _FUZZY_ALGORITHM_LCS
+_VALID_FUZZY_ALGORITHMS: Final[frozenset[str]] = frozenset({
+    _FUZZY_ALGORITHM_LCS,
+    _FUZZY_ALGORITHM_LEGACY,
+})
+_EXACT_ALGORITHM_DP = "dp"
+_EXACT_ALGORITHM_DIFFLIB = "difflib"
+_DEFAULT_EXACT_ALGORITHM = _EXACT_ALGORITHM_DP
+_VALID_EXACT_ALGORITHMS: Final[frozenset[str]] = frozenset({
+    _EXACT_ALGORITHM_DP,
+    _EXACT_ALGORITHM_DIFFLIB,
+})
 
 # Default suffix for extraction index keys (e.g., "entity_index")
 DEFAULT_INDEX_SUFFIX = "_index"  # Suffix for index fields in extraction sorting
@@ -45,6 +77,9 @@ DEFAULT_INDEX_SUFFIX = "_index"  # Suffix for index fields in extraction sorting
 ALIGNMENT_PARAM_KEYS: Final[frozenset[str]] = frozenset({
     "enable_fuzzy_alignment",
     "fuzzy_alignment_threshold",
+    "fuzzy_alignment_algorithm",
+    "fuzzy_alignment_min_density",
+    "exact_alignment_algorithm",
     "accept_match_lesser",
     "suppress_parse_errors",
 })
@@ -129,6 +164,9 @@ class AbstractResolver(abc.ABC):
       enable_fuzzy_alignment: bool = True,
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       accept_match_lesser: bool = True,
+      *,
+      fuzzy_alignment_algorithm: str = _DEFAULT_FUZZY_ALGORITHM,
+      fuzzy_alignment_min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY,
       **kwargs,
   ) -> Iterator[data.Extraction]:
     """Aligns extractions with source text, setting token/char intervals and alignment status.
@@ -139,7 +177,7 @@ class AbstractResolver(abc.ABC):
     Alignment Status Results:
     - MATCH_EXACT: Perfect token-level match
     - MATCH_LESSER: Partial exact match (extraction longer than matched text)
-    - MATCH_FUZZY: Best overlap window meets threshold (≥
+    - MATCH_FUZZY: Best overlap window meets threshold (>=
     fuzzy_alignment_threshold)
     - None: No alignment found
 
@@ -152,10 +190,14 @@ class AbstractResolver(abc.ABC):
         of the chunk.
       enable_fuzzy_alignment: Whether to use fuzzy alignment when exact matching
         fails.
-      fuzzy_alignment_threshold: Minimum token overlap ratio for fuzzy alignment
-        (0-1).
+      fuzzy_alignment_threshold: Minimum fraction of extraction tokens that
+        must be matched (0-1). Default 0.75.
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
         status).
+      fuzzy_alignment_algorithm: "lcs" (default) or "legacy" (deprecated,
+        will be removed in a future release). Keyword-only.
+      fuzzy_alignment_min_density: Minimum ratio of matched tokens to source
+        span length (LCS only). Keyword-only.
       **kwargs: Additional keyword arguments for provider-specific alignment.
 
     Yields:
@@ -241,7 +283,9 @@ class Resolver(AbstractResolver):
 
     Args:
         input_text: The input text to be processed.
-        suppress_parse_errors: Log errors and continue pipeline.
+        suppress_parse_errors: When True, logs a warning and returns []
+          on parse failures (FormatError) or schema/type errors (ValueError)
+          instead of raising.
         **kwargs: Additional keyword arguments.
 
     Returns:
@@ -268,7 +312,13 @@ class Resolver(AbstractResolver):
         return []
       raise ResolverParsingError(str(e)) from e
 
-    processed_extractions = self.extract_ordered_extractions(extraction_data)
+    try:
+      processed_extractions = self.extract_ordered_extractions(extraction_data)
+    except ValueError as e:
+      if suppress_parse_errors:
+        logging.warning("Skipping chunk: schema error: %s", e)
+        return []
+      raise ResolverParsingError(str(e)) from e
 
     logging.debug("Completed the resolver process.")
 
@@ -284,15 +334,13 @@ class Resolver(AbstractResolver):
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       accept_match_lesser: bool = True,
       tokenizer_inst: tokenizer_lib.Tokenizer | None = None,
+      *,
+      fuzzy_alignment_algorithm: str = _DEFAULT_FUZZY_ALGORITHM,
+      fuzzy_alignment_min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY,
+      exact_alignment_algorithm: str = _DEFAULT_EXACT_ALGORITHM,
       **kwargs,
   ) -> Iterator[data.Extraction]:
     """Aligns annotated extractions with source text.
-
-    This uses WordAligner which is based on Python's difflib SequenceMatcher to
-    match tokens in the source text with tokens from the annotated extractions.
-    If
-    the extraction order is significantly different from the source text order,
-    difflib may skip some matches, leaving certain extractions unmatched.
 
     Args:
       extractions: Annotated extractions.
@@ -300,11 +348,16 @@ class Resolver(AbstractResolver):
       token_offset: The starting token index of the chunk.
       char_offset: The starting character index of the chunk.
       enable_fuzzy_alignment: Whether to enable fuzzy alignment fallback.
-      fuzzy_alignment_threshold: Minimum overlap ratio required for fuzzy
-        alignment.
-      accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
-        status).
+      fuzzy_alignment_threshold: Minimum fraction of extraction tokens that
+        must be matched (0-1). Default 0.75.
+      accept_match_lesser: Whether to accept partial exact matches.
       tokenizer_inst: Optional tokenizer instance.
+      fuzzy_alignment_algorithm: "lcs" (default) or "legacy" (deprecated,
+        will be removed in a future release). Keyword-only.
+      fuzzy_alignment_min_density: Minimum ratio of matched tokens to source
+        span length (LCS only). Keyword-only.
+      exact_alignment_algorithm: "dp" (default) or "difflib" (legacy).
+        Keyword-only.
       **kwargs: Additional parameters.
 
     Yields:
@@ -329,6 +382,9 @@ class Resolver(AbstractResolver):
         char_offset or 0,
         enable_fuzzy_alignment=enable_fuzzy_alignment,
         fuzzy_alignment_threshold=fuzzy_alignment_threshold,
+        fuzzy_alignment_algorithm=fuzzy_alignment_algorithm,
+        fuzzy_alignment_min_density=fuzzy_alignment_min_density,
+        exact_alignment_algorithm=exact_alignment_algorithm,
         accept_match_lesser=accept_match_lesser,
         tokenizer_impl=tokenizer_inst,
     )
@@ -402,8 +458,8 @@ class Resolver(AbstractResolver):
         extractions have the same index, their group order dictates the sorting
         order.
     Raises:
-        ValueError: If the extraction text is not a string or integer, or if the
-        index is not an integer.
+        ValueError: If an index is not an integer, attributes are not a dict
+        or None, or extraction text is not a string, integer, or float.
     """
     logging.debug("Starting to extract and order extractions from data.")
 
@@ -419,7 +475,7 @@ class Resolver(AbstractResolver):
       for extraction_class, extraction_value in group.items():
         if index_suffix and extraction_class.endswith(index_suffix):
           if not isinstance(extraction_value, int):
-            logging.error(
+            logging.debug(
                 "Index must be an integer. Found: %s",
                 type(extraction_value),
             )
@@ -428,7 +484,7 @@ class Resolver(AbstractResolver):
 
         if attributes_suffix and extraction_class.endswith(attributes_suffix):
           if not isinstance(extraction_value, (dict, type(None))):
-            logging.error(
+            logging.debug(
                 "Attributes must be a dict or None. Found: %s",
                 type(extraction_value),
             )
@@ -438,7 +494,7 @@ class Resolver(AbstractResolver):
           continue
 
         if not isinstance(extraction_value, (str, int, float)):
-          logging.error(
+          logging.debug(
               "Extraction text must be a string, integer, or float. Found: %s",
               type(extraction_value),
           )
@@ -658,6 +714,78 @@ class WordAligner:
 
     return None
 
+  def _lcs_fuzzy_align_extraction(
+      self,
+      extraction: data.Extraction,
+      source_tokens_norm: list[str],
+      tokenized_text: tokenizer_lib.TokenizedText,
+      token_offset: int,
+      char_offset: int,
+      fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
+      fuzzy_alignment_min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY,
+      tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
+  ) -> data.Extraction | None:
+    """Fuzzy-align an extraction using LCS DP with coverage/density gates.
+
+    Args:
+      extraction: The extraction to align.
+      source_tokens_norm: Pre-normalized source tokens.
+      tokenized_text: The tokenized source text.
+      token_offset: Token offset of the current chunk.
+      char_offset: Character offset of the current chunk.
+      fuzzy_alignment_threshold: Minimum coverage fraction for acceptance.
+      fuzzy_alignment_min_density: Minimum matched-to-span density.
+      tokenizer_impl: Optional tokenizer instance.
+
+    Returns:
+      The aligned extraction on success, None otherwise.
+    """
+    extraction_tokens = list(
+        _tokenize_with_lowercase(
+            extraction.extraction_text, tokenizer_inst=tokenizer_impl
+        )
+    )
+    if not extraction_tokens:
+      return None
+
+    extraction_tokens_norm = [_normalize_token(t) for t in extraction_tokens]
+
+    logging.debug(
+        "LCS fuzzy aligning %r (%d tokens)",
+        extraction.extraction_text,
+        len(extraction_tokens),
+    )
+
+    # Try spans by decreasing match count: a sparse max-match span may fail
+    # the density gate while a denser sub-match span still passes coverage.
+    spans = _best_lcs_spans(source_tokens_norm, extraction_tokens_norm)
+    accepted: LcsSpan | None = None
+    for k in sorted(spans.keys(), reverse=True):
+      candidate = spans[k]
+      if _accept_lcs_match(
+          candidate,
+          len(extraction_tokens_norm),
+          threshold=fuzzy_alignment_threshold,
+          min_density=fuzzy_alignment_min_density,
+      ):
+        accepted = candidate
+        break
+    if accepted is None:
+      return None
+
+    extraction.token_interval = tokenizer_lib.TokenInterval(
+        start_index=accepted.start + token_offset,
+        end_index=accepted.end + 1 + token_offset,
+    )
+    start_token = tokenized_text.tokens[accepted.start]
+    end_token = tokenized_text.tokens[accepted.end]
+    extraction.char_interval = data.CharInterval(
+        start_pos=char_offset + start_token.char_interval.start_pos,
+        end_pos=char_offset + end_token.char_interval.end_pos,
+    )
+    extraction.alignment_status = data.AlignmentStatus.MATCH_FUZZY
+    return extraction
+
   def align_extractions(
       self,
       extraction_groups: Sequence[Sequence[data.Extraction]],
@@ -669,6 +797,10 @@ class WordAligner:
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       accept_match_lesser: bool = True,
       tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
+      *,
+      fuzzy_alignment_algorithm: str = _DEFAULT_FUZZY_ALGORITHM,
+      fuzzy_alignment_min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY,
+      exact_alignment_algorithm: str = _DEFAULT_EXACT_ALGORITHM,
   ) -> Sequence[Sequence[data.Extraction]]:
     """Aligns extractions with their positions in the source text.
 
@@ -691,16 +823,53 @@ class WordAligner:
       delim: Token used to separate multi-token extractions.
       enable_fuzzy_alignment: Whether to use fuzzy alignment when exact matching
         fails.
-      fuzzy_alignment_threshold: Minimum token overlap ratio for fuzzy alignment
-        (0-1).
+      fuzzy_alignment_threshold: Minimum fraction of extraction tokens that
+        must be matched (0-1). Default 0.75.
       accept_match_lesser: Whether to accept partial exact matches (MATCH_LESSER
         status).
       tokenizer_impl: Optional tokenizer instance.
+      fuzzy_alignment_algorithm: "lcs" (default) or "legacy" (deprecated,
+        will be removed in a future release). Keyword-only.
+      fuzzy_alignment_min_density: Minimum ratio of matched tokens to source
+        span length (LCS only). Keyword-only.
+      exact_alignment_algorithm: "dp" (default) aligns exact matches via
+        an order-preserving occurrence DP, so repeated mentions map to
+        successive occurrences and spans of different extractions may
+        overlap. "difflib" restores the legacy greedy behavior with
+        non-overlapping exact spans. Keyword-only.
 
     Returns:
       A sequence of extractions aligned with the source text, including token
       intervals.
     """
+    if exact_alignment_algorithm not in _VALID_EXACT_ALGORITHMS:
+      raise ValueError(
+          f"Invalid exact_alignment_algorithm {exact_alignment_algorithm!r};"
+          f" expected one of {sorted(_VALID_EXACT_ALGORITHMS)}."
+      )
+    if enable_fuzzy_alignment:
+      if fuzzy_alignment_algorithm not in _VALID_FUZZY_ALGORITHMS:
+        raise ValueError(
+            f"Invalid fuzzy_alignment_algorithm {fuzzy_alignment_algorithm!r};"
+            f" expected one of {sorted(_VALID_FUZZY_ALGORITHMS)}."
+        )
+      if not 0.0 <= fuzzy_alignment_threshold <= 1.0:
+        raise ValueError(
+            "fuzzy_alignment_threshold must be in [0, 1]; got"
+            f" {fuzzy_alignment_threshold!r}."
+        )
+      if not 0.0 <= fuzzy_alignment_min_density <= 1.0:
+        raise ValueError(
+            "fuzzy_alignment_min_density must be in [0, 1]; got"
+            f" {fuzzy_alignment_min_density!r}."
+        )
+      if fuzzy_alignment_algorithm == _FUZZY_ALGORITHM_LEGACY:
+        warnings.warn(
+            "fuzzy_alignment_algorithm='legacy' is deprecated and will be"
+            " removed in a future release. Use the default 'lcs' algorithm.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     logging.debug(
         "WordAligner: Starting alignment of extractions with the source text."
         " Extraction groups to align: %s",
@@ -773,6 +942,22 @@ class WordAligner:
     exact_matches = 0
     lesser_matches = 0
 
+    # Track DP-aligned extractions by id(): duplicate extractions
+    # compare equal, so a value-based set would conflate them.
+    dp_matched_extraction_ids: set[int] = set()
+    if exact_alignment_algorithm == _EXACT_ALGORITHM_DP:
+      dp_matched = _apply_monotonic_exact_matches(
+          [ext for ext, _ in index_to_extraction_group.values()],
+          source_tokens,
+          tokenized_text,
+          token_offset,
+          char_offset,
+          tokenizer_impl=tokenizer_impl,
+      )
+      exact_matches += len(dp_matched)
+      aligned_extractions.extend(dp_matched)
+      dp_matched_extraction_ids = {id(ext) for ext in dp_matched}
+
     # Exact matching phase
     for i, j, n in self._get_matching_blocks()[:-1]:
       extraction, _ = index_to_extraction_group.get(j, (None, None))
@@ -782,6 +967,8 @@ class WordAligner:
             " Difflib matching_blocks",
             j,
         )
+        continue
+      if id(extraction) in dp_matched_extraction_ids:
         continue
 
       extraction.token_interval = tokenizer_lib.TokenInterval(
@@ -837,22 +1024,39 @@ class WordAligner:
       if extraction not in aligned_extractions:
         unaligned_extractions.append(extraction)
 
-    # Apply fuzzy alignment to remaining extractions
     if enable_fuzzy_alignment and unaligned_extractions:
       logging.debug(
-          "Starting fuzzy alignment for %d unaligned extractions",
+          "Starting fuzzy alignment (%s) for %d unaligned extractions",
+          fuzzy_alignment_algorithm,
           len(unaligned_extractions),
       )
+      src_norm = (
+          [_normalize_token(t) for t in source_tokens]
+          if fuzzy_alignment_algorithm == _FUZZY_ALGORITHM_LCS
+          else None
+      )
       for extraction in unaligned_extractions:
-        aligned_extraction = self._fuzzy_align_extraction(
-            extraction,
-            source_tokens,
-            tokenized_text,
-            token_offset,
-            char_offset,
-            fuzzy_alignment_threshold,
-            tokenizer_impl=tokenizer_impl,
-        )
+        if fuzzy_alignment_algorithm == _FUZZY_ALGORITHM_LCS:
+          aligned_extraction = self._lcs_fuzzy_align_extraction(
+              extraction,
+              src_norm,
+              tokenized_text,
+              token_offset,
+              char_offset,
+              fuzzy_alignment_threshold=fuzzy_alignment_threshold,
+              fuzzy_alignment_min_density=fuzzy_alignment_min_density,
+              tokenizer_impl=tokenizer_impl,
+          )
+        else:
+          aligned_extraction = self._fuzzy_align_extraction(
+              extraction,
+              source_tokens,
+              tokenized_text,
+              token_offset,
+              char_offset,
+              fuzzy_alignment_threshold,
+              tokenizer_impl=tokenizer_impl,
+          )
         if aligned_extraction:
           aligned_extractions.append(aligned_extraction)
           logging.debug(
@@ -867,6 +1071,176 @@ class WordAligner:
         "Final aligned extraction groups: %s", aligned_extraction_groups
     )
     return aligned_extraction_groups
+
+
+def _find_token_occurrences(
+    source_tokens: Sequence[str],
+    extraction_tokens: Sequence[str],
+) -> list[int]:
+  """Returns all start indices of extraction_tokens within source_tokens."""
+  num_source = len(source_tokens)
+  num_extraction = len(extraction_tokens)
+  if num_extraction == 0 or num_source < num_extraction:
+    return []
+  # Normalize so the slice comparison works for any Sequence input.
+  expected = list(extraction_tokens)
+  first_token = expected[0]
+  return [
+      i
+      for i in range(num_source - num_extraction + 1)
+      # Cheap first-token filter before the O(m) slice compare.
+      if source_tokens[i] == first_token
+      and list(source_tokens[i : i + num_extraction]) == expected
+  ]
+
+
+class _ChainNode(typing.NamedTuple):
+  """One selected occurrence in a monotonic match chain."""
+
+  extraction_index: int
+  start: int
+  parent: _ChainNode | None
+
+
+class _FrontierEntry(typing.NamedTuple):
+  """Pareto-optimal: no kept chain ends earlier with at least this weight."""
+
+  end: int
+  weight: int
+  node: _ChainNode
+
+
+def _select_monotonic_matches(
+    occurrence_lists: Sequence[Sequence[int]],
+    extraction_lengths: Sequence[int],
+) -> dict[int, int]:
+  """Selects exact-match occurrences maximizing total matched tokens.
+
+  Chooses at most one occurrence per extraction, keeping selections in
+  extraction output order without overlap. Token-count weighting
+  preserves the legacy preference for longer extractions in contested
+  regions; ties prefer the earliest-ending chain, so repeated mentions
+  resolve to successive occurrences.
+
+  Args:
+    occurrence_lists: Per-extraction sorted start token indices, in
+      extraction output order.
+    extraction_lengths: Per-extraction token counts.
+
+  Returns:
+    Dict mapping extraction index to its selected start token index.
+  """
+  # Frontier entries are strictly increasing in both end and weight.
+  frontier: list[_FrontierEntry] = []
+  frontier_end = operator.attrgetter("end")
+
+  def best_ending_at_or_before(position: int) -> _FrontierEntry | None:
+    idx = bisect.bisect_right(frontier, position, key=frontier_end)
+    return frontier[idx - 1] if idx else None
+
+  def insert_if_undominated(entry: _FrontierEntry) -> None:
+    covering = best_ending_at_or_before(entry.end)
+    if covering is not None and covering.weight >= entry.weight:
+      return
+    low = bisect.bisect_left(frontier, entry.end, key=frontier_end)
+    # Evict entries ending at or after entry.end with no more weight;
+    # they can never outscore entry as a predecessor.
+    dominated_end = low
+    while (
+        dominated_end < len(frontier)
+        and frontier[dominated_end].weight <= entry.weight
+    ):
+      dominated_end += 1
+    frontier[low:dominated_end] = [entry]
+
+  for extraction_index, (occurrences, length) in enumerate(
+      zip(occurrence_lists, extraction_lengths, strict=True)
+  ):
+    if not occurrences or length == 0:
+      continue
+    # Candidates are computed against the pre-insert frontier so an
+    # extraction cannot extend a chain that already contains it.
+    candidates = []
+    for start in occurrences:
+      predecessor = best_ending_at_or_before(start)
+      weight = length + (predecessor.weight if predecessor else 0)
+      parent = predecessor.node if predecessor else None
+      candidates.append(
+          _FrontierEntry(
+              start + length,
+              weight,
+              _ChainNode(extraction_index, start, parent),
+          )
+      )
+    for candidate in candidates:
+      insert_if_undominated(candidate)
+
+  if not frontier:
+    return {}
+  selection: dict[int, int] = {}
+  node: _ChainNode | None = frontier[-1].node
+  while node is not None:
+    selection[node.extraction_index] = node.start
+    node = node.parent
+  return selection
+
+
+def _apply_monotonic_exact_matches(
+    ordered_extractions: Sequence[data.Extraction],
+    source_tokens: Sequence[str],
+    tokenized_text: tokenizer_lib.TokenizedText,
+    token_offset: int,
+    char_offset: int,
+    tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
+) -> list[data.Extraction]:
+  """Aligns extractions exactly via the monotonic occurrence DP.
+
+  Extractions the DP cannot place are left untouched for the difflib
+  (lesser-match) and fuzzy fallback phases.
+
+  Args:
+    ordered_extractions: Extractions in model output order.
+    source_tokens: Lowercased source tokens.
+    tokenized_text: The tokenized source text, for interval lookup.
+    token_offset: Token offset of the current chunk.
+    char_offset: Character offset of the current chunk.
+    tokenizer_impl: Optional tokenizer instance.
+
+  Returns:
+    The extractions aligned by the DP.
+  """
+  extraction_token_lists = [
+      list(
+          _tokenize_with_lowercase(
+              extraction.extraction_text, tokenizer_inst=tokenizer_impl
+          )
+      )
+      for extraction in ordered_extractions
+  ]
+  selection = _select_monotonic_matches(
+      [
+          _find_token_occurrences(source_tokens, tokens)
+          for tokens in extraction_token_lists
+      ],
+      [len(tokens) for tokens in extraction_token_lists],
+  )
+  matched: list[data.Extraction] = []
+  for extraction_index, start in selection.items():
+    extraction = ordered_extractions[extraction_index]
+    num_tokens = len(extraction_token_lists[extraction_index])
+    extraction.token_interval = tokenizer_lib.TokenInterval(
+        start_index=start + token_offset,
+        end_index=start + num_tokens + token_offset,
+    )
+    start_token = tokenized_text.tokens[start]
+    end_token = tokenized_text.tokens[start + num_tokens - 1]
+    extraction.char_interval = data.CharInterval(
+        start_pos=char_offset + start_token.char_interval.start_pos,
+        end_pos=char_offset + end_token.char_interval.end_pos,
+    )
+    extraction.alignment_status = data.AlignmentStatus.MATCH_EXACT
+    matched.append(extraction)
+  return matched
 
 
 def _tokenize_with_lowercase(
@@ -905,3 +1279,126 @@ def _normalize_token(token: str) -> str:
   if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
     token = token[:-1]
   return token
+
+
+_NO_MATCH = LcsSpan(matches=0, start=-1, end=-1)
+
+
+def _best_lcs_spans(
+    source: Sequence[str],
+    extraction: Sequence[str],
+) -> dict[int, LcsSpan]:
+  """Finds the tightest source span for each achievable match count.
+
+  Runs an O(n * m^2) time / O(m^2) memory DP with rolling rows on the
+  i dimension. For each (i, j, k), tracks the latest source index s
+  such that source[s..i) contains at least k tokens of extraction[0..j)
+  as a subsequence. Preferring later starts produces minimum-span
+  results; among spans of equal length, the earliest start wins.
+  Tracking per match count lets the caller try a denser k-1 match if
+  the maximum-match span fails a density gate.
+
+  Args:
+    source: Normalized source tokens.
+    extraction: Normalized extraction tokens.
+
+  Returns:
+    Dict mapping each achievable match count k (1..m) to its tightest
+    LcsSpan. Empty dict if no matches found.
+  """
+  n = len(source)
+  m = len(extraction)
+  if n == 0 or m == 0:
+    return {}
+
+  # Rolling rows: prev_row[j][k] holds span_start[i-1][j][k],
+  # curr_row[j][k] holds span_start[i][j][k]. k=0 is trivially
+  # achievable: at i, source[i..i) is empty, so s=i gives 0 matches.
+  prev_row = [[-1] * (m + 1) for _ in range(m + 1)]
+  curr_row = [[-1] * (m + 1) for _ in range(m + 1)]
+  for j in range(m + 1):
+    prev_row[j][0] = 0  # i=0 base: k=0 achievable with s=0
+
+  # best_per_k[k] = tightest span seen so far with exactly k matches.
+  best_per_k: dict[int, LcsSpan] = {}
+
+  for i in range(1, n + 1):
+    src_tok = source[i - 1]
+    # Initialize column j=0 of curr_row: k=0 achievable with s=i, k>0 not.
+    curr_row[0][0] = i
+    for k in range(1, m + 1):
+      curr_row[0][k] = -1
+
+    for j in range(1, m + 1):
+      curr_row[j][0] = i
+      matches_here = src_tok == extraction[j - 1]
+      for k in range(1, m + 1):
+        skip_source = prev_row[j][k]
+        skip_extraction = curr_row[j - 1][k]
+        best = skip_source if skip_source > skip_extraction else skip_extraction
+        if matches_here:
+          if k == 1:
+            match_cand = i - 1
+          else:
+            match_cand = prev_row[j - 1][k - 1]
+          best = max(best, match_cand)
+        curr_row[j][k] = best
+
+    end = i - 1
+    for k in range(1, m + 1):
+      s = curr_row[m][k]
+      if s < 0:
+        continue
+      existing = best_per_k.get(k)
+      if existing is None:
+        best_per_k[k] = LcsSpan(matches=k, start=s, end=end)
+        continue
+      new_len = end - s + 1
+      cur_len = existing.span_len
+      if new_len < cur_len or (new_len == cur_len and s < existing.start):
+        best_per_k[k] = LcsSpan(matches=k, start=s, end=end)
+
+    prev_row, curr_row = curr_row, prev_row
+
+  return best_per_k
+
+
+def _best_lcs_span(
+    source: Sequence[str],
+    extraction: Sequence[str],
+) -> LcsSpan:
+  """Returns the max-match LCS span. Wrapper over _best_lcs_spans."""
+  spans = _best_lcs_spans(source, extraction)
+  if not spans:
+    return _NO_MATCH
+  return spans[max(spans.keys())]
+
+
+def _accept_lcs_match(
+    span: LcsSpan,
+    extraction_len: int,
+    threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
+    min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY,
+) -> bool:
+  """Applies coverage and density gates to an LCS result.
+
+  Coverage gate (threshold): did we find enough of the extraction?
+  Requires matches >= ceil(extraction_len * threshold).
+
+  Density gate (min_density): is the match tight enough? Requires
+  matches / span_len >= min_density, rejecting scattered matches
+  where matched tokens are spread across too much noise.
+
+  Args:
+    span: LcsSpan result from _best_lcs_span.
+    extraction_len: Number of tokens in the extraction.
+    threshold: Minimum fraction of the extraction that must match.
+    min_density: Minimum ratio of matched tokens to span length.
+  """
+  if span.matches == 0 or extraction_len == 0:
+    return False
+  needed = math.ceil(extraction_len * threshold)
+  if span.span_len <= 0:
+    return False
+  density = span.matches / span.span_len
+  return span.matches >= needed and density >= min_density

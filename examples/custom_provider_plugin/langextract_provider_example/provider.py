@@ -22,13 +22,17 @@ from typing import Any, Iterator, Sequence
 from langextract_provider_example import schema as custom_schema
 
 import langextract as lx
+from langextract.core import base_model
+from langextract.core import schema as core_schema
+from langextract.core import types
+from langextract.providers import router
 
 
-@lx.providers.registry.register(
+@router.register(
     r'^gemini',  # Matches Gemini model IDs (same as default provider)
 )
 @dataclasses.dataclass(init=False)
-class CustomGeminiProvider(lx.inference.BaseLanguageModel):
+class CustomGeminiProvider(base_model.BaseLanguageModel):
   """Example custom LangExtract provider implementation.
 
   This demonstrates how to create a custom provider for LangExtract
@@ -40,7 +44,7 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
   you must explicitly specify this provider when creating a model:
 
   config = lx.factory.ModelConfig(
-      model_id="gemini-2.5-flash",
+      model_id="gemini-3.5-flash",
       provider="CustomGeminiProvider"
   )
   model = lx.factory.create_model(config)
@@ -55,7 +59,7 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
 
   def __init__(
       self,
-      model_id: str = 'gemini-2.5-flash',
+      model_id: str = 'gemini-3.5-flash',
       api_key: str | None = None,
       temperature: float = 0.0,
       **kwargs: Any,
@@ -100,7 +104,7 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
     self._client = genai.Client(api_key=self.api_key)
 
   @classmethod
-  def get_schema_class(cls) -> type[lx.schema.BaseSchema] | None:
+  def get_schema_class(cls) -> type[core_schema.BaseSchema] | None:
     """Return our custom schema class.
 
     This allows LangExtract to use our custom schema implementation
@@ -111,7 +115,9 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
     """
     return custom_schema.CustomProviderSchema
 
-  def apply_schema(self, schema_instance: lx.schema.BaseSchema | None) -> None:
+  def apply_schema(
+      self, schema_instance: core_schema.BaseSchema | None
+  ) -> None:
     """Apply or clear schema configuration.
 
     This method is called by LangExtract to dynamically apply schema
@@ -137,7 +143,7 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs: Any
-  ) -> Iterator[Sequence[lx.inference.ScoredOutput]]:
+  ) -> Iterator[Sequence[types.ScoredOutput]]:
     """Run inference on a batch of prompts.
 
     Args:
@@ -170,7 +176,7 @@ class CustomGeminiProvider(lx.inference.BaseLanguageModel):
             model=self.model_id, contents=prompt, config=config
         )
         output = response.text.strip()
-        yield [lx.inference.ScoredOutput(score=1.0, output=output)]
+        yield [types.ScoredOutput(score=1.0, output=output)]
 
       except Exception as e:
         raise lx.exceptions.InferenceRuntimeError(

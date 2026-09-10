@@ -100,7 +100,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.get.return_value = create_mock_batch_job()
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="test-project",
         location=gb._DEFAULT_LOCATION,
@@ -135,7 +135,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -160,7 +160,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.models.generate_content.return_value = mock_response
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -179,8 +179,8 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.create.assert_not_called()
 
   @mock.patch.object(genai, "Client", autospec=True)
-  def test_batch_with_schema(self, mock_client_cls):
-    """Test that batch API properly includes schema when configured."""
+  def test_batch_forwards_constructor_generation_params(self, mock_client_cls):
+    """Batch requests forward constructor generation settings."""
     mock_client = mock_client_cls.return_value
     mock_client.vertexai = True
 
@@ -194,20 +194,74 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.create.return_value = create_mock_batch_job()
     mock_client.batches.get.return_value = create_mock_batch_job()
 
-    mock_schema = mock.create_autospec(
-        schemas.gemini.GeminiSchema, instance=True
-    )
-    mock_schema.schema_dict = {
-        "type": "object",
-        "properties": {"name": {"type": "string"}},
-    }
-
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
-        gemini_schema=mock_schema,
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
+    )
+
+    with mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit:
+      mock_submit.return_value = create_mock_batch_job()
+
+      outs = list(model.infer(["test prompt"]))
+
+    self.assertLen(outs, 1)
+    self.assertEqual(outs[0][0].output, '{"name":"test"}')
+    request = mock_submit.call_args.args[2][0]
+    self.assertDictEqual(
+        {
+            "maxOutputTokens": 8192,
+            "temperature": 0.0,
+            "topK": 40,
+            "topP": 0.95,
+        },
+        request["generationConfig"],
+    )
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_batch_schema_runtime_generation_params_override_constructor(
+      self, mock_client_cls
+  ):
+    """Batch schema requests prefer runtime generation settings."""
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+
+    output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+    output_blob.name = f"output{gb._EXT_JSONL}"
+    output_blob.open.return_value.__enter__.return_value = io.StringIO(
+        _create_batch_response(0, {"name": "test"})
+    )
+    self.mock_bucket.list_blobs.return_value = [output_blob]
+
+    mock_client.batches.create.return_value = create_mock_batch_job()
+    mock_client.batches.get.return_value = create_mock_batch_job()
+
+    gemini_schema = schemas.gemini.GeminiSchema(
+        _schema_dict={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        }
+    )
+
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        vertexai=True,
+        project="p",
+        location="l",
+        gemini_schema=gemini_schema,
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
         batch={
             "enabled": True,
             "threshold": 1,
@@ -220,7 +274,14 @@ class TestGeminiBatchAPI(absltest.TestCase):
     with mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit:
       mock_submit.return_value = create_mock_batch_job()
 
-      outs = list(model.infer(["test prompt"]))
+      outs = list(
+          model.infer(
+              ["test prompt"],
+              max_output_tokens=4096,
+              top_p=0.8,
+              top_k=20,
+          )
+      )
 
       self.assertLen(outs, 1)
       self.assertEqual(outs[0][0].output, '{"name":"test"}')
@@ -228,15 +289,18 @@ class TestGeminiBatchAPI(absltest.TestCase):
       # Verify _submit_file was called with project and location parameters.
       mock_submit.assert_called_with(
           mock_client,
-          "gemini-2.5-flash",
+          "gemini-3.5-flash",
           [{
               "contents": [
                   {"role": "user", "parts": [{"text": "test prompt"}]}
               ],
               "generationConfig": {
+                  "maxOutputTokens": 4096,
                   "responseMimeType": "application/json",
-                  "responseSchema": mock_schema.schema_dict,
+                  "responseSchema": gemini_schema.schema_dict,
                   "temperature": 0.0,
+                  "topK": 20,
+                  "topP": 0.8,
               },
           }],
           mock.ANY,  # Display name contains timestamp/random.
@@ -245,7 +309,79 @@ class TestGeminiBatchAPI(absltest.TestCase):
           "l",  # location
       )
 
-    self.assertEqual(model.gemini_schema.schema_dict, mock_schema.schema_dict)
+    self.assertEqual(model.gemini_schema.schema_dict, gemini_schema.schema_dict)
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_batch_runtime_none_clears_constructor_generation_params(
+      self, mock_client_cls
+  ):
+    """Batch runtime None omits constructor generation settings."""
+    mock_client_cls.return_value.vertexai = True
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        vertexai=True,
+        project="p",
+        location="l",
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
+    )
+
+    with mock.patch.object(
+        gb, "infer_batch", autospec=True, return_value=['{"result": "test"}']
+    ) as mock_infer_batch:
+      list(
+          model.infer(
+              ["test prompt"],
+              temperature=None,
+              max_output_tokens=None,
+              top_p=None,
+              top_k=None,
+          )
+      )
+
+    gen_config = mock_infer_batch.call_args.kwargs["gen_config"]
+    for key in ["temperature", "max_output_tokens", "top_p", "top_k"]:
+      self.assertNotIn(key, gen_config)
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_batch_runtime_none_clears_only_selected_generation_param(
+      self, mock_client_cls
+  ):
+    """Batch runtime None clears one setting without clearing siblings."""
+    mock_client_cls.return_value.vertexai = True
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        vertexai=True,
+        project="p",
+        location="l",
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
+    )
+
+    with mock.patch.object(
+        gb, "infer_batch", autospec=True, return_value=['{"result": "test"}']
+    ) as mock_infer_batch:
+      list(model.infer(["test prompt"], max_output_tokens=None, top_p=0.8))
+
+    gen_config = mock_infer_batch.call_args.kwargs["gen_config"]
+    self.assertNotIn("max_output_tokens", gen_config)
+    self.assertEqual(0.0, gen_config["temperature"])
+    self.assertEqual(0.8, gen_config["top_p"])
+    self.assertEqual(40, gen_config["top_k"])
 
   @mock.patch.object(genai, "Client", autospec=True)
   def test_batch_error_handling(self, mock_client_cls):
@@ -255,7 +391,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.create.side_effect = Exception("Batch API error")
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -295,7 +431,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.get.return_value = job
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -377,7 +513,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.get.side_effect = [job0, job1, job2]
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -415,7 +551,7 @@ class TestGeminiBatchAPI(absltest.TestCase):
     mock_client.batches.get.return_value = job
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project="p",
         location="l",
@@ -456,7 +592,7 @@ class EmptyAndPaddingTest(absltest.TestCase):
         client=mock_client_cls.return_value,
         model_id="m",
         prompts=[],
-        schema_dict=None,
+        schema_config=None,
         gen_config={},
         cfg=gb.BatchConfig(
             enabled=True,
@@ -497,7 +633,7 @@ class EmptyAndPaddingTest(absltest.TestCase):
           client=mock_client,
           model_id="m",
           prompts=["p1", "p2"],
-          schema_dict=None,
+          schema_config=None,
           gen_config={},
           cfg=cfg,
       )
@@ -537,7 +673,7 @@ class GCSBatchCachingTest(absltest.TestCase):
         client=mock_client,
         model_id="m",
         prompts=["p1"],
-        schema_dict=None,
+        schema_config=None,
         gen_config={},
         cfg=cfg,
     )
@@ -598,7 +734,7 @@ class GCSBatchCachingTest(absltest.TestCase):
           client=mock_client,
           model_id="m",
           prompts=["cached_prompt", "new_prompt"],
-          schema_dict=None,
+          schema_config=None,
           gen_config={},
           cfg=cfg,
       )
@@ -643,7 +779,7 @@ class GCSBatchCachingTest(absltest.TestCase):
     test_location = "us-central1"
 
     model = gemini.GeminiLanguageModel(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.5-flash",
         vertexai=True,
         project=test_project,
         location=test_location,
@@ -707,6 +843,104 @@ class GCSBatchCachingTest(absltest.TestCase):
     self.assertEqual(
         cache._compute_hash(with_complex_types), cache._compute_hash(normalized)
     )
+
+
+class BatchOutputSchemaRequestTest(absltest.TestCase):
+  """Tests for lowering provider schema config into batch REST requests."""
+
+  def test_build_request_omits_generation_config_without_values(self):
+    request = gb._build_request("prompt", None, {})
+
+    self.assertNotIn("generationConfig", request)
+
+  def test_build_request_lowers_json_schema_config(self):
+    schema_config = {
+        "response_json_schema": {"type": "object", "properties": {}},
+        "response_mime_type": "application/json",
+    }
+
+    request = gb._build_request("prompt", schema_config, None)
+
+    generation_config = request["generationConfig"]
+    self.assertEqual(
+        generation_config["responseJsonSchema"],
+        schema_config["response_json_schema"],
+    )
+    self.assertEqual(generation_config["responseMimeType"], "application/json")
+    self.assertNotIn("responseSchema", generation_config)
+
+  def test_build_request_lowers_response_schema_config(self):
+    schema_config = {
+        "response_schema": {"type": "object", "properties": {}},
+        "response_mime_type": "application/json",
+    }
+
+    request = gb._build_request("prompt", schema_config, None)
+
+    generation_config = request["generationConfig"]
+    self.assertEqual(
+        generation_config["responseSchema"], schema_config["response_schema"]
+    )
+    self.assertNotIn("responseJsonSchema", generation_config)
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_batch_with_output_schema_uses_json_schema_field(
+      self, mock_client_cls
+  ):
+    """User output_schema flows to batch requests as responseJsonSchema."""
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+
+    with mock.patch.object(gb.storage, "Client", autospec=True) as storage_cls:
+      bucket = storage_cls.return_value.bucket.return_value
+      output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+      output_blob.name = f"output{gb._EXT_JSONL}"
+      output_blob.open.return_value.__enter__.return_value = io.StringIO(
+          _create_batch_response(0, {"extractions": []})
+      )
+      bucket.list_blobs.return_value = [output_blob]
+
+      mock_client.batches.create.return_value = create_mock_batch_job()
+      mock_client.batches.get.return_value = create_mock_batch_job()
+
+      output_schema = {
+          "type": "object",
+          "properties": {
+              "extractions": {
+                  "type": "array",
+                  "items": {
+                      "type": "object",
+                      "properties": {"condition": {"type": "string"}},
+                  },
+              }
+          },
+          "required": ["extractions"],
+      }
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash",
+          vertexai=True,
+          project="p",
+          location="l",
+          batch={
+              "enabled": True,
+              "threshold": 1,
+              "enable_caching": False,
+              "retention_days": None,
+          },
+      )
+      model.apply_output_schema(output_schema)
+
+      with mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit:
+        mock_submit.return_value = create_mock_batch_job()
+
+        list(model.infer(["test prompt"]))
+
+        request = mock_submit.call_args[0][2][0]
+        generation_config = request["generationConfig"]
+        self.assertEqual(generation_config["responseJsonSchema"], output_schema)
+        self.assertEqual(
+            generation_config["responseMimeType"], "application/json"
+        )
 
 
 if __name__ == "__main__":

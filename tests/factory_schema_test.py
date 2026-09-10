@@ -22,6 +22,8 @@ from langextract import factory
 from langextract import schema
 from langextract.core import base_model
 from langextract.core import data
+from langextract.core import exceptions
+from langextract.providers import schemas
 
 
 class FactorySchemaIntegrationTest(absltest.TestCase):
@@ -46,7 +48,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
   def test_gemini_with_schema_returns_false_fence(self):
     """Test that Gemini with schema returns fence_output=False."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test_key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test_key"}
     )
 
     with mock.patch(
@@ -89,10 +91,43 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
 
       self.assertFalse(model.requires_fence_output)
 
+  def test_openai_with_schema_returns_false_fence(self):
+    """OpenAI schema constraints use raw JSON by default."""
+    config = factory.ModelConfig(
+        model_id="gpt-4o-mini", provider_kwargs={"api_key": "test_key"}
+    )
+
+    with mock.patch("openai.OpenAI", autospec=True):
+      model = factory._create_model_with_schema(
+          config=config,
+          examples=self.examples,
+          use_schema_constraints=True,
+          fence_output=None,
+      )
+
+      self.assertIsInstance(model.schema, schemas.openai.OpenAISchema)
+      self.assertIs(model.requires_fence_output, False)
+
+  def test_openai_explicit_fence_output_respected(self):
+    """Explicit OpenAI fence_output overrides schema defaults."""
+    config = factory.ModelConfig(
+        model_id="gpt-4o-mini", provider_kwargs={"api_key": "test_key"}
+    )
+
+    with mock.patch("openai.OpenAI", autospec=True):
+      model = factory._create_model_with_schema(
+          config=config,
+          examples=self.examples,
+          use_schema_constraints=True,
+          fence_output=True,
+      )
+
+      self.assertIs(model.requires_fence_output, True)
+
   def test_explicit_fence_output_respected(self):
     """Test that explicit fence_output is not overridden."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test_key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test_key"}
     )
 
     with mock.patch(
@@ -134,7 +169,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
   def test_schema_disabled_returns_true_fence(self):
     """Test that disabling schema constraints returns fence_output=True."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test_key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test_key"}
     )
 
     with mock.patch(
@@ -179,7 +214,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
   def test_no_examples_no_schema(self):
     """Test that no examples means no schema is created."""
     config = factory.ModelConfig(
-        model_id="gemini-2.5-flash", provider_kwargs={"api_key": "test_key"}
+        model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test_key"}
     )
 
     with mock.patch(
@@ -238,6 +273,121 @@ class SchemaApplicationTest(absltest.TestCase):
           mock_apply.assert_called_once()
           schema_arg = mock_apply.call_args[0][0]
           self.assertIsInstance(schema_arg, schema.GeminiSchema)
+
+
+@mock.patch.dict(
+    "os.environ",
+    {"GEMINI_API_KEY": "test_key", "OPENAI_API_KEY": "test_key"},
+)
+class FactoryOutputSchemaTest(absltest.TestCase):
+  """Tests for create_model with user-provided output_schema."""
+
+  def setUp(self):
+    super().setUp()
+    self.output_schema = schema.extractions_schema(
+        schema.extraction_item_schema("condition")
+    )
+    self.examples = [
+        data.ExampleData(
+            text="Patient has diabetes",
+            extractions=[
+                data.Extraction(
+                    extraction_class="condition",
+                    extraction_text="diabetes",
+                )
+            ],
+        )
+    ]
+
+  def test_gemini_output_schema_configures_json_schema(self):
+    model = factory.create_model_from_id(
+        "gemini-3.5-flash", output_schema=self.output_schema
+    )
+
+    self.assertIsInstance(model.schema, schemas.gemini.GeminiSchema)
+    self.assertTrue(model.schema.from_output_schema)
+    self.assertEqual(
+        model.schema.to_provider_config()["response_json_schema"],
+        self.output_schema,
+    )
+    self.assertFalse(model.requires_fence_output)
+
+  def test_openai_output_schema_configures_response_format(self):
+    model = factory.create_model_from_id(
+        "gpt-4o", output_schema=self.output_schema
+    )
+
+    self.assertIsInstance(model.schema, schemas.openai.OpenAISchema)
+    self.assertTrue(model.schema.from_output_schema)
+    self.assertEqual(
+        model.schema.response_format["json_schema"]["schema"],
+        self.output_schema,
+    )
+    self.assertFalse(model.requires_fence_output)
+
+  def test_output_schema_overrides_example_schema(self):
+    model = factory.create_model(
+        factory.ModelConfig(model_id="gemini-3.5-flash"),
+        examples=self.examples,
+        use_schema_constraints=True,
+        output_schema=self.output_schema,
+    )
+
+    provider_config = model.schema.to_provider_config()
+    self.assertEqual(
+        provider_config["response_json_schema"], self.output_schema
+    )
+    self.assertNotIn("response_schema", provider_config)
+
+  def test_output_schema_rejects_provider_schema_kwargs(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "response_schema"
+    ):
+      factory.create_model_from_id(
+          "gemini-3.5-flash",
+          output_schema=self.output_schema,
+          response_schema={"type": "object"},
+      )
+
+  def test_output_schema_ignores_none_provider_schema_kwargs(self):
+    model = factory.create_model_from_id(
+        "gemini-3.5-flash",
+        output_schema=self.output_schema,
+        response_schema=None,
+    )
+
+    self.assertEqual(
+        model.schema.to_provider_config()["response_mime_type"],
+        "application/json",
+    )
+
+  def test_output_schema_rejects_fence_output(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "fence_output"
+    ):
+      factory.create_model(
+          factory.ModelConfig(model_id="gemini-3.5-flash"),
+          output_schema=self.output_schema,
+          fence_output=True,
+      )
+
+  def test_output_schema_rejects_yaml_format(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "format_type=JSON"
+    ):
+      factory.create_model_from_id(
+          "gemini-3.5-flash",
+          output_schema=self.output_schema,
+          format_type=data.FormatType.YAML,
+      )
+
+  def test_output_schema_rejects_unsupported_provider(self):
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "does not support output_schema"
+    ):
+      factory.create_model_from_id(
+          "gemma2:2b", output_schema=self.output_schema
+      )
 
 
 if __name__ == "__main__":

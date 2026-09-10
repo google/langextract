@@ -556,6 +556,13 @@ def _extract_text(resp: _TextResponse | dict[str, Any] | None) -> str | None:
   return text if isinstance(text, str) else None
 
 
+_UNSPECIFIED_REASONS = frozenset((
+    "FINISH_REASON_UNSPECIFIED",
+    "BLOCKED_REASON_UNSPECIFIED",
+    "BLOCK_REASON_UNSPECIFIED",
+))
+
+
 def _no_text_block_diagnostic(resp: Any) -> str | None:
   """Return a block diagnostic when a textless response was refused.
 
@@ -579,7 +586,8 @@ def _no_text_block_diagnostic(resp: Any) -> str | None:
     block_reason = prompt_feedback.get("blockReason") or prompt_feedback.get(
         "block_reason"
     )
-    if block_reason:
+    # The zero enum value means the service reported no reason, not a block.
+    if block_reason and block_reason not in _UNSPECIFIED_REASONS:
       return f"block_reason={block_reason}"
 
   candidates = resp.get("candidates")
@@ -589,8 +597,9 @@ def _no_text_block_diagnostic(resp: Any) -> str | None:
       finish_reason = candidate.get("finishReason") or candidate.get(
           "finish_reason"
       )
-      if finish_reason and finish_reason != "STOP":
-        return f"finish_reason={finish_reason}"
+      if finish_reason and finish_reason not in _UNSPECIFIED_REASONS:
+        if finish_reason != "STOP":
+          return f"finish_reason={finish_reason}"
   return None
 
 
@@ -666,7 +675,7 @@ def _parse_batch_line(
     diagnostic = _no_text_block_diagnostic(resp)
     if diagnostic:
       raise exceptions.InferenceRuntimeError(
-          f"Batch item blocked or refused: {diagnostic}"
+          f"Batch item blocked or refused: {diagnostic}", provider="Gemini"
       )
 
   key = obj.get("key", "")

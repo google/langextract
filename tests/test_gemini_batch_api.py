@@ -665,6 +665,21 @@ class BatchParseBlockedItemTest(absltest.TestCase):
     }
     self.assertEqual(self._parse(response, self.cfg), {0: ""})
 
+  def test_unspecified_reasons_are_not_treated_as_blocked(self):
+    # The zero enum value means the service set no reason; it is not a block.
+    responses = (
+        {
+            "candidates": [{
+                "finishReason": "FINISH_REASON_UNSPECIFIED",
+                "content": {"role": "model", "parts": []},
+            }]
+        },
+        {"promptFeedback": {"blockReason": "BLOCKED_REASON_UNSPECIFIED"}},
+        {"promptFeedback": {"blockReason": "BLOCK_REASON_UNSPECIFIED"}},
+    )
+    for response in responses:
+      self.assertEqual(self._parse(response, self.cfg), {0: ""})
+
 
 class BatchConfigValidationTest(parameterized.TestCase):
   """Test BatchConfig validation logic."""

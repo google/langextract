@@ -633,27 +633,47 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           index = future_to_index[future]
           try:
             results[index] = future.result()
-          except exceptions.InferenceRuntimeError:
-            raise
           except Exception as e:
             # Collect, don't raise mid-loop: raising here abandons the still
             # running futures and throws away every chunk that already
             # succeeded. Let the pool drain, then fail once with the completed
             # work attached so the caller can recover it.
+            #
+            # InferenceRuntimeError is collected like any other failure rather
+            # than re-raised on the spot. Its diagnostic is not lost: it is
+            # carried on the aggregate error as `original` and quoted in the
+            # message, so a blocked or no-text chunk still reports why while
+            # the chunks that succeeded survive.
             errors[index] = e
 
         if errors:
           completed = sum(1 for result in results if result is not None)
           first_index = min(errors)
+          first_error = errors[first_index]
+          partial = [
+              [result] if result is not None else None for result in results
+          ]
+          failed = sorted(errors)
+
+          if completed == 0 and isinstance(
+              first_error, exceptions.InferenceRuntimeError
+          ):
+            # Nothing survived, so there is no partial work to describe and
+            # nothing to gain by wrapping. Propagate the provider's own
+            # diagnostic unchanged (a blocked prompt, an exhausted token
+            # budget) rather than burying it one level down, and attach the
+            # drained bookkeeping to it.
+            first_error.partial_results = partial
+            first_error.failed_indices = failed
+            raise first_error
+
           raise exceptions.InferenceRuntimeError(
               f'Parallel inference failed for {len(errors)} of '
               f'{len(batch_prompts)} prompt(s); {completed} completed chunk(s) '
-              f'preserved. First error: {errors[first_index]}',
-              original=errors[first_index],
-              partial_results=[
-                  [result] if result is not None else None for result in results
-              ],
-              failed_indices=sorted(errors),
+              f'preserved. First error: {first_error}',
+              original=first_error,
+              partial_results=partial,
+              failed_indices=failed,
           )
 
         for result in results:

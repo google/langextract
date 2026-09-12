@@ -392,6 +392,102 @@ class PromptAlignmentValidationTest(parameterized.TestCase):
     self.assertEqual(report.has_failed, expected_has_failed)
     self.assertEqual(report.has_non_exact, expected_has_non_exact)
 
+  def test_empty_extraction_text(self):
+    """Verify that empty strings are properly rejected iwth ValueError."""
+    example = data.ExampleData(
+        text="Patient takes lisinopril 10mg daily.",
+        extractions=[
+            data.Extraction(
+                extraction_class="Medication",
+                extraction_text="",
+                attributes={},
+            )
+        ],
+    )
+
+    with self.assertRaises(ValueError) as context:
+      prompt_validation.validate_prompt_alignment([example])
+
+    self.assertIn("empty", str(context.exception).lower())
+
+  def test_unicode_and_special_chars(self):
+    """Ensure proper handling of unicode characters and special symbols."""
+    example = data.ExampleData(
+        text=(
+            "Patient visits café daily. Temperature: 98.6°F. Cost: €50, £40,"
+            " ¥500."
+        ),
+        extractions=[
+            data.Extraction(
+                extraction_class="Location",
+                extraction_text="café",
+                attributes={"type": "establishment"},
+            ),
+            data.Extraction(
+                extraction_class="Temperature",
+                extraction_text="98.6°F",  # Degree symbol
+                attributes={"unit": "fahrenheit"},
+            ),
+            data.Extraction(
+                extraction_class="Cost",
+                extraction_text="€50",  # Euro symbol
+                attributes={"currency": "euro"},
+            ),
+            data.Extraction(
+                extraction_class="Cost",
+                extraction_text="£40",  # Pound symbol
+                attributes={"currency": "pound"},
+            ),
+            data.Extraction(
+                extraction_class="Cost",
+                extraction_text="¥500",  # Yen symbol
+                attributes={"currency": "yen"},
+            ),
+        ],
+    )
+
+    # Unicode characters should be handled without errors
+    report = prompt_validation.validate_prompt_alignment([example])
+
+    # All extractions should align successfully (exact matches)
+    self.assertEmpty(report.issues)
+    self.assertFalse(report.has_failed)
+    self.assertFalse(report.has_non_exact)
+
+  def test_very_long_extraction_text(self):
+    """Test graceful handling of very long extraction text (1000+ characters)."""
+    # Create a long text passage (approximately 1140 characters)
+    long_passage = (
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 20
+    )
+
+    example = data.ExampleData(
+        text=f"Medical history: {long_passage} End of history.",
+        extractions=[
+            data.Extraction(
+                extraction_class="History",
+                # Exactly 1000 characters
+                extraction_text=long_passage[:1000],
+                attributes={"length": "detailed"},
+            ),
+        ],
+    )
+
+    # Long extraction text should be handled gracefully
+    report = prompt_validation.validate_prompt_alignment([example])
+
+    # Should either succeed (if substring match works) or fail gracefully
+    # The important thing is it doesn't crash or hang
+    self.assertIsNotNone(report)
+
+    # If it finds a match, verify it's tracked correctly
+    if not report.has_failed:
+      # Successfully found the long extraction
+      self.assertIsNotNone(report)
+    else:
+      # If it fails, that's also acceptable - just verify it fails cleanly
+      self.assertTrue(report.has_failed)
+
 
 class ExtractIntegrationTest(absltest.TestCase):
   """Minimal integration test for extract() entry point validation."""

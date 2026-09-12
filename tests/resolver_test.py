@@ -1865,6 +1865,27 @@ class ResolverTest(parameterized.TestCase):
     with self.assertRaises(resolver_lib.ResolverParsingError):
       self.default_resolver.resolve(test_input, suppress_parse_errors=False)
 
+  def test_resolve_parse_error_suppressed_logs_no_retry_and_opt_out(self):
+    """A dropped chunk's log line says the data is gone and how to opt out.
+
+    Regression coverage for the surprise reported on #358: the default,
+    suppress_parse_errors=True, drops a chunk with no exception, so any
+    caller-side retry keyed on catching a parse error never fires. The
+    message must say so, not just "skipping", so it is discoverable without
+    reading the docs.
+    """
+    test_input = "```json\n```not valid at all"
+    with mock.patch("langextract.resolver.logging") as mock_log:
+      actual = self.default_resolver.resolve(
+          test_input, suppress_parse_errors=True
+      )
+      self.assertEmpty(actual)
+      mock_log.warning.assert_called()
+      log_msg = mock_log.warning.call_args[0][0]
+      self.assertIn("no retry possible", log_msg)
+      self.assertIn("suppress_parse_errors", log_msg)
+      self.assertIn("False", log_msg)
+
   @parameterized.named_parameters(
       dict(
           testcase_name="non_dict_attributes",
@@ -1893,6 +1914,7 @@ class ResolverTest(parameterized.TestCase):
       mock_log.warning.assert_called()
       log_msg = mock_log.warning.call_args[0][0]
       self.assertIn("schema error", log_msg)
+      self.assertIn("no retry possible", log_msg)
       mock_log.error.assert_not_called()
 
   def test_resolve_schema_error_raises_without_suppression(self):

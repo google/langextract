@@ -25,6 +25,7 @@ from absl.testing import parameterized
 from google import genai
 from google.api_core import exceptions
 
+from langextract.core import exceptions as core_exceptions
 from langextract.providers import gemini
 from langextract.providers import gemini_batch as gb
 from langextract.providers import schemas
@@ -565,6 +566,119 @@ class TestGeminiBatchAPI(absltest.TestCase):
 
     with self.assertRaisesRegex(Exception, "Batch item error"):
       list(model.infer(["test"]))
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_blocked_batch_item_raises(self, mock_client_cls):
+    """A safety-blocked item must raise, not report empty success."""
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+
+    output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+    output_blob.name = f"output{gb._EXT_JSONL}"
+    output_blob.open.return_value.__enter__.return_value = io.StringIO(
+        json.dumps({
+            "key": f"{gb._KEY_IDX}0",
+            "response": {"promptFeedback": {"blockReason": "SAFETY"}},
+        })
+    )
+    self.mock_bucket.list_blobs.return_value = [output_blob]
+
+    job = create_mock_batch_job()
+    mock_client.batches.create.return_value = job
+    mock_client.batches.get.return_value = job
+
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        vertexai=True,
+        project="p",
+        location="l",
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
+    )
+
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError,
+        "Batch item blocked or refused",
+    ):
+      list(model.infer(["test"]))
+
+
+class BatchParseBlockedItemTest(absltest.TestCase):
+  """Blocked/refused batch items raise instead of becoming empty successes.
+
+  Regression test for issue #527. A safety-blocked or refused item has no
+  text content but still reports a block/finish reason in the response; it
+  used to be written into outputs as '' (an empty success).
+  """
+
+  def setUp(self):
+    super().setUp()
+    self.cfg = gb.BatchConfig(
+        enabled=True, enable_caching=False, retention_days=None
+    )
+    self.ignore_cfg = gb.BatchConfig(
+        enabled=True,
+        enable_caching=False,
+        retention_days=None,
+        ignore_item_errors=True,
+    )
+
+  def _parse(self, response, cfg):
+    outputs = {}
+    line = json.dumps({"key": f"{gb._KEY_IDX}0", "response": response})
+    gb._parse_batch_line(line, outputs, cfg)
+    return outputs
+
+  def test_blocked_candidate_raises(self):
+    response = {
+        "candidates": [{
+            "finishReason": "SAFETY",
+            "content": {"role": "model", "parts": []},
+        }]
+    }
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError, "finish_reason=SAFETY"
+    ):
+      self._parse(response, self.cfg)
+
+  def test_blocked_prompt_raises(self):
+    response = {"promptFeedback": {"blockReason": "SAFETY"}}
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError, "block_reason=SAFETY"
+    ):
+      self._parse(response, self.cfg)
+
+  def test_blocked_item_ignored_when_configured(self):
+    response = {"promptFeedback": {"blockReason": "SAFETY"}}
+    self.assertEqual(self._parse(response, self.ignore_cfg), {0: ""})
+
+  def test_genuinely_empty_response_without_diagnostic_stays_empty(self):
+    response = {
+        "candidates": [{
+            "finishReason": "STOP",
+            "content": {"role": "model", "parts": []},
+        }]
+    }
+    self.assertEqual(self._parse(response, self.cfg), {0: ""})
+
+  def test_unspecified_reasons_are_not_treated_as_blocked(self):
+    # The zero enum value means the service set no reason; it is not a block.
+    responses = (
+        {
+            "candidates": [{
+                "finishReason": "FINISH_REASON_UNSPECIFIED",
+                "content": {"role": "model", "parts": []},
+            }]
+        },
+        {"promptFeedback": {"blockReason": "BLOCKED_REASON_UNSPECIFIED"}},
+        {"promptFeedback": {"blockReason": "BLOCK_REASON_UNSPECIFIED"}},
+    )
+    for response in responses:
+      self.assertEqual(self._parse(response, self.cfg), {0: ""})
 
 
 class BatchConfigValidationTest(parameterized.TestCase):

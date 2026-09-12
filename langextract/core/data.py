@@ -45,6 +45,8 @@ class AlignmentStatus(enum.Enum):
   MATCH_GREATER = "match_greater"
   MATCH_LESSER = "match_lesser"
   MATCH_FUZZY = "match_fuzzy"
+  # Fallback alignment when token-based matching fails but raw substring match succeeds.
+  MATCH_SUBSTRING = "match_substring"
 
 
 @dataclasses.dataclass

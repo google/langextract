@@ -108,7 +108,12 @@ def extract(
       format_type: The format type for the output (JSON or YAML).
       max_char_buffer: Max number of characters for inference.
       temperature: The sampling temperature for generation. When None (default),
-        uses the model's default temperature. Set to 0.0 for deterministic output
+        uses the model's default temperature. When 'config' is provided, an
+        explicit temperature is merged into config.provider_kwargs and takes
+        precedence over any temperature already set there; the caller's
+        ModelConfig is not mutated. When 'model' is provided the model is
+        already constructed, so temperature cannot be applied and a UserWarning
+        is emitted. Set to 0.0 for deterministic output
         or higher values for more variation.
       fence_output: Whether to expect/generate fenced output (```json or
         ```yaml). When True, the model is prompted to generate fenced output and
@@ -166,9 +171,13 @@ def extract(
         mentioned in the previous chunk). Defaults to None (disabled).
       config: Model configuration to use for extraction. Takes precedence over
         model_id, api_key, and language_model_type parameters. When both model
-        and config are provided, model takes precedence.
+        and config are provided, model takes precedence. An explicit
+        'temperature' argument is merged into config.provider_kwargs and wins
+        over a temperature already present there.
       model: Pre-configured language model to use for extraction. Takes
-        precedence over all other parameters including config.
+        precedence over all other parameters including config. Because the
+        instance is already built, 'temperature' cannot be applied to it and is
+        reported via a UserWarning instead of being silently dropped.
       output_schema: Optional JSON schema for LangExtract's raw JSON output
         envelope. It replaces example-derived provider constraints, while
         examples still guide the prompt when supplied. Use `lx.schema` helpers
@@ -281,6 +290,14 @@ def extract(
           UserWarning,
           stacklevel=2,
       )
+    if temperature is not None:
+      warnings.warn(
+          "'temperature' is ignored when 'model' is provided. Set the "
+          "temperature on the model instance before passing it to extract(), "
+          "or pass 'config' instead so that 'temperature' can be forwarded.",
+          UserWarning,
+          stacklevel=2,
+      )
   elif config:
     if use_schema_constraints and output_schema is None:
       warnings.warn(
@@ -288,6 +305,18 @@ def extract(
           "Or pass output_schema=... for an explicit schema.",
           UserWarning,
           stacklevel=2,
+      )
+
+    if temperature is not None:
+      # An explicit 'temperature' kwarg wins over a temperature carried in
+      # config.provider_kwargs. Replace rather than mutate so the caller's
+      # ModelConfig is left untouched and stays reusable.
+      config = dataclasses.replace(
+          config,
+          provider_kwargs={
+              **(config.provider_kwargs or {}),
+              "temperature": temperature,
+          },
       )
 
     language_model = factory.create_model(

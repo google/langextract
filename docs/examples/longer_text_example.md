@@ -163,6 +163,49 @@ LangExtract uses JSONL, a human-readable format ideal for language model data. E
 ### Optimal long context management
 While single-inference approaches can be powerful, their accuracy may be affected by distant context. LangExtract uses smart chunking strategies that respect text delimiters (such as paragraph breaks) to keep context intact and well-formed for the model. Users can configure context sizes (`max_char_buffer`) combined with parallel processing (`max_workers`) to maintain extraction quality across large documents. Multiple sequential extraction passes further enhance sensitivity by capturing entities that might be missed in any single run due to the stochastic nature of language model generation.
 
+### Structured inputs such as long tables
+
+Documents with long HTML or Markdown tables can still be split across chunks,
+especially when a single table is larger than `max_char_buffer`. In that case,
+later chunks may contain table rows without the header row or nearby section
+context, which can make column meanings ambiguous for the model.
+
+For table-heavy inputs, prefer a preprocessing step that preserves table
+structure in plain text before calling LangExtract. Two reliable patterns are:
+
+- Convert each HTML table to Markdown or another row-oriented text format so
+  headers and cells remain readable after chunking.
+- If a table must be split, repeat the column header and any section title before
+  each table segment, or process each table/section as a separate
+  `lx.data.Document`.
+
+You can also use `context_window_chars` to include the tail of the previous
+chunk in the next prompt. This helps preserve header or section context when a
+chunk boundary falls inside a table.
+
+```python
+table_context = (
+    "The input contains table rows. Use the nearest visible column headers "
+    "and section title to interpret each row, and extract exact cell text."
+)
+
+result = lx.extract(
+    text_or_documents=table_text,
+    prompt_description=prompt,
+    examples=examples,
+    model_id="gemini-3.5-flash",
+    max_char_buffer=2500,
+    context_window_chars=1200,
+    additional_context=table_context,
+)
+```
+
+When choosing `max_char_buffer`, run a small sample first and inspect the
+resulting visualization. Increase the buffer when complete rows and their
+headers fit comfortably in one chunk; use a context window when some boundary
+overlap is useful, but avoid making it so large that every request repeats most
+of the previous chunk.
+
 ### Enhanced accuracy through chunking
 The chunked processing approach can improve extraction quality over a single inference pass on a large document because each chunk uses a smaller, more manageable context size. This helps the model focus on the most relevant information and prevents interference from distant context. While the overall latency and time required remain similar due to parallelization, the extraction quality can be substantially higher with better entity coverage and more accurate attribute assignment across the entire document.¹
 

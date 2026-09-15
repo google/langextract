@@ -53,6 +53,16 @@ _KEY_IDX = "idx-"
 _CACHE_PREFIX = "cache"
 _UNSET = object()
 
+# Vertex JSON can encode protobuf enums by name or number.
+_UNSPECIFIED_REASONS = (
+    0,
+    "",
+    "FINISH_REASON_UNSPECIFIED",
+    "BLOCKED_REASON_UNSPECIFIED",
+    "BLOCK_REASON_UNSPECIFIED",
+)
+_STOP_REASONS = (1, "STOP")
+
 
 def _json_default(obj: Any) -> Any:
   """Serialize non-JSON-native objects used in provider configurations."""
@@ -76,7 +86,8 @@ class BatchConfig:
     timeout: Maximum seconds to wait for job completion.
     max_prompts_per_job: Max prompts allowed in one batch job.
     ignore_item_errors: If True, continue on per-item errors.
-    enable_caching: If True, use GCS-based caching for inference results.
+    enable_caching: If True, cache inference results in GCS. Strict runs
+      recheck empty entries, which may represent previously ignored failures.
     retention_days: Days to keep GCS data (default 30). None for permanent.
   """
 
@@ -556,50 +567,30 @@ def _extract_text(resp: _TextResponse | dict[str, Any] | None) -> str | None:
   return text if isinstance(text, str) else None
 
 
-_UNSPECIFIED_REASONS = frozenset((
-    "FINISH_REASON_UNSPECIFIED",
-    "BLOCKED_REASON_UNSPECIFIED",
-    "BLOCK_REASON_UNSPECIFIED",
-))
-
-
 def _no_text_block_diagnostic(resp: Any) -> str | None:
-  """Return a block diagnostic when a textless response was refused.
+  """Describe a block or abnormal finish in a textless batch response."""
+  prompt_feedback = _safe_get_nested(
+      resp, "promptFeedback"
+  ) or _safe_get_nested(resp, "prompt_feedback")
+  block_reason = _safe_get_nested(
+      prompt_feedback, "blockReason"
+  ) or _safe_get_nested(prompt_feedback, "block_reason")
+  if (
+      type(block_reason) in (str, int)
+      and block_reason not in _UNSPECIFIED_REASONS
+  ):
+    return f"block_reason={block_reason}"
 
-  A safety-blocked or refused batch item has no extractable text, so it is
-  indistinguishable from a genuinely empty generation by ``_extract_text``
-  alone. Vertex batch output uses REST-style (camelCase) keys, while inline
-  responses may arrive snake_case; accept both.
-
-  Args:
-    resp: The parsed ``response`` object from a batch output JSONL line.
-
-  Returns:
-    A human-readable reason when the response itself signals a block/refusal,
-    or None when it simply lacks text without a diagnostic.
-  """
-  if not isinstance(resp, dict):
-    return None
-
-  prompt_feedback = resp.get("promptFeedback") or resp.get("prompt_feedback")
-  if isinstance(prompt_feedback, dict):
-    block_reason = prompt_feedback.get("blockReason") or prompt_feedback.get(
-        "block_reason"
-    )
-    # The zero enum value means the service reported no reason, not a block.
-    if block_reason and block_reason not in _UNSPECIFIED_REASONS:
-      return f"block_reason={block_reason}"
-
-  candidates = resp.get("candidates")
-  if isinstance(candidates, list) and candidates:
-    candidate = candidates[0]
-    if isinstance(candidate, dict):
-      finish_reason = candidate.get("finishReason") or candidate.get(
-          "finish_reason"
-      )
-      if finish_reason and finish_reason not in _UNSPECIFIED_REASONS:
-        if finish_reason != "STOP":
-          return f"finish_reason={finish_reason}"
+  candidate = _safe_get_nested(resp, "candidates", 0)
+  finish_reason = _safe_get_nested(
+      candidate, "finishReason"
+  ) or _safe_get_nested(candidate, "finish_reason")
+  if (
+      type(finish_reason) in (str, int)
+      and finish_reason not in _UNSPECIFIED_REASONS
+      and finish_reason not in _STOP_REASONS
+  ):
+    return f"finish_reason={finish_reason}"
   return None
 
 
@@ -659,6 +650,12 @@ def _parse_batch_line(
   except json.JSONDecodeError:
     return
 
+  status = obj.get("status")
+  if isinstance(status, str) and status and not cfg.ignore_item_errors:
+    raise exceptions.InferenceRuntimeError(
+        f"Batch item error: {status}", provider="Gemini"
+    )
+
   error = obj.get("error")
   if error and not cfg.ignore_item_errors:
     code = error.get("code") if isinstance(error, dict) else None
@@ -667,15 +664,11 @@ def _parse_batch_line(
 
   resp = obj.get("response", {})
   text = _extract_text(resp) or ""
-
   if not text and not cfg.ignore_item_errors:
-    # A safety-blocked or refused item has no text but still reports a block
-    # reason in the response. Surface that instead of silently treating the
-    # item as a successful empty extraction.
     diagnostic = _no_text_block_diagnostic(resp)
     if diagnostic:
       raise exceptions.InferenceRuntimeError(
-          f"Batch item blocked or refused: {diagnostic}", provider="Gemini"
+          f"Batch item returned no text: {diagnostic}", provider="Gemini"
       )
 
   key = obj.get("key", "")
@@ -858,6 +851,9 @@ def infer_batch(
       })
 
     cached_results = cache.get_multi(key_data_list)
+    if not cfg.ignore_item_errors:
+      # Empty cache entries may be ignored failures saved by an earlier run.
+      cached_results = {i: text for i, text in cached_results.items() if text}
 
     for idx, prompt in enumerate(prompts):
       if idx not in cached_results:

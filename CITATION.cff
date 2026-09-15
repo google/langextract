@@ -31,8 +31,8 @@ keywords:
   - machine-learning
   - python
 license: Apache-2.0
-version: 1.6.0
-date-released: 2026-07-02
+version: 1.7.0
+date-released: 2026-09-13
 
 # The concept DOI here is deliberate: it needs no per-release update and always
 # resolves. Zenodo mints a version DOI only on `release: published`, after the

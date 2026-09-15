@@ -19,12 +19,10 @@ They should run in CI after all other tests pass.
 """
 
 import functools
-import json
 import os
 import re
 import textwrap
 import time
-from typing import Any
 import unittest
 from unittest import mock
 import uuid
@@ -35,7 +33,6 @@ import google.auth.exceptions
 import google.genai.errors
 import pytest
 
-from langextract import data
 import langextract as lx
 from langextract.core import tokenizer as tokenizer_lib
 from langextract.providers import gemini_batch as gb
@@ -57,7 +54,7 @@ RUN_OPENAI_BATCH_LIVE_TESTS = (
 VERTEX_PROJECT = os.environ.get("VERTEX_PROJECT") or os.environ.get(
     "GOOGLE_CLOUD_PROJECT"
 )
-VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")
+VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us")
 
 
 def has_vertex_ai_credentials():
@@ -308,77 +305,6 @@ def assert_valid_char_intervals(test_case, result):
 class TestLiveAPIGemini(unittest.TestCase):
   """Tests using real Gemini API."""
 
-  def _check_cached_result(self, result_json: dict[str, Any]) -> bool:
-    """Check if cached result contains expected medication data.
-
-    Args:
-      result_json: The raw JSON dict from the cache file.
-                   Expected format: {"text": "JSON_STRING_OF_RESULT"}
-
-    Returns:
-      True if the result contains valid medication extractions, False otherwise.
-    """
-    try:
-      text_content = result_json.get("text")
-      if not isinstance(text_content, str):
-        return False
-
-      inner_json = json.loads(text_content)
-      if not isinstance(inner_json, dict):
-        return False
-
-      extractions_data = inner_json.get(data.EXTRACTIONS_KEY)
-      if not isinstance(extractions_data, list):
-        return False
-
-      extractions = []
-      for item in extractions_data:
-        if isinstance(item, dict):
-          clean_item = {k: v for k, v in item.items() if not k.startswith("_")}
-          extractions.append(data.Extraction(**clean_item))
-
-      doc = data.AnnotatedDocument(
-          text=inner_json.get("text"), extractions=extractions
-      )
-
-      if not doc.extractions:
-        return False
-
-      # Check for specific content
-      medication_texts = extract_by_class(doc, _CLASS_MEDICATION)
-      dosage_texts = extract_by_class(doc, _CLASS_DOSAGE)
-
-      has_lisinopril = any("Lisinopril" in t for t in medication_texts)
-      has_10mg = any("10mg" in t for t in dosage_texts)
-
-      return has_lisinopril and has_10mg
-
-    except (json.JSONDecodeError, TypeError, ValueError):
-      return False
-
-  def _verify_gcs_cache_content(self, bucket_name):
-    """Verify that GCS cache contains expected structured results."""
-    cache = gb.GCSBatchCache(bucket_name, project=VERTEX_PROJECT)
-    found_content = False
-
-    # Use iter_items() to check cache content
-    items = list(cache.iter_items())
-    self.assertTrue(len(items) > 0, "No cache files found in GCS bucket")
-
-    for _, text in items:
-      try:
-        result_json = json.loads(text)
-        if self._check_cached_result(result_json):
-          found_content = True
-          break
-      except (json.JSONDecodeError, TypeError, ValueError):
-        continue
-
-    self.assertTrue(
-        found_content,
-        "Could not find expected structured result in GCS cache files",
-    )
-
   @skip_if_no_gemini
   @live_api
   @retry_on_transient_errors(max_retries=2)
@@ -589,15 +515,7 @@ class TestLiveAPIGemini(unittest.TestCase):
   @pytest.mark.vertex_ai
   @mock.patch.object(gb, "infer_batch", wraps=gb.infer_batch, autospec=True)
   def test_batch_extraction_vertex_gcs(self, mock_infer_batch):
-    """Test extraction using Vertex AI Batch API with GCS.
-
-    This test runs a real Vertex AI Batch job and will take time to complete.
-    It is skipped unless VERTEX_PROJECT is set.
-
-    We wrap `infer_batch` to verify that:
-    - Batch API is actually called (not falling back to real-time API)
-    - Schema dict is passed (non-None) to the batch function
-    """
+    """Extract grounded results through a real schema-constrained batch job."""
 
     prompt = textwrap.dedent("""\
         Extract medication information including medication name, dosage, route, frequency,
@@ -644,6 +562,8 @@ class TestLiveAPIGemini(unittest.TestCase):
         "threshold": 2,
         "poll_interval": 1,  # Fast polling for test
         "timeout": 900,  # 15 minutes for actual batch job completion
+        "enable_caching": False,
+        "retention_days": None,  # Preserve existing bucket lifecycle rules.
     }
 
     batch_result = lx.extract(
@@ -655,12 +575,7 @@ class TestLiveAPIGemini(unittest.TestCase):
     )
 
     mock_infer_batch.assert_called_once()
-    call_args = mock_infer_batch.call_args
-    schema_dict_arg = call_args.kwargs.get("schema_dict")
-    self.assertIsNotNone(
-        schema_dict_arg,
-        "schema_dict should be passed to batch API (not None)",
-    )
+    self.assertIsNotNone(mock_infer_batch.call_args.kwargs["schema_config"])
 
     self.assertIsInstance(batch_result, list)
     self.assertEqual(
@@ -707,13 +622,9 @@ class TestLiveAPIGemini(unittest.TestCase):
   @skip_if_no_vertex
   @live_api
   @pytest.mark.vertex_ai
-  def test_batch_caching_live(self):
-    """Test batch caching with real Vertex AI Batch API.
-
-    Verifies that:
-    1. First run populates GCS cache
-    2. Second run uses cache (returns same results faster)
-    """
+  @mock.patch.object(gb, "_submit_file", wraps=gb._submit_file, autospec=True)
+  def test_batch_caching_live(self, mock_submit):
+    """A second extraction reuses GCS results without submitting another job."""
     prompt = "Extract the medication: Patient takes 10mg Lisinopril."
     examples = get_basic_medication_examples()
 
@@ -737,10 +648,9 @@ class TestLiveAPIGemini(unittest.TestCase):
         "poll_interval": 1,
         "timeout": 900,
         "enable_caching": True,
+        "retention_days": None,  # Preserve existing bucket lifecycle rules.
     }
 
-    print("\nStarting first batch run (API)...")
-    start_time = time.time()
     results1 = list(
         lx.extract(
             text_or_documents=documents,
@@ -750,11 +660,13 @@ class TestLiveAPIGemini(unittest.TestCase):
             language_model_params=language_model_params,
         )
     )
-    duration1 = time.time() - start_time
-    print(f"First run took {duration1:.2f}s")
+    mock_submit.assert_called_once()
+    self.assertEqual(len(results1), len(documents))
 
-    print("Starting second batch run (Cache)...")
-    start_time = time.time()
+    mock_submit.reset_mock()
+    mock_submit.side_effect = AssertionError(
+        "A cache hit must not submit a new batch job"
+    )
     results2 = list(
         lx.extract(
             text_or_documents=documents,
@@ -764,20 +676,17 @@ class TestLiveAPIGemini(unittest.TestCase):
             language_model_params=language_model_params,
         )
     )
-    duration2 = time.time() - start_time
-    print(f"Second run took {duration2:.2f}s")
+    mock_submit.assert_not_called()
 
     self.assertEqual(len(results1), len(results2))
-    for r1, r2 in zip(results1, results2):
-      self.assertEqual(r1.text, r2.text)
-      self.assertEqual(len(r1.extractions), len(r2.extractions))
-
-    self.assertLess(duration2, 10.0, "Second run took too long for cache hit")
-
-    print("\nVerifying GCS cache content...")
-    bucket_name = gb._get_bucket_name(VERTEX_PROJECT, VERTEX_LOCATION)
-    print(f"Checking bucket: {bucket_name}")
-    self._verify_gcs_cache_content(bucket_name)
+    for first_result, cached_result in zip(results1, results2):
+      self.assertEqual(first_result.text, cached_result.text)
+      self.assertIn(
+          "Lisinopril", extract_by_class(first_result, _CLASS_MEDICATION)
+      )
+      self.assertIn("10mg", extract_by_class(first_result, _CLASS_DOSAGE))
+      self.assertEqual(first_result.extractions, cached_result.extractions)
+      assert_valid_char_intervals(self, cached_result)
 
 
 class TestCrossChunkContext(unittest.TestCase):

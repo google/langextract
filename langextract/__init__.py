@@ -26,11 +26,13 @@ from typing import Any, Dict
 
 from langextract import visualization
 from langextract.extraction import extract as extract_func
+from langextract.extraction import Extractor
 
 __all__ = [
     # Public convenience functions (thin wrappers)
     "extract",
     "visualize",
+    "Extractor",
     # Submodules exposed lazily on attribute access for ergonomics:
     "annotation",
     "data",

@@ -175,6 +175,8 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
     .lx-gif-optimized .lx-current-highlight { text-decoration-thickness: 4px; }
     </style>""")
 
+_HTML_CHARSET_META = '<meta charset="UTF-8">\n'
+
 
 def _assign_colors(extractions: list[data.Extraction]) -> dict[str, str]:
   """Assigns a background colour to each extraction class.
@@ -600,7 +602,7 @@ def visualize(
         '<div class="lx-animated-wrapper"><p>No valid extractions to'
         ' animate.</p></div>'
     )
-    full_html = _VISUALIZATION_CSS + empty_html
+    full_html = _HTML_CHARSET_META + _VISUALIZATION_CSS + empty_html
     if HTML is not None and _is_jupyter():
       return HTML(full_html)
     return full_html
@@ -615,7 +617,7 @@ def visualize(
       show_legend,
   )
 
-  full_html = _VISUALIZATION_CSS + visualization_html
+  full_html = _HTML_CHARSET_META + _VISUALIZATION_CSS + visualization_html
 
   # Apply GIF optimizations if requested
   if gif_optimized:

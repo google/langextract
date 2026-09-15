@@ -42,6 +42,350 @@ def _has_preconfigured_output_schema(model: typing.Any) -> bool:
   )
 
 
+class Extractor:  # pylint: disable=too-many-instance-attributes
+  """Reusable extraction pipeline.
+
+  Builds the prompt, language model, and resolver once so the same setup can
+  be applied to many inputs without repeating that work on every call.
+
+  Example:
+    extractor = lx.Extractor(
+        prompt_description=prompt,
+        examples=examples,
+        model_id="gemini-3.5-flash",
+    )
+    first = extractor.extract(text1)
+    second = extractor.extract(text2)
+  """
+
+  def __init__(
+      self,
+      prompt_description: str | None = None,
+      examples: typing.Sequence[typing.Any] | None = None,
+      model_id: str = "gemini-3.5-flash",
+      api_key: str | None = None,
+      language_model_type: typing.Type[typing.Any] | None = None,
+      format_type: typing.Any = None,
+      max_char_buffer: int = 1000,
+      temperature: float | None = None,
+      fence_output: bool | None = None,
+      use_schema_constraints: bool = True,
+      batch_length: int = 10,
+      max_workers: int = 10,
+      resolver_params: dict | None = None,
+      language_model_params: dict | None = None,
+      debug: bool = False,
+      model_url: str | None = None,
+      extraction_passes: int = 1,
+      context_window_chars: int | None = None,
+      config: typing.Any = None,
+      model: typing.Any = None,
+      *,
+      output_schema: core_types.JsonSchema | None = None,
+      prompt_validation_level: pv.PromptValidationLevel = (
+          pv.PromptValidationLevel.WARNING
+      ),
+      prompt_validation_strict: bool = False,
+      show_progress: bool = True,
+      tokenizer: tokenizer_lib.Tokenizer | None = None,
+  ):
+    """Creates a reusable extractor.
+
+    Args are the same as `extract()`, except the text input and per-call
+    options (`additional_context`, `fetch_urls`) are passed to `extract()`.
+    """
+    schema_active = (
+        output_schema is not None or _has_preconfigured_output_schema(model)
+    )
+    if not examples and not schema_active:
+      raise ValueError(
+          "Examples are required for reliable extraction. Please provide at"
+          " least one ExampleData object with sample extractions, or provide"
+          " output_schema."
+      )
+    examples = list(examples or [])
+    # Reject before any model mutation so a caller-provided model is not left
+    # with a schema or fence override from a failed call.
+    if schema_active and fence_output is True:
+      raise exceptions.output_schema_fence_error()
+
+    if prompt_validation_level is not pv.PromptValidationLevel.OFF:
+      policy_kwargs = {}
+      if resolver_params:
+        for field in dataclasses.fields(pv.AlignmentPolicy):
+          val = resolver_params.get(field.name)
+          if val is not None:
+            policy_kwargs[field.name] = val
+      report = pv.validate_prompt_alignment(
+          examples=examples,
+          aligner=resolver.WordAligner(),
+          policy=pv.AlignmentPolicy(**policy_kwargs),
+          tokenizer=tokenizer,
+      )
+      pv.handle_alignment_report(
+          report,
+          level=prompt_validation_level,
+          strict_non_exact=prompt_validation_strict,
+      )
+
+    if debug:
+      # pylint: disable=import-outside-toplevel
+      from langextract.core import debug_utils
+
+      debug_utils.configure_debug_logging()
+
+    if format_type is None:
+      format_type = data.FormatType.JSON
+
+    if max_workers is not None and batch_length < max_workers:
+      warnings.warn(
+          f"batch_length ({batch_length}) < max_workers ({max_workers}). "
+          f"Only {batch_length} workers will be used. "
+          "Set batch_length >= max_workers for optimal parallelization.",
+          UserWarning,
+      )
+
+    prompt_template = prompting.PromptTemplateStructured(
+        description=prompt_description
+    )
+    prompt_template.examples.extend(examples)
+
+    language_model: base_model.BaseLanguageModel | None = None
+
+    if model:
+      language_model = model
+      if output_schema is not None:
+        if not isinstance(language_model, base_model.BaseLanguageModel):
+          raise exceptions.unsupported_output_schema_error(
+              type(language_model).__name__
+          )
+        language_model.apply_output_schema(output_schema)
+      if fence_output is not None:
+        language_model.set_fence_output(fence_output)
+      if use_schema_constraints and not schema_active:
+        warnings.warn(
+            "'use_schema_constraints' is ignored when 'model' is provided. "
+            "The model should already be configured with schema constraints.",
+            UserWarning,
+            stacklevel=2,
+        )
+    elif config:
+      if use_schema_constraints and output_schema is None:
+        warnings.warn(
+            "With 'config', schema constraints are still applied via examples. "
+            "Or pass output_schema=... for an explicit schema.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+      language_model = factory.create_model(
+          config=config,
+          examples=prompt_template.examples if use_schema_constraints else None,
+          use_schema_constraints=use_schema_constraints,
+          fence_output=fence_output,
+          output_schema=output_schema,
+      )
+    else:
+      if language_model_type is not None:
+        warnings.warn(
+            "'language_model_type' is deprecated and will be removed in"
+            " v2.0.0. Use model, config, or model_id parameters instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+
+      base_lm_kwargs: dict[str, typing.Any] = {
+          "api_key": api_key,
+          "format_type": format_type,
+          "temperature": temperature,
+          "model_url": model_url,
+          "base_url": model_url,
+          "max_workers": max_workers,
+      }
+
+      # TODO(v2.0.0): Remove gemini_schema parameter
+      if "gemini_schema" in (language_model_params or {}):
+        warnings.warn(
+            "'gemini_schema' is deprecated. Schema constraints are now "
+            "automatically handled. This parameter will be ignored.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        language_model_params = dict(language_model_params or {})
+        language_model_params.pop("gemini_schema", None)
+
+      base_lm_kwargs.update(language_model_params or {})
+      filtered_kwargs = {
+          k: v for k, v in base_lm_kwargs.items() if v is not None
+      }
+
+      config = factory.ModelConfig(
+          model_id=model_id, provider_kwargs=filtered_kwargs
+      )
+
+      language_model = factory.create_model(
+          config=config,
+          examples=prompt_template.examples if use_schema_constraints else None,
+          use_schema_constraints=use_schema_constraints,
+          fence_output=fence_output,
+          output_schema=output_schema,
+      )
+
+    format_handler, remaining_params = fh.FormatHandler.from_resolver_params(
+        resolver_params=resolver_params,
+        base_format_type=format_type,
+        base_use_fences=language_model.requires_fence_output,
+        base_attribute_suffix=data.ATTRIBUTE_SUFFIX,
+        base_use_wrapper=True,
+        base_wrapper_key=data.EXTRACTIONS_KEY,
+    )
+
+    if output_schema is not None or _has_preconfigured_output_schema(
+        language_model
+    ):
+      output_schema_lib.validate_output_schema_format_handler(format_handler)
+
+    if language_model.schema is not None:
+      language_model.schema.validate_format(format_handler)
+
+    alignment_kwargs = {}
+    for key in resolver.ALIGNMENT_PARAM_KEYS:
+      val = remaining_params.pop(key, None)
+      if val is not None:
+        alignment_kwargs[key] = val
+    alignment_kwargs.setdefault("suppress_parse_errors", True)
+
+    effective_params = {"format_handler": format_handler, **remaining_params}
+
+    try:
+      res = resolver.Resolver(**effective_params)
+    except TypeError as e:
+      msg = str(e)
+      if (
+          "unexpected keyword argument" in msg
+          or "got an unexpected keyword argument" in msg
+      ):
+        raise TypeError(
+            f"Unknown key in resolver_params; check spelling: {e}"
+        ) from e
+      raise
+
+    self._annotator = annotation.Annotator(
+        language_model=language_model,
+        prompt_template=prompt_template,
+        format_handler=format_handler,
+    )
+    self._resolver = res
+    self._alignment_kwargs = alignment_kwargs
+    self._max_char_buffer = max_char_buffer
+    self._batch_length = batch_length
+    self._max_workers = max_workers
+    self._debug = debug
+    self._extraction_passes = extraction_passes
+    self._context_window_chars = context_window_chars
+    self._show_progress = show_progress
+    self._tokenizer = tokenizer
+
+  def extract(
+      self,
+      text_or_documents: str | Iterable[data.Document],
+      additional_context: str | None = None,
+      *,
+      fetch_urls: bool = False,
+      max_char_buffer: int | None = None,
+      batch_length: int | None = None,
+      max_workers: int | None = None,
+      extraction_passes: int | None = None,
+      context_window_chars: int | None = None,
+      show_progress: bool | None = None,
+      debug: bool | None = None,
+  ) -> list[data.AnnotatedDocument] | data.AnnotatedDocument:
+    """Runs extraction on text or documents.
+
+    Args:
+      text_or_documents: Source text, or an iterable of Document objects.
+      additional_context: Optional extra context for this call only.
+      fetch_urls: If True, http(s) strings are fetched. Default False.
+      max_char_buffer: Override the value set on the extractor.
+      batch_length: Override the value set on the extractor.
+      max_workers: Override the value set on the extractor.
+      extraction_passes: Override the value set on the extractor.
+      context_window_chars: Override the value set on the extractor.
+      show_progress: Override the value set on the extractor.
+      debug: Override the value set on the extractor.
+
+    Returns:
+      An AnnotatedDocument for string input, or a list for document iterables.
+    """
+    if (
+        fetch_urls
+        and isinstance(text_or_documents, str)
+        and io.is_url(text_or_documents)
+    ):
+      text_or_documents = io.download_text_from_url(text_or_documents)
+
+    max_char_buffer = (
+        self._max_char_buffer if max_char_buffer is None else max_char_buffer
+    )
+    batch_length = self._batch_length if batch_length is None else batch_length
+    max_workers = self._max_workers if max_workers is None else max_workers
+    extraction_passes = (
+        self._extraction_passes
+        if extraction_passes is None
+        else extraction_passes
+    )
+    context_window_chars = (
+        self._context_window_chars
+        if context_window_chars is None
+        else context_window_chars
+    )
+    show_progress = (
+        self._show_progress if show_progress is None else show_progress
+    )
+    debug = self._debug if debug is None else debug
+
+    if isinstance(text_or_documents, str):
+      return self._annotator.annotate_text(
+          text=text_or_documents,
+          resolver=self._resolver,
+          max_char_buffer=max_char_buffer,
+          batch_length=batch_length,
+          additional_context=additional_context,
+          debug=debug,
+          extraction_passes=extraction_passes,
+          context_window_chars=context_window_chars,
+          show_progress=show_progress,
+          max_workers=max_workers,
+          tokenizer=self._tokenizer,
+          **self._alignment_kwargs,
+      )
+
+    if additional_context is not None:
+      documents = (
+          doc.with_additional_context(additional_context)
+          if doc.additional_context is None
+          else doc
+          for doc in text_or_documents
+      )
+    else:
+      documents = text_or_documents
+    return list(
+        self._annotator.annotate_documents(
+            documents=documents,
+            resolver=self._resolver,
+            max_char_buffer=max_char_buffer,
+            batch_length=batch_length,
+            debug=debug,
+            extraction_passes=extraction_passes,
+            context_window_chars=context_window_chars,
+            show_progress=show_progress,
+            max_workers=max_workers,
+            tokenizer=self._tokenizer,
+            **self._alignment_kwargs,
+        )
+    )
+
+
 def extract(
     text_or_documents: str | Iterable[data.Document],
     prompt_description: str | None = None,
@@ -79,6 +423,9 @@ def extract(
   language model based on the instructions in prompt_description and guided by
   examples. Supports sequential extraction passes to improve recall at the cost
   of additional API calls.
+
+  For repeated extractions with the same prompt and examples, prefer
+  `Extractor`, which builds the pipeline once and reuses it.
 
   Args:
       text_or_documents: The source text to extract information from, or an
@@ -199,231 +546,34 @@ def extract(
         fails.
       pv.PromptAlignmentError: If validation fails in ERROR mode.
   """
-  schema_active = output_schema is not None or _has_preconfigured_output_schema(
-      model
-  )
-  if not examples and not schema_active:
-    raise ValueError(
-        "Examples are required for reliable extraction. Please provide at least"
-        " one ExampleData object with sample extractions, or provide"
-        " output_schema."
-    )
-  examples = list(examples or [])
-  # Reject before any model mutation so a caller-provided model is not left
-  # with a schema or fence override from a failed call.
-  if schema_active and fence_output is True:
-    raise exceptions.output_schema_fence_error()
-
-  if prompt_validation_level is not pv.PromptValidationLevel.OFF:
-    policy_kwargs = {}
-    if resolver_params:
-      for field in dataclasses.fields(pv.AlignmentPolicy):
-        val = resolver_params.get(field.name)
-        if val is not None:
-          policy_kwargs[field.name] = val
-    report = pv.validate_prompt_alignment(
-        examples=examples,
-        aligner=resolver.WordAligner(),
-        policy=pv.AlignmentPolicy(**policy_kwargs),
-        tokenizer=tokenizer,
-    )
-    pv.handle_alignment_report(
-        report,
-        level=prompt_validation_level,
-        strict_non_exact=prompt_validation_strict,
-    )
-
-  if debug:
-    # pylint: disable=import-outside-toplevel
-    from langextract.core import debug_utils
-
-    debug_utils.configure_debug_logging()
-
-  if format_type is None:
-    format_type = data.FormatType.JSON
-
-  if max_workers is not None and batch_length < max_workers:
-    warnings.warn(
-        f"batch_length ({batch_length}) < max_workers ({max_workers}). "
-        f"Only {batch_length} workers will be used. "
-        "Set batch_length >= max_workers for optimal parallelization.",
-        UserWarning,
-    )
-
-  if (
-      fetch_urls
-      and isinstance(text_or_documents, str)
-      and io.is_url(text_or_documents)
-  ):
-    text_or_documents = io.download_text_from_url(text_or_documents)
-
-  prompt_template = prompting.PromptTemplateStructured(
-      description=prompt_description
-  )
-  prompt_template.examples.extend(examples)
-
-  language_model: base_model.BaseLanguageModel | None = None
-
-  if model:
-    language_model = model
-    if output_schema is not None:
-      if not isinstance(language_model, base_model.BaseLanguageModel):
-        raise exceptions.unsupported_output_schema_error(
-            type(language_model).__name__
-        )
-      language_model.apply_output_schema(output_schema)
-    if fence_output is not None:
-      language_model.set_fence_output(fence_output)
-    if use_schema_constraints and not schema_active:
-      warnings.warn(
-          "'use_schema_constraints' is ignored when 'model' is provided. "
-          "The model should already be configured with schema constraints.",
-          UserWarning,
-          stacklevel=2,
-      )
-  elif config:
-    if use_schema_constraints and output_schema is None:
-      warnings.warn(
-          "With 'config', schema constraints are still applied via examples. "
-          "Or pass output_schema=... for an explicit schema.",
-          UserWarning,
-          stacklevel=2,
-      )
-
-    language_model = factory.create_model(
-        config=config,
-        examples=prompt_template.examples if use_schema_constraints else None,
-        use_schema_constraints=use_schema_constraints,
-        fence_output=fence_output,
-        output_schema=output_schema,
-    )
-  else:
-    if language_model_type is not None:
-      warnings.warn(
-          "'language_model_type' is deprecated and will be removed in v2.0.0. "
-          "Use model, config, or model_id parameters instead.",
-          FutureWarning,
-          stacklevel=2,
-      )
-
-    base_lm_kwargs: dict[str, typing.Any] = {
-        "api_key": api_key,
-        "format_type": format_type,
-        "temperature": temperature,
-        "model_url": model_url,
-        "base_url": model_url,
-        "max_workers": max_workers,
-    }
-
-    # TODO(v2.0.0): Remove gemini_schema parameter
-    if "gemini_schema" in (language_model_params or {}):
-      warnings.warn(
-          "'gemini_schema' is deprecated. Schema constraints are now "
-          "automatically handled. This parameter will be ignored.",
-          FutureWarning,
-          stacklevel=2,
-      )
-      language_model_params = dict(language_model_params or {})
-      language_model_params.pop("gemini_schema", None)
-
-    base_lm_kwargs.update(language_model_params or {})
-    filtered_kwargs = {k: v for k, v in base_lm_kwargs.items() if v is not None}
-
-    config = factory.ModelConfig(
-        model_id=model_id, provider_kwargs=filtered_kwargs
-    )
-
-    language_model = factory.create_model(
-        config=config,
-        examples=prompt_template.examples if use_schema_constraints else None,
-        use_schema_constraints=use_schema_constraints,
-        fence_output=fence_output,
-        output_schema=output_schema,
-    )
-
-  format_handler, remaining_params = fh.FormatHandler.from_resolver_params(
+  return Extractor(
+      prompt_description=prompt_description,
+      examples=examples,
+      model_id=model_id,
+      api_key=api_key,
+      language_model_type=language_model_type,
+      format_type=format_type,
+      max_char_buffer=max_char_buffer,
+      temperature=temperature,
+      fence_output=fence_output,
+      use_schema_constraints=use_schema_constraints,
+      batch_length=batch_length,
+      max_workers=max_workers,
       resolver_params=resolver_params,
-      base_format_type=format_type,
-      base_use_fences=language_model.requires_fence_output,
-      base_attribute_suffix=data.ATTRIBUTE_SUFFIX,
-      base_use_wrapper=True,
-      base_wrapper_key=data.EXTRACTIONS_KEY,
+      language_model_params=language_model_params,
+      debug=debug,
+      model_url=model_url,
+      extraction_passes=extraction_passes,
+      context_window_chars=context_window_chars,
+      config=config,
+      model=model,
+      output_schema=output_schema,
+      prompt_validation_level=prompt_validation_level,
+      prompt_validation_strict=prompt_validation_strict,
+      show_progress=show_progress,
+      tokenizer=tokenizer,
+  ).extract(
+      text_or_documents,
+      additional_context=additional_context,
+      fetch_urls=fetch_urls,
   )
-
-  if output_schema is not None or _has_preconfigured_output_schema(
-      language_model
-  ):
-    output_schema_lib.validate_output_schema_format_handler(format_handler)
-
-  if language_model.schema is not None:
-    language_model.schema.validate_format(format_handler)
-
-  # Pull alignment settings from normalized params
-  alignment_kwargs = {}
-  for key in resolver.ALIGNMENT_PARAM_KEYS:
-    val = remaining_params.pop(key, None)
-    if val is not None:
-      alignment_kwargs[key] = val
-  alignment_kwargs.setdefault("suppress_parse_errors", True)
-
-  effective_params = {"format_handler": format_handler, **remaining_params}
-
-  try:
-    res = resolver.Resolver(**effective_params)
-  except TypeError as e:
-    msg = str(e)
-    if (
-        "unexpected keyword argument" in msg
-        or "got an unexpected keyword argument" in msg
-    ):
-      raise TypeError(
-          f"Unknown key in resolver_params; check spelling: {e}"
-      ) from e
-    raise
-
-  annotator = annotation.Annotator(
-      language_model=language_model,
-      prompt_template=prompt_template,
-      format_handler=format_handler,
-  )
-
-  if isinstance(text_or_documents, str):
-    result = annotator.annotate_text(
-        text=text_or_documents,
-        resolver=res,
-        max_char_buffer=max_char_buffer,
-        batch_length=batch_length,
-        additional_context=additional_context,
-        debug=debug,
-        extraction_passes=extraction_passes,
-        context_window_chars=context_window_chars,
-        show_progress=show_progress,
-        max_workers=max_workers,
-        tokenizer=tokenizer,
-        **alignment_kwargs,
-    )
-    return result
-  else:
-    if additional_context is not None:
-      documents = (
-          doc.with_additional_context(additional_context)
-          if doc.additional_context is None
-          else doc
-          for doc in text_or_documents
-      )
-    else:
-      documents = text_or_documents
-    result = annotator.annotate_documents(
-        documents=documents,
-        resolver=res,
-        max_char_buffer=max_char_buffer,
-        batch_length=batch_length,
-        debug=debug,
-        extraction_passes=extraction_passes,
-        context_window_chars=context_window_chars,
-        show_progress=show_progress,
-        max_workers=max_workers,
-        tokenizer=tokenizer,
-        **alignment_kwargs,
-    )
-    return list(result)

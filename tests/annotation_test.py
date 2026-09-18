@@ -200,7 +200,13 @@ class AnnotatorTest(absltest.TestCase):
         text, actual_annotated_text.extractions
     )
     self.mock_language_model.infer.assert_called_once_with(
-        batch_prompts=[f"\n\nQ: {text}\nA: "],
+        batch_prompts=[
+            prompting.PromptParts(
+                prefix="\n",
+                examples="",
+                suffix=f"Q: {text}\nA: ",
+            )
+        ],
     )
 
   def test_annotate_text_without_index_suffix(self):
@@ -319,7 +325,13 @@ class AnnotatorTest(absltest.TestCase):
         text, actual_annotated_text.extractions
     )
     self.mock_language_model.infer.assert_called_once_with(
-        batch_prompts=[f"\n\nQ: {text}\nA: "],
+        batch_prompts=[
+            prompting.PromptParts(
+                prefix="\n",
+                examples="",
+                suffix=f"Q: {text}\nA: ",
+            )
+        ],
     )
 
   def test_annotate_text_with_attributes_suffix(self):
@@ -463,7 +475,13 @@ class AnnotatorTest(absltest.TestCase):
         text, actual_annotated_text.extractions
     )
     self.mock_language_model.infer.assert_called_once_with(
-        batch_prompts=[f"\n\nQ: {text}\nA: "],
+        batch_prompts=[
+            prompting.PromptParts(
+                prefix="\n",
+                examples="",
+                suffix=f"Q: {text}\nA: ",
+            )
+        ],
     )
 
   def test_annotate_text_multiple_chunks(self):
@@ -556,12 +574,22 @@ class AnnotatorTest(absltest.TestCase):
     self.mock_language_model.infer.assert_has_calls([
         mock.call(
             batch_prompts=[
-                "\n\nQ: Patient takes one Aspirin for headaches.\nA: "
+                prompting.PromptParts(
+                    prefix="\n",
+                    examples="",
+                    suffix="Q: Patient takes one Aspirin for headaches.\nA: ",
+                )
             ],
             enable_fuzzy_alignment=False,
         ),
         mock.call(
-            batch_prompts=["\n\nQ: Pt has fever.\nA: "],
+            batch_prompts=[
+                prompting.PromptParts(
+                    prefix="\n",
+                    examples="",
+                    suffix="Q: Pt has fever.\nA: ",
+                )
+            ],
             enable_fuzzy_alignment=False,
         ),
     ])
@@ -588,7 +616,13 @@ class AnnotatorTest(absltest.TestCase):
     )
     self.assertDataclassEqual(expected_annotated_text, actual_annotated_text)
     self.mock_language_model.infer.assert_called_once_with(
-        batch_prompts=[f"\n\nQ: {text}\nA: "],
+        batch_prompts=[
+            prompting.PromptParts(
+                prefix="\n",
+                examples="",
+                suffix=f"Q: {text}\nA: ",
+            )
+        ],
     )
 
 
@@ -1132,14 +1166,15 @@ class AnnotateDocumentsGeneratorTest(absltest.TestCase):
     def mock_infer(batch_prompts, **_):
       """Return medication extractions based on prompt content."""
       for prompt in batch_prompts:
-        if "Ibuprofen" in prompt:
+        prompt_str = str(prompt)
+        if "Ibuprofen" in prompt_str:
           text = textwrap.dedent(f"""\
             ```yaml
             {data.EXTRACTIONS_KEY}:
             - medication: "Ibuprofen"
               medication_index: 4
             ```""")
-        elif "Cefazolin" in prompt:
+        elif "Cefazolin" in prompt_str:
           text = textwrap.dedent(f"""\
             ```yaml
             {data.EXTRACTIONS_KEY}:
@@ -1260,11 +1295,11 @@ class CrossChunkContextTest(absltest.TestCase):
     calls = self.mock_language_model.infer.call_args_list
     self.assertLen(calls, 2)
 
-    first_prompt = calls[0].kwargs["batch_prompts"][0]
+    first_prompt = str(calls[0].kwargs["batch_prompts"][0])
     context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
     self.assertNotIn(context_prefix, first_prompt)
 
-    second_prompt = calls[1].kwargs["batch_prompts"][0]
+    second_prompt = str(calls[1].kwargs["batch_prompts"][0])
     self.assertIn(context_prefix, second_prompt)
     self.assertIn("cardiologist", second_prompt)
 
@@ -1300,8 +1335,8 @@ class CrossChunkContextTest(absltest.TestCase):
     self.assertLen(calls, 2)
 
     context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
-    first_prompt = calls[0].kwargs["batch_prompts"][0]
-    second_prompt = calls[1].kwargs["batch_prompts"][0]
+    first_prompt = str(calls[0].kwargs["batch_prompts"][0])
+    second_prompt = str(calls[1].kwargs["batch_prompts"][0])
 
     self.assertNotIn(context_prefix, first_prompt)
     self.assertNotIn(context_prefix, second_prompt)
@@ -1341,10 +1376,10 @@ class CrossChunkContextTest(absltest.TestCase):
     context_prefix = prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX
 
     # Extract prompts in order: doc1_chunk1, doc1_chunk2, doc2_chunk1, doc2_chunk2
-    doc1_chunk1_prompt = calls[0].kwargs["batch_prompts"][0]
-    doc1_chunk2_prompt = calls[1].kwargs["batch_prompts"][0]
-    doc2_chunk1_prompt = calls[2].kwargs["batch_prompts"][0]
-    doc2_chunk2_prompt = calls[3].kwargs["batch_prompts"][0]
+    doc1_chunk1_prompt = str(calls[0].kwargs["batch_prompts"][0])
+    doc1_chunk2_prompt = str(calls[1].kwargs["batch_prompts"][0])
+    doc2_chunk1_prompt = str(calls[2].kwargs["batch_prompts"][0])
+    doc2_chunk2_prompt = str(calls[3].kwargs["batch_prompts"][0])
 
     # First chunks of each document should NOT have context prefix
     self.assertNotIn(context_prefix, doc1_chunk1_prompt)

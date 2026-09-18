@@ -152,6 +152,111 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
 
   @mock.patch("langextract.annotation.Annotator")
   @mock.patch("langextract.extraction.factory.create_model")
+  def test_temperature_merges_into_config_provider_kwargs(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that an explicit temperature reaches the config's provider_kwargs."""
+    config = factory.ModelConfig(
+        model_id="config-model", provider_kwargs={"api_key": "config-key"}
+    )
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = True
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        config=config,
+        temperature=0.0,
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(
+        called_config.provider_kwargs,
+        {"api_key": "config-key", "temperature": 0.0},
+    )
+    self.assertEqual(called_config.model_id, "config-model")
+    # The caller's config must not be mutated.
+    self.assertEqual(config.provider_kwargs, {"api_key": "config-key"})
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_explicit_temperature_overrides_config_provider_kwargs(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that an explicit temperature wins over one set in provider_kwargs."""
+    config = factory.ModelConfig(
+        model_id="config-model", provider_kwargs={"temperature": 0.9}
+    )
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = True
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        config=config,
+        temperature=0.0,
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(called_config.provider_kwargs["temperature"], 0.0)
+    self.assertEqual(config.provider_kwargs["temperature"], 0.9)
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_config_temperature_preserved_without_explicit_temperature(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that config's temperature survives when extract() gets none."""
+    config = factory.ModelConfig(
+        model_id="config-model", provider_kwargs={"temperature": 0.9}
+    )
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = True
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        config=config,
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(called_config.provider_kwargs["temperature"], 0.9)
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_temperature_with_model_emits_warning(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that temperature is reported, not dropped, when model is given."""
+    provided_model = mock.MagicMock()
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    with self.assertWarnsRegex(UserWarning, "'temperature' is ignored"):
+      lx.extract(
+          text_or_documents="text",
+          prompt_description=self.description,
+          examples=self.examples,
+          model=provided_model,
+          temperature=0.0,
+          use_schema_constraints=False,
+      )
+
+    mock_create_model.assert_not_called()
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
   def test_language_model_type_only_emits_warning_and_works(
       self, mock_create_model, mock_annotator_cls
   ):

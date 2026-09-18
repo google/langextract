@@ -25,6 +25,7 @@ from absl.testing import parameterized
 from google import genai
 from google.api_core import exceptions
 
+from langextract.core import exceptions as core_exceptions
 from langextract.providers import gemini
 from langextract.providers import gemini_batch as gb
 from langextract.providers import schemas
@@ -567,6 +568,272 @@ class TestGeminiBatchAPI(absltest.TestCase):
       list(model.infer(["test"]))
 
 
+class BatchParseItemTest(parameterized.TestCase):
+
+  def test_vertex_status_error_raises(self):
+    outputs = {}
+    line = json.dumps({
+        "key": "idx-2",
+        "status": "Bad Request: invalid role",
+        "response": {},
+    })
+
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError, "Bad Request: invalid role"
+    ):
+      gb._parse_batch_line(line, outputs, gb.BatchConfig())
+
+    self.assertEmpty(outputs)
+
+  def test_error_field_raises_with_provider(self):
+    outputs = {}
+    line = json.dumps(
+        {"key": "idx-2", "error": {"code": 13, "message": "boom"}}
+    )
+
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError, "boom"
+    ) as raised:
+      gb._parse_batch_line(line, outputs, gb.BatchConfig())
+
+    self.assertEqual(raised.exception.provider, "Gemini")
+    self.assertEmpty(outputs)
+
+  def test_empty_vertex_status_preserves_text(self):
+    outputs = {}
+    response = json.loads(_create_batch_response(2, "third"))
+    response["status"] = ""
+
+    gb._parse_batch_line(json.dumps(response), outputs, gb.BatchConfig())
+
+    self.assertDictEqual(outputs, {2: "third"})
+
+  def test_ignored_vertex_status_preserves_indices(self):
+    outputs = {0: "first", 2: "third"}
+    line = json.dumps({
+        "key": "idx-1",
+        "status": "Bad Request: invalid role",
+        "response": {},
+    })
+
+    gb._parse_batch_line(line, outputs, gb.BatchConfig(ignore_item_errors=True))
+
+    self.assertDictEqual(outputs, {0: "first", 1: "", 2: "third"})
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="status",
+          line={
+              "key": "idx-1",
+              "status": "Bad Request: invalid role",
+              "response": {},
+          },
+          expected="Bad Request: invalid role",
+      ),
+      dict(
+          testcase_name="error",
+          line={"key": "idx-1", "error": {"code": 13, "message": "boom"}},
+          expected="boom",
+      ),
+      dict(
+          testcase_name="blocked",
+          line={
+              "key": "idx-1",
+              "response": {"promptFeedback": {"blockReason": "SAFETY"}},
+          },
+          expected="block_reason=SAFETY",
+      ),
+  )
+  def test_ignored_item_failure_is_logged(self, line, expected):
+    outputs = {}
+
+    with self.assertLogs(level="WARNING") as logs:
+      gb._parse_batch_line(
+          json.dumps(line), outputs, gb.BatchConfig(ignore_item_errors=True)
+      )
+
+    self.assertDictEqual(outputs, {1: ""})
+    self.assertLen(logs.output, 1)
+    self.assertIn("idx-1", logs.output[0])
+    self.assertIn(expected, logs.output[0])
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="prompt_camel",
+          response={"promptFeedback": {"blockReason": "SAFETY"}},
+          diagnostic="block_reason=SAFETY",
+      ),
+      dict(
+          testcase_name="prompt_snake",
+          response={"prompt_feedback": {"block_reason": "BLOCKLIST"}},
+          diagnostic="block_reason=BLOCKLIST",
+      ),
+      dict(
+          testcase_name="prompt_numeric",
+          response={"promptFeedback": {"blockReason": 1}},
+          diagnostic="block_reason=1",
+      ),
+      dict(
+          testcase_name="prompt_with_message",
+          response={
+              "promptFeedback": {
+                  "blockReason": "SAFETY",
+                  "blockReasonMessage": "Blocked by safety filters",
+              }
+          },
+          diagnostic="block_reason=SAFETY: Blocked by safety filters",
+      ),
+      dict(
+          testcase_name="prompt_malformed_message",
+          response={
+              "promptFeedback": {
+                  "blockReason": "SAFETY",
+                  "blockReasonMessage": {"unexpected": "shape"},
+              }
+          },
+          diagnostic="block_reason=SAFETY$",
+      ),
+      dict(
+          testcase_name="candidate_camel",
+          response={"candidates": [{"finishReason": "SAFETY"}]},
+          diagnostic="finish_reason=SAFETY",
+      ),
+      dict(
+          testcase_name="candidate_snake",
+          response={"candidates": [{"finish_reason": "RECITATION"}]},
+          diagnostic="finish_reason=RECITATION",
+      ),
+      dict(
+          testcase_name="token_limit",
+          response={"candidates": [{"finishReason": "MAX_TOKENS"}]},
+          diagnostic="finish_reason=MAX_TOKENS",
+      ),
+      dict(
+          testcase_name="future_reason",
+          response={"candidates": [{"finishReason": "NEW_REASON"}]},
+          diagnostic="finish_reason=NEW_REASON",
+      ),
+      dict(
+          testcase_name="candidate_numeric",
+          response={"candidates": [{"finishReason": 3}]},
+          diagnostic="finish_reason=3",
+      ),
+      dict(
+          testcase_name="explicit_empty_text",
+          response={
+              "candidates": [{
+                  "finishReason": "SAFETY",
+                  "content": {"parts": [{"text": ""}]},
+              }]
+          },
+          diagnostic="finish_reason=SAFETY",
+      ),
+  )
+  def test_blocked_item_raises(self, response, diagnostic):
+    outputs = {}
+    line = json.dumps({"key": "idx-2", "response": response})
+
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError, diagnostic
+    ):
+      gb._parse_batch_line(line, outputs, gb.BatchConfig())
+
+    self.assertEmpty(outputs)
+
+  @parameterized.named_parameters(
+      dict(testcase_name="absent", response={}),
+      dict(testcase_name="null_response", response=None),
+      dict(
+          testcase_name="stop",
+          response={"candidates": [{"finishReason": "STOP"}]},
+      ),
+      dict(
+          testcase_name="numeric_stop",
+          response={"candidates": [{"finishReason": 1}]},
+      ),
+      dict(
+          testcase_name="numeric_unspecified",
+          response={
+              "promptFeedback": {"blockReason": 0},
+              "candidates": [{"finishReason": 0}],
+          },
+      ),
+      dict(
+          testcase_name="finish_unspecified",
+          response={
+              "candidates": [{"finishReason": "FINISH_REASON_UNSPECIFIED"}]
+          },
+      ),
+      dict(
+          testcase_name="block_unspecified",
+          response={
+              "promptFeedback": {"blockReason": "BLOCK_REASON_UNSPECIFIED"}
+          },
+      ),
+      dict(
+          testcase_name="blocked_unspecified",
+          response={
+              "promptFeedback": {"blockReason": "BLOCKED_REASON_UNSPECIFIED"}
+          },
+      ),
+      dict(
+          testcase_name="malformed_reasons",
+          response={
+              "promptFeedback": {"blockReason": {"unknown": "value"}},
+              "candidates": [{"finishReason": ["SAFETY"]}],
+          },
+      ),
+      dict(
+          testcase_name="malformed_scalars",
+          response={
+              "promptFeedback": {"blockReason": True},
+              "candidates": [{"finishReason": 2.0}],
+          },
+      ),
+      dict(
+          testcase_name="malformed_containers",
+          response={"promptFeedback": ["SAFETY"], "candidates": [None]},
+      ),
+  )
+  def test_no_valid_diagnostic_preserves_empty_output(self, response):
+    outputs = {}
+    line = json.dumps({"key": "idx-2", "response": response})
+
+    gb._parse_batch_line(line, outputs, gb.BatchConfig())
+
+    self.assertDictEqual(outputs, {2: ""})
+
+  def test_nonempty_text_with_abnormal_finish_is_preserved(self):
+    outputs = {}
+    line = json.dumps({
+        "key": "idx-2",
+        "response": {
+            "candidates": [{
+                "finishReason": "MAX_TOKENS",
+                "content": {"parts": [{"text": "partial output"}]},
+            }]
+        },
+    })
+
+    gb._parse_batch_line(line, outputs, gb.BatchConfig())
+
+    self.assertDictEqual(outputs, {2: "partial output"})
+
+  def test_ignore_errors_preserves_other_rows_and_indices(self):
+    outputs = {}
+    cfg = gb.BatchConfig(ignore_item_errors=True)
+    blocked = json.dumps({
+        "key": "idx-1",
+        "response": {"promptFeedback": {"blockReason": "SAFETY"}},
+    })
+
+    gb._parse_batch_line(_create_batch_response(2, "third"), outputs, cfg)
+    gb._parse_batch_line(blocked, outputs, cfg)
+    gb._parse_batch_line(_create_batch_response(0, "first"), outputs, cfg)
+
+    self.assertDictEqual(outputs, {0: "first", 1: "", 2: "third"})
+
+
 class BatchConfigValidationTest(parameterized.TestCase):
   """Test BatchConfig validation logic."""
 
@@ -640,7 +907,7 @@ class EmptyAndPaddingTest(absltest.TestCase):
       self.assertEqual(outs, ["only_one", ""])  # padded
 
 
-class GCSBatchCachingTest(absltest.TestCase):
+class GCSBatchCachingTest(parameterized.TestCase):
   """Test GCS batch caching functionality."""
 
   def setUp(self):
@@ -652,21 +919,35 @@ class GCSBatchCachingTest(absltest.TestCase):
     self.mock_bucket = self.mock_storage_client.bucket.return_value
     self.mock_blob = self.mock_bucket.blob.return_value
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="nonempty",
+          cached_text="cached_response",
+          ignore_item_errors=False,
+      ),
+      dict(
+          testcase_name="ignored_empty", cached_text="", ignore_item_errors=True
+      ),
+  )
   @mock.patch.object(genai, "Client", autospec=True)
-  def test_cache_hit_skips_inference(self, mock_client_cls):
-    """Test that fully cached prompts skip inference."""
+  def test_cache_hit_skips_inference(
+      self, mock_client_cls, cached_text, ignore_item_errors
+  ):
     mock_client = mock_client_cls.return_value
     mock_client.vertexai = True
     mock_client.project = "p"
     mock_client.location = "l"
 
-    self.mock_blob.download_as_text.return_value = '{"text": "cached_response"}'
+    self.mock_blob.download_as_text.return_value = json.dumps(
+        {"text": cached_text}
+    )
 
     cfg = gb.BatchConfig(
         enabled=True,
         threshold=1,
         enable_caching=True,
         retention_days=None,
+        ignore_item_errors=ignore_item_errors,
     )
 
     outs = gb.infer_batch(
@@ -678,11 +959,97 @@ class GCSBatchCachingTest(absltest.TestCase):
         cfg=cfg,
     )
 
-    self.assertListEqual(outs, ["cached_response"])
+    self.assertListEqual(outs, [cached_text])
 
     mock_client.batches.create.assert_not_called()
 
     self.mock_bucket.blob.assert_called()
+
+  @parameterized.named_parameters(
+      dict(testcase_name="new_request", cached_results={}),
+      dict(testcase_name="old_empty_cache", cached_results={0: ""}),
+  )
+  @mock.patch.object(genai, "Client", autospec=True)
+  @mock.patch.object(gb, "GCSBatchCache", autospec=True)
+  def test_strict_blocked_item_raises_before_cache_write(
+      self, mock_cache_cls, mock_client_cls, cached_results
+  ):
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+    cache = mock_cache_cls.return_value
+    cache.get_multi.return_value = cached_results
+    output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+    output_blob.name = "output.jsonl"
+    output_blob.open.return_value.__enter__.return_value = io.StringIO(
+        json.dumps({
+            "key": "idx-0",
+            "response": {"promptFeedback": {"blockReason": "SAFETY"}},
+        })
+    )
+    self.mock_bucket.list_blobs.return_value = [output_blob]
+    mock_client.batches.create.return_value = create_mock_batch_job()
+    mock_client.batches.get.return_value = create_mock_batch_job()
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        vertexai=True,
+        project="p",
+        location="l",
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": True,
+            "retention_days": None,
+        },
+    )
+
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError, "block_reason=SAFETY"
+    ):
+      list(model.infer(["test"]))
+
+    mock_client.batches.create.assert_called_once()
+    cache.set_multi.assert_not_called()
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  @mock.patch.object(gb, "GCSBatchCache", autospec=True)
+  def test_strict_mode_rechecks_only_empty_cache_entries(
+      self, mock_cache_cls, mock_client_cls
+  ):
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+    cache = mock_cache_cls.return_value
+    cache.get_multi.return_value = {0: "cached", 1: ""}
+    output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+    output_blob.name = "output.jsonl"
+    output_blob.open.return_value.__enter__.return_value = io.StringIO(
+        _create_batch_response(0, "new")
+    )
+    self.mock_bucket.list_blobs.return_value = [output_blob]
+    mock_client.batches.create.return_value = create_mock_batch_job()
+    mock_client.batches.get.return_value = create_mock_batch_job()
+
+    results = gb.infer_batch(
+        client=mock_client,
+        model_id="m",
+        prompts=["cached prompt", "empty prompt"],
+        schema_config=None,
+        gen_config={},
+        cfg=gb.BatchConfig(
+            enabled=True,
+            enable_caching=True,
+            retention_days=None,
+        ),
+        project="p",
+        location="l",
+    )
+
+    self.assertListEqual(results, ["cached", "new"])
+    mock_client.batches.create.assert_called_once()
+    uploads = cache.set_multi.call_args.args[0]
+    self.assertLen(uploads, 1)
+    request, text = uploads[0]
+    self.assertEqual(request["prompt"], "empty prompt")
+    self.assertEqual(text, "new")
 
   @mock.patch.object(genai, "Client", autospec=True)
   def test_partial_cache_hit(self, mock_client_cls):

@@ -53,6 +53,16 @@ _KEY_IDX = "idx-"
 _CACHE_PREFIX = "cache"
 _UNSET = object()
 
+# Vertex JSON can encode protobuf enums by name or number.
+_UNSPECIFIED_REASONS = (
+    0,
+    "",
+    "FINISH_REASON_UNSPECIFIED",
+    "BLOCKED_REASON_UNSPECIFIED",
+    "BLOCK_REASON_UNSPECIFIED",
+)
+_STOP_REASONS = (1, "STOP")
+
 
 def _json_default(obj: Any) -> Any:
   """Serialize non-JSON-native objects used in provider configurations."""
@@ -76,7 +86,8 @@ class BatchConfig:
     timeout: Maximum seconds to wait for job completion.
     max_prompts_per_job: Max prompts allowed in one batch job.
     ignore_item_errors: If True, continue on per-item errors.
-    enable_caching: If True, use GCS-based caching for inference results.
+    enable_caching: If True, cache inference results in GCS. Strict runs
+      recheck empty entries, which may represent previously ignored failures.
     retention_days: Days to keep GCS data (default 30). None for permanent.
   """
 
@@ -556,6 +567,39 @@ def _extract_text(resp: _TextResponse | dict[str, Any] | None) -> str | None:
   return text if isinstance(text, str) else None
 
 
+def _no_text_block_diagnostic(resp: Any) -> str | None:
+  """Describe a block or abnormal finish in a textless batch response."""
+  prompt_feedback = _safe_get_nested(
+      resp, "promptFeedback"
+  ) or _safe_get_nested(resp, "prompt_feedback")
+  block_reason = _safe_get_nested(
+      prompt_feedback, "blockReason"
+  ) or _safe_get_nested(prompt_feedback, "block_reason")
+  # Exact type checks reject bools: True == 1 would otherwise read as a
+  # SAFETY block or a STOP finish.
+  if (
+      type(block_reason) in (str, int)
+      and block_reason not in _UNSPECIFIED_REASONS
+  ):
+    message = _safe_get_nested(
+        prompt_feedback, "blockReasonMessage"
+    ) or _safe_get_nested(prompt_feedback, "block_reason_message")
+    detail = f": {message}" if isinstance(message, str) and message else ""
+    return f"block_reason={block_reason}{detail}"
+
+  candidate = _safe_get_nested(resp, "candidates", 0)
+  finish_reason = _safe_get_nested(
+      candidate, "finishReason"
+  ) or _safe_get_nested(candidate, "finish_reason")
+  if (
+      type(finish_reason) in (str, int)
+      and finish_reason not in _UNSPECIFIED_REASONS
+      and finish_reason not in _STOP_REASONS
+  ):
+    return f"finish_reason={finish_reason}"
+  return None
+
+
 def _poll_completion(
     client: genai.Client, job: genai.types.BatchJob, cfg: BatchConfig
 ) -> genai.types.BatchJob:
@@ -603,25 +647,47 @@ def _poll_completion(
     logging.info("Batch job is running... (State: %s)", state.name)
 
 
+def _item_failure(obj: dict[str, Any], resp: Any, text: str) -> str | None:
+  """Return why a batch output line failed, or None if it is usable."""
+  status = obj.get("status")
+  if isinstance(status, str) and status:
+    return f"Batch item error: {status}"
+
+  error = obj.get("error")
+  if error:
+    code = error.get("code") if isinstance(error, dict) else None
+    if code not in (None, 0):
+      return f"Batch item error: {error}"
+
+  if not text:
+    diagnostic = _no_text_block_diagnostic(resp)
+    if diagnostic:
+      return f"Batch item returned no text: {diagnostic}"
+  return None
+
+
 def _parse_batch_line(
     line: str, outputs: dict[int, str], cfg: BatchConfig
 ) -> None:
-  """Parse a single line from batch output JSONL."""
+  """Parse a single line from batch output JSONL.
+
+  Raises:
+    InferenceRuntimeError: If the item failed and errors are not ignored.
+  """
   try:
     obj = json.loads(line)
   except json.JSONDecodeError:
     return
 
-  error = obj.get("error")
-  if error and not cfg.ignore_item_errors:
-    code = error.get("code") if isinstance(error, dict) else None
-    if code not in (None, 0):
-      raise exceptions.InferenceRuntimeError(f"Batch item error: {error}")
-
+  key = obj.get("key", "")
   resp = obj.get("response", {})
   text = _extract_text(resp) or ""
+  failure = _item_failure(obj, resp, text)
+  if failure and not cfg.ignore_item_errors:
+    raise exceptions.InferenceRuntimeError(failure, provider="Gemini")
+  if failure:
+    logging.warning("Batch API: Ignoring failed item %r: %s", key, failure)
 
-  key = obj.get("key", "")
   try:
     # Extract the original index from the key (e.g., "idx-5" -> 5)
     idx = int(str(key).rsplit(_KEY_IDX, maxsplit=1)[-1])
@@ -801,6 +867,9 @@ def infer_batch(
       })
 
     cached_results = cache.get_multi(key_data_list)
+    if not cfg.ignore_item_errors:
+      # Empty cache entries may be ignored failures saved by an earlier run.
+      cached_results = {i: text for i, text in cached_results.items() if text}
 
     for idx, prompt in enumerate(prompts):
       if idx not in cached_results:

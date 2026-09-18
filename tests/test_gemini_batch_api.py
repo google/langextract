@@ -585,6 +585,20 @@ class BatchParseItemTest(parameterized.TestCase):
 
     self.assertEmpty(outputs)
 
+  def test_error_field_raises_with_provider(self):
+    outputs = {}
+    line = json.dumps(
+        {"key": "idx-2", "error": {"code": 13, "message": "boom"}}
+    )
+
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError, "boom"
+    ) as raised:
+      gb._parse_batch_line(line, outputs, gb.BatchConfig())
+
+    self.assertEqual(raised.exception.provider, "Gemini")
+    self.assertEmpty(outputs)
+
   def test_empty_vertex_status_preserves_text(self):
     outputs = {}
     response = json.loads(_create_batch_response(2, "third"))
@@ -608,6 +622,43 @@ class BatchParseItemTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
       dict(
+          testcase_name="status",
+          line={
+              "key": "idx-1",
+              "status": "Bad Request: invalid role",
+              "response": {},
+          },
+          expected="Bad Request: invalid role",
+      ),
+      dict(
+          testcase_name="error",
+          line={"key": "idx-1", "error": {"code": 13, "message": "boom"}},
+          expected="boom",
+      ),
+      dict(
+          testcase_name="blocked",
+          line={
+              "key": "idx-1",
+              "response": {"promptFeedback": {"blockReason": "SAFETY"}},
+          },
+          expected="block_reason=SAFETY",
+      ),
+  )
+  def test_ignored_item_failure_is_logged(self, line, expected):
+    outputs = {}
+
+    with self.assertLogs(level="WARNING") as logs:
+      gb._parse_batch_line(
+          json.dumps(line), outputs, gb.BatchConfig(ignore_item_errors=True)
+      )
+
+    self.assertDictEqual(outputs, {1: ""})
+    self.assertLen(logs.output, 1)
+    self.assertIn("idx-1", logs.output[0])
+    self.assertIn(expected, logs.output[0])
+
+  @parameterized.named_parameters(
+      dict(
           testcase_name="prompt_camel",
           response={"promptFeedback": {"blockReason": "SAFETY"}},
           diagnostic="block_reason=SAFETY",
@@ -621,6 +672,26 @@ class BatchParseItemTest(parameterized.TestCase):
           testcase_name="prompt_numeric",
           response={"promptFeedback": {"blockReason": 1}},
           diagnostic="block_reason=1",
+      ),
+      dict(
+          testcase_name="prompt_with_message",
+          response={
+              "promptFeedback": {
+                  "blockReason": "SAFETY",
+                  "blockReasonMessage": "Blocked by safety filters",
+              }
+          },
+          diagnostic="block_reason=SAFETY: Blocked by safety filters",
+      ),
+      dict(
+          testcase_name="prompt_malformed_message",
+          response={
+              "promptFeedback": {
+                  "blockReason": "SAFETY",
+                  "blockReasonMessage": {"unexpected": "shape"},
+              }
+          },
+          diagnostic="block_reason=SAFETY$",
       ),
       dict(
           testcase_name="candidate_camel",

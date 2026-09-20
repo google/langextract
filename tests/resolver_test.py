@@ -1865,6 +1865,20 @@ class ResolverTest(parameterized.TestCase):
     with self.assertRaises(resolver_lib.ResolverParsingError):
       self.default_resolver.resolve(test_input, suppress_parse_errors=False)
 
+  def test_resolve_parse_error_suppressed_logs_opt_out(self):
+    test_input = "```json\n```not valid at all"
+    with mock.patch.object(resolver_lib, "logging", autospec=True) as mock_log:
+      actual = self.default_resolver.resolve(
+          test_input, suppress_parse_errors=True
+      )
+      self.assertEmpty(actual)
+      mock_log.warning.assert_called_once()
+      log_msg = mock_log.warning.call_args[0][0]
+      self.assertIn("Chunk omitted from results", log_msg)
+      self.assertIn("parse error", log_msg)
+      self.assertIn("resolver_params={'suppress_parse_errors': False}", log_msg)
+      mock_log.error.assert_not_called()
+
   @parameterized.named_parameters(
       dict(
           testcase_name="non_dict_attributes",
@@ -1885,14 +1899,16 @@ class ResolverTest(parameterized.TestCase):
   )
   def test_resolve_schema_error_suppressed(self, test_input):
     """Schema errors are suppressed with warning-only logging."""
-    with mock.patch("langextract.resolver.logging") as mock_log:
+    with mock.patch.object(resolver_lib, "logging", autospec=True) as mock_log:
       actual = self.default_resolver.resolve(
           test_input, suppress_parse_errors=True
       )
       self.assertEmpty(actual)
-      mock_log.warning.assert_called()
+      mock_log.warning.assert_called_once()
       log_msg = mock_log.warning.call_args[0][0]
+      self.assertIn("Chunk omitted from results", log_msg)
       self.assertIn("schema error", log_msg)
+      self.assertIn("resolver_params={'suppress_parse_errors': False}", log_msg)
       mock_log.error.assert_not_called()
 
   def test_resolve_schema_error_raises_without_suppression(self):

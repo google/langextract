@@ -80,6 +80,11 @@ def extract(
   examples. Supports sequential extraction passes to improve recall at the cost
   of additional API calls.
 
+  Note:
+      By default, parsing errors log a warning and omit the affected chunk.
+      Set `resolver_params={'suppress_parse_errors': False}` to raise
+      `ResolverParsingError` instead.
+
   Args:
       text_or_documents: The source text to extract information from, or an
         iterable of Document objects. An http:// or https:// string is fetched

@@ -309,9 +309,9 @@ class Resolver(AbstractResolver):
     except exceptions.FormatError as e:
       if suppress_parse_errors:
         logging.warning(
-            "Chunk dropped, no retry possible (parse error; pass"
-            " resolver_params={'suppress_parse_errors': False} to raise and"
-            " retry instead): %s",
+            "Chunk omitted from results (parse error): %s. Set"
+            " resolver_params={'suppress_parse_errors': False} to raise"
+            " instead.",
             e,
         )
         return []
@@ -322,9 +322,9 @@ class Resolver(AbstractResolver):
     except ValueError as e:
       if suppress_parse_errors:
         logging.warning(
-            "Chunk dropped, no retry possible (schema error; pass"
-            " resolver_params={'suppress_parse_errors': False} to raise and"
-            " retry instead): %s",
+            "Chunk omitted from results (schema error): %s. Set"
+            " resolver_params={'suppress_parse_errors': False} to raise"
+            " instead.",
             e,
         )
         return []

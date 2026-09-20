@@ -81,15 +81,9 @@ def extract(
   of additional API calls.
 
   Note:
-      By default, a chunk whose model output fails to parse is dropped
-      silently: no exception is raised, and that chunk's data is simply
-      missing from the result (see `resolver_params`
-      ['suppress_parse_errors'] below). Retry logic written around catching
-      a parse exception from `extract()` will not fire under this default,
-      since the exception never reaches it. Pass
-      `resolver_params={'suppress_parse_errors': False}` to raise
-      `ResolverParsingError` instead, so it can be caught and retried (e.g.
-      with a smaller `max_char_buffer`).
+      By default, parsing errors log a warning and omit the affected chunk.
+      Set `resolver_params={'suppress_parse_errors': False}` to raise
+      `ResolverParsingError` instead.
 
   Args:
       text_or_documents: The source text to extract information from, or an

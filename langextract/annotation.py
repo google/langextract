@@ -392,6 +392,8 @@ class Annotator:
         outputs = self._language_model.infer(batch_prompts=prompts, **kwargs)
         if not isinstance(outputs, list):
           outputs = list(outputs)
+        # Avoid retaining these prompts while constructing the next batch.
+        del prompts
 
         for text_chunk, scored_outputs in zip(batch, outputs):
           if not isinstance(scored_outputs, list):

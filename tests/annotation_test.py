@@ -14,10 +14,12 @@
 
 from collections.abc import Sequence
 import dataclasses
+import gc
 import inspect
 import textwrap
 from typing import Type
 from unittest import mock
+import weakref
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -25,6 +27,7 @@ from absl.testing import parameterized
 from langextract import annotation
 from langextract import prompting
 from langextract import resolver as resolver_lib
+from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.core import tokenizer
@@ -633,6 +636,106 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
       ],
       text="Patient reports migraine.",
   )
+
+  def test_releases_prompts_before_next_batch_with_list_outputs(self):
+    class TrackedPrompt(str):
+      pass
+
+    prompt_refs = []
+
+    def build_prompt(unused_builder, chunk_text, *unused_args):
+      gc.collect()
+      for prompt_ref in prompt_refs:
+        self.assertIsNone(
+            prompt_ref(), msg="Previous batch prompts are still retained"
+        )
+      prompt = TrackedPrompt(chunk_text)
+      prompt_refs.append(weakref.ref(prompt))
+      return prompt
+
+    llm_inference = self._LLM_INFERENCE
+
+    # A mock would retain the prompts being measured in its call history.
+    class FakeLanguageModel(base_model.BaseLanguageModel):
+
+      def infer(self, batch_prompts, **kwargs):
+        return [
+            [types.ScoredOutput(score=1.0, output=llm_inference)]
+            for _ in batch_prompts
+        ]
+
+    annotator = annotation.Annotator(
+        language_model=FakeLanguageModel(),
+        prompt_template=prompting.PromptTemplateStructured(description=""),
+    )
+    with mock.patch.object(
+        prompting.ContextAwarePromptBuilder,
+        "build_prompt",
+        autospec=True,
+        side_effect=build_prompt,
+    ):
+      results = list(
+          annotator.annotate_documents(
+              [
+                  data.Document(text=self._FIXED_DOCUMENT_CONTENT),
+                  data.Document(text=self._FIXED_DOCUMENT_CONTENT),
+              ],
+              batch_length=1,
+              show_progress=False,
+          )
+      )
+
+    self.assertLen(prompt_refs, 2)
+    self.assertLen(results, 2)
+
+  def test_releases_prompts_before_next_batch_with_iterator_outputs(self):
+    class TrackedPrompt(str):
+      pass
+
+    prompt_refs = []
+
+    def build_prompt(unused_builder, chunk_text, *unused_args):
+      gc.collect()
+      for prompt_ref in prompt_refs:
+        self.assertIsNone(
+            prompt_ref(), msg="Previous batch prompts are still retained"
+        )
+      prompt = TrackedPrompt(chunk_text)
+      prompt_refs.append(weakref.ref(prompt))
+      return prompt
+
+    llm_inference = self._LLM_INFERENCE
+
+    # A mock would retain the prompts being measured in its call history.
+    class FakeLanguageModel(base_model.BaseLanguageModel):
+
+      def infer(self, batch_prompts, **kwargs):
+        for _ in batch_prompts:
+          yield [types.ScoredOutput(score=1.0, output=llm_inference)]
+
+    annotator = annotation.Annotator(
+        language_model=FakeLanguageModel(),
+        prompt_template=prompting.PromptTemplateStructured(description=""),
+    )
+    with mock.patch.object(
+        prompting.ContextAwarePromptBuilder,
+        "build_prompt",
+        autospec=True,
+        side_effect=build_prompt,
+    ):
+      results = list(
+          annotator.annotate_documents(
+              [
+                  data.Document(text=self._FIXED_DOCUMENT_CONTENT),
+                  data.Document(text=self._FIXED_DOCUMENT_CONTENT),
+              ],
+              batch_length=1,
+              show_progress=False,
+          )
+      )
+
+    self.assertLen(prompt_refs, 2)
+    self.assertLen(results, 2)
 
   @parameterized.named_parameters(
       dict(

@@ -175,6 +175,7 @@ _API_CONFIG_KEYS: Final[set[str]] = {
     'tools',
     'stop_sequences',
     'candidate_count',
+    'thinking_config',
 }
 
 
@@ -277,8 +278,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
         forwarded to the API, including generation settings
         (max_output_tokens, top_p, top_k), response schemas, tools, safety
-        settings, stop sequences, candidate count, and system instructions.
-        See https://ai.google.dev/api/generate-content for details.
+        settings, stop sequences, candidate count, system instructions, and
+        thinking_config. See https://ai.google.dev/api/generate-content for
+        details.
     """
     try:
       # pylint: disable=import-outside-toplevel

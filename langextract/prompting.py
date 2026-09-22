@@ -28,6 +28,31 @@ from langextract.core import exceptions
 from langextract.core import format_handler
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class PromptParts:
+  """Structured prompt with shared and unique parts for memory efficiency.
+
+  When many prompts share the same few-shot examples text, storing it as a
+  shared reference avoids O(N * examples_size) memory for N prompts.
+
+  Attributes:
+    prefix: Description and optional context (small, unique per prompt).
+    examples: Formatted few-shot examples (large, shared across prompts).
+    suffix: Question text and answer prefix (small, unique per prompt).
+  """
+
+  prefix: str
+  examples: str
+  suffix: str
+
+  def __str__(self) -> str:
+    parts = [self.prefix]
+    if self.examples:
+      parts.append(self.examples)
+    parts.append(self.suffix)
+    return "\n".join(parts)
+
+
 class PromptBuilderError(exceptions.LangExtractError):
   """Failure to build prompt."""
 
@@ -91,6 +116,15 @@ class QAPromptGenerator:
   question_prefix: str = "Q: "
   answer_prefix: str = "A: "
 
+  def __post_init__(self):
+    if self.template.examples:
+      lines = [self.examples_heading]
+      for ex in self.template.examples:
+        lines.append(self.format_example_as_text(ex))
+      self._examples_text = "\n".join(lines)
+    else:
+      self._examples_text = ""
+
   def __str__(self) -> str:
     """Returns a string representation of the prompt with an empty question."""
     return self.render("")
@@ -112,6 +146,37 @@ class QAPromptGenerator:
         f"{self.answer_prefix}{answer}\n",
     ])
 
+  def render_parts(
+      self, question: str, additional_context: str | None = None
+  ) -> PromptParts:
+    """Generate a structured prompt split into shared and unique parts.
+
+    The examples text is cached and shared across all calls, avoiding
+    O(N * examples_size) memory when building many prompts.
+
+    Args:
+      question: That will be presented to the model.
+      additional_context: Additional context to include in the prompt. An empty
+        string is ignored.
+
+    Returns:
+      PromptParts with prefix, examples, and suffix.
+    """
+    prefix_lines: list[str] = [f"{self.template.description}\n"]
+    if additional_context:
+      prefix_lines.append(f"{additional_context}\n")
+
+    suffix = "\n".join([
+        f"{self.question_prefix}{question}",
+        self.answer_prefix,
+    ])
+
+    return PromptParts(
+        prefix="\n".join(prefix_lines),
+        examples=self._examples_text,
+        suffix=suffix,
+    )
+
   def render(self, question: str, additional_context: str | None = None) -> str:
     """Generate a text representation of the prompt.
 
@@ -123,19 +188,7 @@ class QAPromptGenerator:
     Returns:
       Text prompt with a question to be presented to a language model.
     """
-    prompt_lines: list[str] = [f"{self.template.description}\n"]
-
-    if additional_context:
-      prompt_lines.append(f"{additional_context}\n")
-
-    if self.template.examples:
-      prompt_lines.append(self.examples_heading)
-      for ex in self.template.examples:
-        prompt_lines.append(self.format_example_as_text(ex))
-
-    prompt_lines.append(f"{self.question_prefix}{question}")
-    prompt_lines.append(self.answer_prefix)
-    return "\n".join(prompt_lines)
+    return str(self.render_parts(question, additional_context))
 
 
 class PromptBuilder:
@@ -158,7 +211,7 @@ class PromptBuilder:
       chunk_text: str,
       document_id: str,
       additional_context: str | None = None,
-  ) -> str:
+  ) -> PromptParts:
     """Builds a prompt for the given chunk.
 
     Args:
@@ -167,10 +220,10 @@ class PromptBuilder:
       additional_context: Optional additional context from the document.
 
     Returns:
-      The rendered prompt string ready for the language model.
+      PromptParts with shared examples and unique prefix/suffix.
     """
     del document_id  # Unused in base class.
-    return self._generator.render(
+    return self._generator.render_parts(
         question=chunk_text,
         additional_context=additional_context,
     )
@@ -217,7 +270,7 @@ class ContextAwarePromptBuilder(PromptBuilder):
       chunk_text: str,
       document_id: str,
       additional_context: str | None = None,
-  ) -> str:
+  ) -> PromptParts:
     """Builds a prompt, injecting previous chunk context if enabled.
 
     Args:
@@ -227,17 +280,17 @@ class ContextAwarePromptBuilder(PromptBuilder):
       additional_context: Optional additional context from the document.
 
     Returns:
-      The rendered prompt string ready for the language model.
+      PromptParts with shared examples and unique prefix/suffix.
     """
     effective_context = self._build_effective_context(
         document_id, additional_context
     )
-    prompt = self._generator.render(
+    prompt_parts = self._generator.render_parts(
         question=chunk_text,
         additional_context=effective_context,
     )
     self._update_state(document_id, chunk_text)
-    return prompt
+    return prompt_parts
 
   def _build_effective_context(
       self,

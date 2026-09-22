@@ -273,6 +273,24 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
     self.assertLen(parsed, 1)
     self.assertEqual(parsed[0]["person"], "Alice")
 
+  def test_fenced_json_accepted_when_fences_disabled(self):
+    # Some OpenAI-compatible backends may return fenced JSON even when raw
+    # JSON mode is expected.
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=False,
+    )
+    fenced_json = textwrap.dedent("""
+        ```json
+        {"extractions": [{"person": "Alice"}]}
+        ```
+    """).strip()
+    parsed = handler.parse_output(fenced_json)
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["person"], "Alice")
+
   def test_top_level_list_accepted_as_fallback(self):
     # Some models return [...] instead of {"extractions": [...]}
     handler = format_handler.FormatHandler(

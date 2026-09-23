@@ -305,6 +305,23 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
     self.assertLen(parsed, 1)
     self.assertEqual(parsed[0]["person"], "John Smith")
 
+  def test_from_resolver_params_with_string_and_enum_format_type(self):
+    # Tests backward compatibility for format_type in resolver_params (issue #542)
+    for ft_input in ["yaml", "json", data.FormatType.YAML, data.FormatType.JSON]:
+      with self.subTest(format_type=ft_input):
+        handler, _ = format_handler.FormatHandler.from_resolver_params(
+            resolver_params={"format_type": ft_input},
+            base_format_type=data.FormatType.JSON,
+            base_use_fences=True,
+            warn_on_legacy=False,
+        )
+        self.assertIsInstance(handler.format_type, data.FormatType)
+        expected_val = ft_input.value if hasattr(ft_input, "value") else ft_input
+        self.assertEqual(handler.format_type.value, expected_val)
+        # Verify _add_fences does not raise AttributeError
+        fenced = handler._add_fences("extractions:\n  - person: Alice")
+        self.assertIn(f"```{expected_val}", fenced)
+
 
 if __name__ == "__main__":
   absltest.main()

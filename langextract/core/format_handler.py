@@ -65,7 +65,7 @@ class FormatHandler:
 
   def __init__(
       self,
-      format_type: data.FormatType = data.FormatType.JSON,
+      format_type: data.FormatType | str = data.FormatType.JSON,
       use_wrapper: bool = True,
       wrapper_key: str | None = None,
       use_fences: bool = True,
@@ -76,7 +76,7 @@ class FormatHandler:
     """Initialize format handler.
 
     Args:
-      format_type: Output format type enum.
+      format_type: Output format type enum or string ('json', 'yaml').
       use_wrapper: Whether to wrap extractions in a container dictionary.
         True: {"extractions": [...]}, False: [...]
       wrapper_key: Key name for the container dictionary. When use_wrapper=True:
@@ -90,6 +90,8 @@ class FormatHandler:
       allow_top_level_list: Allow top-level list when not strict and
         wrapper not required.
     """
+    if isinstance(format_type, str):
+      format_type = data.FormatType(format_type.lower())
     self.format_type = format_type
     self.use_wrapper = use_wrapper
     if use_wrapper:
@@ -403,8 +405,11 @@ class FormatHandler:
     for legacy_key, fh_key in mapping.items():
       if legacy_key in rp and rp[legacy_key] is not None:
         val = rp.pop(legacy_key)
-        if fh_key == "format_type" and hasattr(val, "value"):
-          val = val.value
+        if fh_key == "format_type":
+          if isinstance(val, str):
+            val = data.FormatType(val.lower())
+          elif hasattr(val, "value"):
+            val = data.FormatType(val.value.lower())
         kwargs[fh_key] = val
         used_legacy.append(legacy_key)
 

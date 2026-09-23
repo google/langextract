@@ -307,7 +307,12 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
 
   def test_from_resolver_params_with_string_and_enum_format_type(self):
     # Tests backward compatibility for format_type in resolver_params (issue #542)
-    for ft_input in ["yaml", "json", data.FormatType.YAML, data.FormatType.JSON]:
+    for ft_input in [
+        "yaml",
+        "json",
+        data.FormatType.YAML,
+        data.FormatType.JSON,
+    ]:
       with self.subTest(format_type=ft_input):
         handler, _ = format_handler.FormatHandler.from_resolver_params(
             resolver_params={"format_type": ft_input},
@@ -316,7 +321,9 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
             warn_on_legacy=False,
         )
         self.assertIsInstance(handler.format_type, data.FormatType)
-        expected_val = ft_input.value if hasattr(ft_input, "value") else ft_input
+        expected_val = (
+            ft_input.value if hasattr(ft_input, "value") else ft_input
+        )
         self.assertEqual(handler.format_type.value, expected_val)
         # Verify _add_fences does not raise AttributeError
         fenced = handler._add_fences("extractions:\n  - person: Alice")

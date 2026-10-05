@@ -42,6 +42,7 @@ from absl import logging
 from google import genai
 from google.api_core import exceptions as google_exceptions
 from google.cloud import storage
+import pydantic
 
 from langextract.core import exceptions
 
@@ -66,6 +67,8 @@ _STOP_REASONS = (1, "STOP")
 
 def _json_default(obj: Any) -> Any:
   """Serialize non-JSON-native objects used in provider configurations."""
+  if isinstance(obj, pydantic.BaseModel):
+    return obj.model_dump(mode="json", by_alias=True, exclude_none=True)
   if dataclasses.is_dataclass(obj):
     return dataclasses.asdict(obj)
   if isinstance(obj, enum.Enum):
@@ -280,7 +283,7 @@ def _build_request(
   Constructs a properly formatted request dictionary for batch processing.
   Per the Gemini Batch API documentation, each request in the JSONL file
   can include its own generationConfig with schema and generation parameters,
-  as well as top-level systemInstruction and safetySettings.
+  as well as top-level systemInstruction, safetySettings, and tools.
 
   Args:
     prompt: The text prompt to send to the model.
@@ -291,7 +294,7 @@ def _build_request(
     gen_config: Optional generation configuration parameters.
     system_instruction: Optional system instruction text.
     safety_settings: Optional safety settings sequence.
-    tools: Optional tools sequence (e.g. google_search).
+    tools: Optional tools sequence (e.g., google_search).
 
   Returns:
     A dictionary formatted for REST API file-based submission, containing:
@@ -301,7 +304,13 @@ def _build_request(
       * tools: Optional tools.
       * generationConfig: Optional generation configuration and schema.
   """
-  request = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
+  request: dict[str, Any] = {
+      "contents": [{"role": "user", "parts": [{"text": prompt}]}]
+  }
+
+  effective_gen_config = dict(gen_config) if gen_config else {}
+  gen_config_tools = effective_gen_config.pop("tools", None)
+  effective_tools = tools if tools is not None else gen_config_tools
 
   if system_instruction:
     request["systemInstruction"] = {"parts": [{"text": system_instruction}]}
@@ -309,10 +318,10 @@ def _build_request(
   if safety_settings:
     request["safetySettings"] = safety_settings
 
-  if tools:
-    request["tools"] = tools
+  if effective_tools:
+    request["tools"] = effective_tools
 
-  if schema_config or gen_config:
+  if schema_config or effective_gen_config:
     generation_config = {}
     if schema_config:
       json_schema = schema_config.get("response_json_schema")
@@ -324,8 +333,8 @@ def _build_request(
       generation_config["responseMimeType"] = schema_config.get(
           "response_mime_type", _MIME_TYPE_JSON
       )
-    if gen_config:
-      for k, v in gen_config.items():
+    if effective_gen_config:
+      for k, v in effective_gen_config.items():
         generation_config[_snake_to_camel(k)] = v
     request["generationConfig"] = generation_config
 
@@ -378,7 +387,9 @@ def _submit_file(
         # We use a simple "idx-{N}" key format to track the original order
         # of prompts, as batch processing may return results out of order.
         line = {"key": f"{_KEY_IDX}{idx}", "request": req}
-        f.write(json.dumps(line, ensure_ascii=False) + "\n")
+        f.write(
+            json.dumps(line, ensure_ascii=False, default=_json_default) + "\n"
+        )
 
     project, location = _get_project_location(client, project, location)
     bucket_name = _get_bucket_name(project, location)
@@ -785,9 +796,9 @@ def infer_batch(
     cfg: BatchConfig,
     system_instruction: str | None = None,
     safety_settings: Sequence[Any] | None = None,
-    tools: Sequence[Any] | None = None,
     project: str | None = None,
     location: str | None = None,
+    tools: Sequence[Any] | None = None,
 ) -> list[str]:
   """Execute batch inference on multiple prompts using the Vertex AI Batch API.
 
@@ -809,9 +820,9 @@ def infer_batch(
     cfg: Batch configuration including thresholds, timeouts, and error handling.
     system_instruction: Optional system instruction text.
     safety_settings: Optional safety settings sequence.
-    tools: Optional tools sequence (e.g. google_search).
     project: Google Cloud project ID (optional, overrides client/env).
     location: Vertex AI location (optional, overrides client/env).
+    tools: Optional tools sequence (e.g., google_search).
 
   Returns:
     List of text outputs corresponding 1:1 to input prompts. Missing results

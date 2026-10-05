@@ -126,17 +126,26 @@ gh workflow run ci.yaml --repo google/langextract --ref main \
   -f pr_head_sha="<REVIEWED_40_CHARACTER_SHA>"
 ```
 
-Both inputs are required for fork tests. Invalid or incomplete requests fail
-before environment approval. Approve the `live-keys` request in GitHub Actions;
-the protected job then checks maintainer permissions and rejects a closed PR,
+Both inputs are required for fork tests. Use the PR number without padding and
+the full lowercase SHA. Invalid or incomplete requests fail before environment
+approval. Verify that the run is a `workflow_dispatch` from `main`, then confirm
+the PR and SHA in its title before approving `live-keys` in GitHub Actions.
+The title alone is not evidence of a trusted run. The protected job checks the `admin`
+or `maintain` role, validates the inputs again, and rejects a closed PR,
 a non-fork PR, a target other than `main`, or a head that has moved. It fetches
 and verifies the pinned commit before merging it into `main` for testing.
 
-Inspect the `test-fork-pr` job in the dispatched run for the tested SHA and
-actual live-test results. A run may skip live tests if API keys are unavailable;
-a green run alone does not prove they executed. These results belong to the
-manual run and may not appear in the PR's checks list. Keep the run link as
-review evidence and merge only if the PR still has the tested head SHA.
+Inspect the `test-fork-pr` job summary for the tested SHA and execution status,
+then check the logs for passed and skipped test counts. A run may skip live tests
+if API keys are unavailable; the summary reports that explicitly. The job uses a
+read-only GitHub token and does not post success comments on the PR. Results
+belong to the manual run and may not appear in the PR's checks list. Keep the run
+link as review evidence and merge only if the PR still has the tested head SHA.
+
+Approval trusts the entire selected commit, including build files, test
+configuration, and dependencies, to execute with the live API keys. Review that
+exact commit before dispatching; SHA verification prevents a later code swap,
+but does not sandbox the approved code.
 
 Fork dispatches do not rerun the unit-test matrix on unchanged `main` or cancel
 ordinary PR CI. Dispatching without either input still runs the unit matrix.

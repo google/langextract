@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import abc
+import codecs
 import dataclasses
+from email import message
 import ipaddress
 import json
 import os
@@ -326,14 +328,31 @@ def download_text_from_url(
       # Combine chunks and decode
       content = b''.join(chunks)
 
-      # Try to decode as text
-      encodings = ['utf-8', 'latin-1', 'ascii', 'utf-16']
+      # Prefer a BOM, then an explicit charset, before the legacy fallbacks.
+      # UTF-32 BOMs must precede UTF-16 because their prefixes overlap.
+      encodings = []
+      for bom, encoding in (
+          (codecs.BOM_UTF32_LE, 'utf-32'),
+          (codecs.BOM_UTF32_BE, 'utf-32'),
+          (codecs.BOM_UTF16_LE, 'utf-16'),
+          (codecs.BOM_UTF16_BE, 'utf-16'),
+          (codecs.BOM_UTF8, 'utf-8-sig'),
+      ):
+        if content.startswith(bom):
+          encodings.append(encoding)
+          break
+      header = message.Message()
+      header['Content-Type'] = content_type
+      charset = header.get_content_charset()
+      if charset:
+        encodings.append(charset)
+      encodings.extend(['utf-8', 'latin-1'])
       text_content = None
       for encoding in encodings:
         try:
           text_content = content.decode(encoding)
           break
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, LookupError):
           continue
 
       if text_content is None:

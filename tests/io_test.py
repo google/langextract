@@ -14,11 +14,13 @@
 
 """Tests for langextract.io module."""
 
+import codecs
 import pathlib
 import tempfile
 import unittest
 from unittest import mock
 
+import pytest
 import requests
 
 from langextract import io
@@ -96,6 +98,72 @@ class IoTest(unittest.TestCase):
 
     self.assertTrue(tracker.closed)
     self.assertEqual(tracker.updates, [5])
+
+
+@pytest.mark.parametrize(
+    'payload,content_type,expected',
+    [
+        ('caf\u00e9'.encode('utf-8'), 'text/plain', 'caf\u00e9'),
+        ('caf\u00e9'.encode('latin-1'), 'text/plain', 'caf\u00e9'),
+        (
+            'price: \u20ac'.encode('cp1252'),
+            'text/plain; charset="windows-1252"',
+            'price: \u20ac',
+        ),
+        ('hello'.encode('utf-16'), 'text/plain', 'hello'),
+        (
+            codecs.BOM_UTF16_BE + 'hello'.encode('utf-16-be'),
+            'text/plain',
+            'hello',
+        ),
+        ('hello'.encode('utf-32'), 'text/plain', 'hello'),
+        (
+            codecs.BOM_UTF32_BE + 'hello'.encode('utf-32-be'),
+            'text/plain',
+            'hello',
+        ),
+        ('caf\u00e9'.encode('utf-8-sig'), 'text/plain', 'caf\u00e9'),
+        ('hello'.encode('utf-16-le'), 'text/plain; charset=utf-16-le', 'hello'),
+        ('hello'.encode('utf-16'), 'text/plain; charset=latin-1', 'hello'),
+        (
+            'caf\u00e9'.encode('utf-8'),
+            'text/plain; charset=unknown-encoding',
+            'caf\u00e9',
+        ),
+        (
+            'caf\u00e9'.encode('latin-1'),
+            'text/plain; charset=utf-8',
+            'caf\u00e9',
+        ),
+        (b'', 'text/plain; charset=utf-8', ''),
+    ],
+    ids=[
+        'utf8-fallback',
+        'latin1-fallback',
+        'quoted-charset',
+        'utf16-le-bom',
+        'utf16-be-bom',
+        'utf32-le-bom',
+        'utf32-be-bom',
+        'utf8-bom',
+        'explicit-utf16-le',
+        'bom-before-charset',
+        'unknown-charset',
+        'invalid-declared-bytes',
+        'empty',
+    ],
+)
+def test_download_text_preserves_encoding(payload, content_type, expected):
+  response = requests.Response()
+  response.status_code = 200
+  response.headers['Content-Type'] = content_type
+  response._content = payload
+  response._content_consumed = True
+  with mock.patch('langextract.io.requests.get', return_value=response):
+    actual = io.download_text_from_url(
+        'https://example.com/input.txt', show_progress=False
+    )
+  assert actual == expected
 
 
 if __name__ == '__main__':

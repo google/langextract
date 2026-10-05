@@ -31,11 +31,9 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
-  pull_request_target:
-    types: [labeled]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.inputs.pr_number || github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.inputs.pr_number || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 # Keep ordinary PR formatting and secure fork formatting on the same
@@ -107,6 +105,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      (github.event.inputs.pr_number == '' &&
+       github.event.inputs.pr_head_sha == '')
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
@@ -275,25 +277,41 @@ jobs:
       - name: Run Ollama integration tests
         run: tox -e ollama-integration
 
+  validate-fork-inputs:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.pr_number != '' ||
+       github.event.inputs.pr_head_sha != '')
+    permissions: {}
+    steps:
+      - name: Validate fork test request before environment approval
+        uses: actions/github-script@v9
+        with:
+          script: |
+            if (context.ref !== 'refs/heads/main') {
+              throw new Error('Fork live tests must be dispatched from main.');
+            }
+            const inputs = context.payload.inputs ?? {};
+            if (!/^[1-9]\d*$/.test((inputs.pr_number || '').trim())) {
+              throw new Error('Invalid pr_number: provide a positive PR number.');
+            }
+            if (!/^[0-9a-f]{40}$/i.test((inputs.pr_head_sha || '').trim())) {
+              throw new Error('Invalid pr_head_sha: provide the full 40-character SHA.');
+            }
+
   test-fork-pr:
+    needs: validate-fork-inputs
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
       name: live-keys
-    # Triggered by maintainer label on a fork PR or secure manual dispatch from
-    # main with an exact PR SHA.
+    # Dispatch from main so live-keys uses a protected repository branch.
     if: |
-      (
-        github.event_name == 'pull_request_target' &&
-        github.event.action == 'labeled' &&
-        github.event.label.name == 'ready-to-merge' &&
-        github.event.pull_request.head.repo.full_name != github.repository
-      ) || (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/main' &&
-        github.event.inputs.pr_number != '' &&
-        github.event.inputs.pr_head_sha != ''
-      )
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event.inputs.pr_number != '' ||
+       github.event.inputs.pr_head_sha != '')
 
     permissions:
       contents: read
@@ -317,23 +335,9 @@ jobs:
               throw new Error(`User ${context.actor} does not have maintainer permissions.`);
             }
 
-            let prNumber;
-            let shaToTest;
-            if (context.eventName === 'pull_request_target') {
-              prNumber = context.payload.pull_request.number;
-              shaToTest = context.payload.pull_request.head.sha;
-            } else {
-              const dispatchInputs = context.payload.inputs ?? {};
-              const prNumberInput = (dispatchInputs.pr_number || '').trim();
-              shaToTest = (dispatchInputs.pr_head_sha || '').trim();
-              if (!/^[1-9]\d*$/.test(prNumberInput)) {
-                throw new Error(`Invalid pr_number input: ${dispatchInputs.pr_number}`);
-              }
-              prNumber = Number.parseInt(prNumberInput, 10);
-              if (!/^[0-9a-f]{40}$/i.test(shaToTest)) {
-                throw new Error(`Invalid pr_head_sha input: ${shaToTest}`);
-              }
-            }
+            const dispatchInputs = context.payload.inputs;
+            const prNumber = Number.parseInt(dispatchInputs.pr_number.trim(), 10);
+            const shaToTest = dispatchInputs.pr_head_sha.trim();
 
             const { data: pullRequest } = await github.rest.pulls.get({
               owner: context.repo.owner,
@@ -359,16 +363,13 @@ jobs:
               );
             }
 
-            // Repeat this check here because workflow_dispatch does not carry
-            // the pull_request_target fork filter.
             if (headRepoFullName === `${context.repo.owner}/${context.repo.repo}`) {
               throw new Error(
                   `PR #${prNumber} is from the base repository; use normal PR checks instead.`
               );
             }
 
-            if (context.eventName === 'workflow_dispatch' &&
-                pullRequest.head.sha !== shaToTest) {
+            if (pullRequest.head.sha !== shaToTest) {
               throw new Error(
                   `PR #${prNumber} head moved to ${pullRequest.head.sha}. ` +
                   `Re-run workflow_dispatch with the latest SHA.`

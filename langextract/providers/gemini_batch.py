@@ -64,6 +64,14 @@ _UNSPECIFIED_REASONS = (
 )
 _STOP_REASONS = (1, "STOP")
 
+# Vertex AI batch imports its JSONL input with a loader that cannot store
+# empty JSON objects, so a default tool such as {"googleSearch": {}} fails the
+# whole job. An empty domain exclusion list means the same thing and imports.
+_GOOGLE_SEARCH_EMPTY_FIELDS = {
+    "googleSearch": "excludeDomains",
+    "google_search": "exclude_domains",
+}
+
 
 def _json_default(obj: Any) -> Any:
   """Serialize non-JSON-native objects used in provider configurations."""
@@ -270,6 +278,42 @@ def _ensure_bucket_lifecycle(
     )
 
 
+def _encode_batch_tools(tools: Sequence[Any]) -> list[Any]:
+  """Encode tools in a form that Vertex AI batch can import.
+
+  Vertex AI batch rejects input files that contain empty JSON objects. A
+  default google_search tool is therefore sent with an empty domain exclusion
+  list, which has the same meaning. Other tools with an empty configuration
+  have no equivalent form, so they are rejected before anything is uploaded.
+
+  Args:
+    tools: Tools as dictionaries or google.genai types.
+
+  Returns:
+    JSON-compatible tool dictionaries. The input is not modified.
+
+  Raises:
+    InferenceConfigError: If a tool configuration is empty and has no
+      equivalent form that Vertex AI batch can import.
+  """
+  encoded = json.loads(json.dumps(list(tools), default=_json_default))
+  for index, tool in enumerate(encoded):
+    if not isinstance(tool, dict):
+      continue
+    for key, value in list(tool.items()):
+      if value != {}:
+        continue
+      if key in _GOOGLE_SEARCH_EMPTY_FIELDS:
+        tool[key] = {_GOOGLE_SEARCH_EMPTY_FIELDS[key]: []}
+      else:
+        raise exceptions.InferenceConfigError(
+            f"Tool configuration tools[{index}].{key} is empty, and Vertex AI"
+            " batch cannot import empty objects. Set an option on this tool"
+            " if it has one, or disable batch mode to use it."
+        )
+  return encoded
+
+
 def _build_request(
     prompt: str,
     schema_config: dict | None,
@@ -294,7 +338,8 @@ def _build_request(
     gen_config: Optional generation configuration parameters.
     system_instruction: Optional system instruction text.
     safety_settings: Optional safety settings sequence.
-    tools: Optional tools sequence (e.g., google_search).
+    tools: Optional tools sequence (e.g., google_search). Tools are encoded
+        so that Vertex AI batch can import them; see _encode_batch_tools.
 
   Returns:
     A dictionary formatted for REST API file-based submission, containing:
@@ -303,6 +348,9 @@ def _build_request(
       * safetySettings: Optional safety settings.
       * tools: Optional tools.
       * generationConfig: Optional generation configuration and schema.
+
+  Raises:
+    InferenceConfigError: If a tool cannot be sent through Vertex AI batch.
   """
   request: dict[str, Any] = {
       "contents": [{"role": "user", "parts": [{"text": prompt}]}]
@@ -319,7 +367,7 @@ def _build_request(
     request["safetySettings"] = safety_settings
 
   if effective_tools:
-    request["tools"] = effective_tools
+    request["tools"] = _encode_batch_tools(effective_tools)
 
   if schema_config or effective_gen_config:
     generation_config = {}
@@ -832,6 +880,7 @@ def infer_batch(
     RuntimeError: If batch job fails or individual items have errors
         (when cfg.ignore_item_errors is False).
     TimeoutError: If batch job doesn't complete within cfg.timeout seconds.
+    InferenceConfigError: If a tool cannot be sent through Vertex AI batch.
   """
   if not prompts:
     return []

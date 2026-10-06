@@ -965,7 +965,9 @@ class GCSBatchCachingTest(parameterized.TestCase):
     self.assertLen(results, 1)
     self.assertLen(uploaded, 1)
     request = uploaded[0]["request"]
-    self.assertEqual(request["tools"], [{"googleSearch": {}}])
+    self.assertEqual(
+        request["tools"], [{"googleSearch": {"excludeDomains": []}}]
+    )
     self.assertNotIn("tools", request["generationConfig"])
     self.assertEqual(
         request["generationConfig"]["thinkingConfig"], {"thinkingBudget": 0}
@@ -1414,7 +1416,9 @@ class BatchOutputSchemaRequestTest(absltest.TestCase):
         tools=tools,
     )
 
-    self.assertEqual(request["tools"], tools)
+    self.assertEqual(
+        request["tools"], [{"google_search": {"exclude_domains": []}}]
+    )
     self.assertNotIn("tools", request["generationConfig"])
     self.assertEqual(
         request["generationConfig"],
@@ -1426,9 +1430,11 @@ class BatchOutputSchemaRequestTest(absltest.TestCase):
     gen_config = {"tools": tools}
     request = gb._build_request("prompt", None, gen_config)
 
-    self.assertEqual(request["tools"], tools)
+    self.assertEqual(
+        request["tools"], [{"google_search": {"exclude_domains": []}}]
+    )
     self.assertNotIn("generationConfig", request)
-    self.assertIn("tools", gen_config)
+    self.assertEqual(gen_config, {"tools": [{"google_search": {}}]})
 
   @mock.patch.object(genai, "Client", autospec=True)
   def test_batch_places_tools_at_top_level_and_forwards_thinking_config(
@@ -1473,10 +1479,93 @@ class BatchOutputSchemaRequestTest(absltest.TestCase):
         list(model.infer(["test prompt"]))
 
         request = mock_submit.call_args[0][2][0]
-        self.assertEqual(request["tools"], tools)
+        self.assertEqual(
+            request["tools"], [{"google_search": {"exclude_domains": []}}]
+        )
         generation_config = request["generationConfig"]
         self.assertNotIn("tools", generation_config)
         self.assertEqual(generation_config["thinkingConfig"], thinking_config)
+
+
+class BatchToolEncodingTest(parameterized.TestCase):
+  """Tests for encoding tools so that Vertex AI batch can import them."""
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="typed",
+          tool=genai.types.Tool(google_search=genai.types.GoogleSearch()),
+          expected={"googleSearch": {"excludeDomains": []}},
+      ),
+      dict(
+          testcase_name="camel_case_dict",
+          tool={"googleSearch": {}},
+          expected={"googleSearch": {"excludeDomains": []}},
+      ),
+      dict(
+          testcase_name="snake_case_dict",
+          tool={"google_search": {}},
+          expected={"google_search": {"exclude_domains": []}},
+      ),
+  )
+  def test_default_google_search_gets_empty_exclusion_list(
+      self, tool, expected
+  ):
+    request = gb._build_request("prompt", None, None, tools=[tool])
+
+    self.assertEqual(request["tools"], [expected])
+
+  def test_configured_google_search_is_unchanged(self):
+    tools = [{"googleSearch": {"excludeDomains": ["example.com"]}}]
+
+    request = gb._build_request("prompt", None, None, tools=tools)
+
+    self.assertEqual(request["tools"], tools)
+
+  def test_caller_tools_are_not_modified(self):
+    tools = [{"google_search": {}}]
+
+    gb._build_request("prompt", None, None, tools=tools)
+
+    self.assertEqual(tools, [{"google_search": {}}])
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="typed_code_execution",
+          tool=genai.types.Tool(code_execution=genai.types.ToolCodeExecution()),
+          path="tools[0].codeExecution",
+      ),
+      dict(
+          testcase_name="url_context_dict",
+          tool={"url_context": {}},
+          path="tools[0].url_context",
+      ),
+  )
+  def test_other_empty_tool_config_is_rejected(self, tool, path):
+    with self.assertRaises(core_exceptions.InferenceConfigError) as raised:
+      gb._build_request("prompt", None, None, tools=[tool])
+
+    self.assertIn(path, str(raised.exception))
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_rejected_tool_fails_before_upload(self, mock_client_cls):
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+
+    with mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit:
+      with self.assertRaises(core_exceptions.InferenceConfigError):
+        gb.infer_batch(
+            mock_client,
+            "gemini-3.5-flash",
+            ["prompt"],
+            None,
+            {},
+            gb.BatchConfig(enable_caching=False),
+            project="p",
+            location="l",
+            tools=[{"code_execution": {}}],
+        )
+
+    mock_submit.assert_not_called()
 
 
 if __name__ == "__main__":

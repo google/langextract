@@ -14,10 +14,14 @@
 
 """Tests for langextract.visualization."""
 
+import pathlib
+import shutil
+import tempfile
 from unittest import mock
 
 from absl.testing import absltest
 
+from langextract import io
 from langextract import visualization
 from langextract.core import data
 
@@ -154,6 +158,60 @@ class VisualizationTest(absltest.TestCase):
     actual_html = visualization.visualize(doc)
 
     self.assertEqual(actual_html, expected_html)
+
+  def _write_two_doc_jsonl(self):
+    docs = []
+    for doc_id, text in (("doc-a", "Alpha text"), ("doc-b", "Bravo text")):
+      docs.append(
+          data.AnnotatedDocument(
+              document_id=doc_id,
+              text=text,
+              extractions=[
+                  data.Extraction(
+                      extraction_class="WORD",
+                      extraction_text=text.split()[0],
+                      char_interval=data.CharInterval(
+                          start_pos=0, end_pos=len(text.split()[0])
+                      ),
+                  )
+              ],
+          )
+      )
+    path = pathlib.Path(tempfile.mkdtemp()) / "docs.jsonl"
+    self.addCleanup(shutil.rmtree, path.parent, ignore_errors=True)
+    io.save_annotated_documents(iter(docs), path.parent, path.name, show_progress=False)
+    return path
+
+  @mock.patch.object(visualization, "HTML", new=None)
+  def test_visualize_jsonl_defaults_to_first_document(self):
+    path = self._write_two_doc_jsonl()
+
+    html = visualization.visualize(path)
+
+    self.assertIn("Alpha", html)
+    self.assertNotIn("Bravo", html)
+
+  @mock.patch.object(visualization, "HTML", new=None)
+  def test_visualize_jsonl_selects_document_by_id(self):
+    path = self._write_two_doc_jsonl()
+
+    html = visualization.visualize(path, document_id="doc-b")
+
+    self.assertIn("Bravo", html)
+    self.assertNotIn("Alpha", html)
+
+  @mock.patch.object(visualization, "HTML", new=None)
+  def test_visualize_jsonl_unknown_document_id_lists_available(self):
+    path = self._write_two_doc_jsonl()
+
+    with self.assertRaisesRegex(ValueError, "doc-a.*doc-b"):
+      visualization.visualize(path, document_id="missing")
+
+  def test_visualize_document_id_with_annotated_document_raises(self):
+    doc = data.AnnotatedDocument(text="Some text.", extractions=[])
+
+    with self.assertRaisesRegex(ValueError, "JSONL path"):
+      visualization.visualize(doc, document_id="doc-a")
 
 
 if __name__ == "__main__":

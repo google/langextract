@@ -179,7 +179,9 @@ class VisualizationTest(absltest.TestCase):
       )
     path = pathlib.Path(tempfile.mkdtemp()) / "docs.jsonl"
     self.addCleanup(shutil.rmtree, path.parent, ignore_errors=True)
-    io.save_annotated_documents(iter(docs), path.parent, path.name, show_progress=False)
+    io.save_annotated_documents(
+        iter(docs), path.parent, path.name, show_progress=False
+    )
     return path
 
   @mock.patch.object(visualization, "HTML", new=None)

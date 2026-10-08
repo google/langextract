@@ -595,14 +595,13 @@ def visualize(
       annotated_doc = documents[0]
     else:
       annotated_doc = next(
-          (d for d in documents if d._document_id == document_id), None
+          (d for d in documents if d.document_id == document_id), None
       )
       if annotated_doc is None:
-        available = [d._document_id for d in documents if d._document_id]
+        available = [d.document_id for d in documents]
         raise ValueError(
             f'document_id {document_id!r} not found in {file_path}. Available'
-            f' ({len(available)} of {len(documents)} documents have ids):'
-            f' {available[:10]}'
+            f' (showing up to 10 of {len(available)}): {available[:10]}'
         )
   else:
     if document_id is not None:

@@ -141,6 +141,28 @@ class VisualizationTest(absltest.TestCase):
   @mock.patch.object(
       visualization, "HTML", new=None
   )  # Ensures visualize returns str
+  def test_visualize_highlights_are_clickable(self):
+
+    doc = data.AnnotatedDocument(
+        text="Patient needs Aspirin.",
+        extractions=[
+            data.Extraction(
+                extraction_class="MEDICATION",
+                extraction_text="Aspirin",
+                char_interval=data.CharInterval(start_pos=14, end_pos=21),
+            )
+        ],
+    )
+
+    actual_html = visualization.visualize(doc)
+
+    self.assertIn("cursor: pointer", actual_html)
+    self.assertIn("addEventListener('click'", actual_html)
+    self.assertIn("closest('.lx-highlight')", actual_html)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
   def test_visualize_no_extractions_renders_text_and_empty_legend(self):
 
     doc = data.AnnotatedDocument(text="No entities here.", extractions=[])

@@ -455,7 +455,8 @@ class Resolver(AbstractResolver):
     associated index keys (identified by the index_suffix). It sorts these pairs
     by their indices in ascending order and excludes pairs without an index key,
     returning a list of lists of tuples (extraction_class: str, extraction_text:
-    str).
+    str). Empty or whitespace-only values are skipped because they have no text
+    to ground in the source.
 
     Args:
         extraction_data: A list of dictionaries. Each dictionary contains pairs
@@ -514,6 +515,13 @@ class Resolver(AbstractResolver):
 
         if not isinstance(extraction_value, str):
           extraction_value = str(extraction_value)
+
+        if not extraction_value.strip():
+          # No text to ground in the source; treat it like an omitted key.
+          logging.debug(
+              "Empty value for %s. Skipping extraction.", extraction_class
+          )
+          continue
 
         if index_suffix:
           index_key = extraction_class + index_suffix

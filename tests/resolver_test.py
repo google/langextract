@@ -1936,6 +1936,28 @@ class ResolverTest(parameterized.TestCase):
     for extraction in aligned:
       self.assertIsNotNone(extraction.char_interval)
 
+  def test_resolve_and_align_only_empty_value_returns_no_extractions(self):
+    resolver = resolver_lib.Resolver(format_type=data.FormatType.JSON)
+    model_output = textwrap.dedent(f"""\
+        {{
+          "{data.EXTRACTIONS_KEY}": [
+            {{"frequency": ""}}
+          ]
+        }}""")
+
+    # Before empty values were skipped, align raised ValueError here because
+    # no extraction tokens remained to match against the source.
+    aligned = list(
+        resolver.align(
+            resolver.resolve(model_output),
+            "Patient takes 10mg Lisinopril daily.",
+            token_offset=0,
+            char_offset=0,
+        )
+    )
+
+    self.assertEmpty(aligned)
+
   def test_resolve_parse_error_suppressed_logs_opt_out(self):
     test_input = "```json\n```not valid at all"
     with mock.patch.object(resolver_lib, "logging", autospec=True) as mock_log:

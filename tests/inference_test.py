@@ -607,6 +607,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
         tools=["tool1", "tool2"],
         stop_sequences=["\n\n"],
         system_instruction="Be helpful",
+        thinking_config={"thinking_level": "minimal"},
         # Unknown parameters to test filtering
         unknown_param="should_be_ignored",
         another_unknown="also_ignored",
@@ -616,6 +617,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
         "tools": ["tool1", "tool2"],
         "stop_sequences": ["\n\n"],
         "system_instruction": "Be helpful",
+        "thinking_config": {"thinking_level": "minimal"},
     }
     self.assertEqual(
         expected_extra_kwargs,
@@ -630,13 +632,108 @@ class TestGeminiLanguageModel(absltest.TestCase):
     call_args = mock_client.models.generate_content.call_args
     config = call_args.kwargs["config"]
 
-    for key in ["tools", "stop_sequences", "system_instruction"]:
+    for key in [
+        "tools",
+        "stop_sequences",
+        "system_instruction",
+        "thinking_config",
+    ]:
       self.assertIn(key, config, f"Expected {key} to be in API config")
       self.assertEqual(
           expected_extra_kwargs[key],
           config[key],
           f"Config value for {key} should match what was provided",
       )
+    for key in ["max_output_tokens", "top_p", "top_k"]:
+      self.assertNotIn(key, config)
+
+  @mock.patch("google.genai.Client", autospec=True)
+  def test_gemini_runtime_generation_params_override_constructor(
+      self, mock_client_class
+  ):
+    """Runtime generation settings override constructor defaults."""
+    mock_client = mock_client_class.return_value
+
+    mock_response = mock.Mock()
+    mock_response.text = '{"result": "test"}'
+    mock_client.models.generate_content.return_value = mock_response
+
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        api_key="test-key",
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+    )
+    runtime_params = {
+        "max_output_tokens": 4096,
+        "top_p": 0.8,
+        "top_k": 20,
+    }
+
+    list(model.infer(["Test prompt"], **runtime_params))
+
+    mock_client.models.generate_content.assert_called_once()
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    for key, value in runtime_params.items():
+      self.assertIn(key, config)
+      self.assertEqual(value, config[key])
+
+  @mock.patch("google.genai.Client", autospec=True)
+  def test_gemini_runtime_none_clears_constructor_generation_params(
+      self, mock_client_class
+  ):
+    """Runtime None uses provider defaults instead of constructor settings."""
+    mock_client = mock_client_class.return_value
+    mock_client.models.generate_content.return_value = mock.Mock(
+        text='{"result": "test"}'
+    )
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        api_key="test-key",
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+    )
+
+    list(
+        model.infer(
+            ["Test prompt"],
+            temperature=None,
+            max_output_tokens=None,
+            top_p=None,
+            top_k=None,
+        )
+    )
+
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    for key in ["temperature", "max_output_tokens", "top_p", "top_k"]:
+      self.assertNotIn(key, config)
+
+  @mock.patch("google.genai.Client", autospec=True)
+  def test_gemini_runtime_none_clears_only_selected_generation_param(
+      self, mock_client_class
+  ):
+    """Runtime None clears one constructor setting without clearing siblings."""
+    mock_client = mock_client_class.return_value
+    mock_client.models.generate_content.return_value = mock.Mock(
+        text='{"result": "test"}'
+    )
+    model = gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        api_key="test-key",
+        max_output_tokens=8192,
+        top_p=0.95,
+        top_k=40,
+    )
+
+    list(model.infer(["Test prompt"], max_output_tokens=None, top_p=0.8))
+
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    self.assertNotIn("max_output_tokens", config)
+    self.assertEqual(0.0, config["temperature"])
+    self.assertEqual(0.8, config["top_p"])
+    self.assertEqual(40, config["top_k"])
 
   @mock.patch("google.genai.Client")
   def test_gemini_runtime_kwargs_filtered(self, mock_client_class):
@@ -659,6 +756,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
             prompts,
             candidate_count=2,
             safety_settings={"HARM_CATEGORY_DANGEROUS": "BLOCK_NONE"},
+            thinking_config={"thinking_level": "minimal"},
             unknown_runtime_param="ignored",
         )
     )
@@ -675,6 +773,11 @@ class TestGeminiLanguageModel(absltest.TestCase):
         {"HARM_CATEGORY_DANGEROUS": "BLOCK_NONE"},
         config.get("safety_settings"),
         "safety_settings should be passed through to API",
+    )
+    self.assertEqual(
+        {"thinking_level": "minimal"},
+        config.get("thinking_config"),
+        "thinking_config should be passed through to API",
     )
     self.assertNotIn(
         "unknown_runtime_param", config, "Unknown kwargs should be filtered out"
@@ -780,7 +883,12 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"name": "John", "age": 30}'))
+        mock.Mock(
+            message=mock.Mock(
+                content='{"name": "John", "age": 30}', refusal=None
+            ),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -851,7 +959,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -877,7 +988,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -900,7 +1014,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -924,7 +1041,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -946,7 +1066,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -969,7 +1092,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -992,7 +1118,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content="test output"))
+        mock.Mock(
+            message=mock.Mock(content="test output", refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
@@ -1018,7 +1147,10 @@ class TestOpenAILanguageModel(absltest.TestCase):
 
     mock_response = mock.Mock()
     mock_response.choices = [
-        mock.Mock(message=mock.Mock(content='{"result": "test"}'))
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
     ]
     mock_client.chat.completions.create.return_value = mock_response
 

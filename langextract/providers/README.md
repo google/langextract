@@ -197,16 +197,19 @@ result = lx.extract(
     max_char_buffer=3000,       # Document chunking
 )
 
-# 2. Provider-specific parameters passed via **kwargs:
+# 2. Provider-specific constructor parameters via language_model_params:
 result = lx.extract(
     text_or_documents="Your document",
     model_id="gemini-3.5-flash",
     prompt_description="Extract entities",
     examples=[...],
-    # These go directly to the Gemini provider:
-    temperature=0.7,          # Sampling temperature
-    api_key="your-key",      # Override environment variable
-    max_output_tokens=1000,  # Token limit
+    temperature=0.7,     # Common sampling parameter
+    api_key="your-key",  # Override environment variable
+    language_model_params={
+        "max_output_tokens": 1000,
+        "top_p": 0.95,
+        "top_k": 40,
+    },
 )
 ```
 
@@ -374,6 +377,14 @@ class MyProviderLanguageModel(base_model.BaseLanguageModel):
             result = self.client.generate(prompt, **kwargs)
             yield [types.ScoredOutput(score=1.0, output=result)]
 ```
+
+The built-in providers keep SDK response types inside the provider. A local
+helper such as `_response_to_scored_output()` translates usable text into
+`ScoredOutput` and raises a provider-tagged `InferenceRuntimeError` for blocked,
+refused, truncated, or otherwise unusable responses. `infer()` remains the
+public plugin contract; the helper is a convention, not a required base method.
+Providers using this pattern should re-raise `InferenceRuntimeError` before any
+retry or blanket exception handler so the diagnostic is preserved.
 
 **Pattern Registration Explained:**
 - The `@router.register` decorator patterns (e.g., `r'^mymodel'`, `r'^custom'`) define which model IDs your provider supports

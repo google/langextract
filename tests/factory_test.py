@@ -23,12 +23,120 @@ import os
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
+import openai as openai_sdk
+from openai.resources import chat as chat_resources
+from openai.types import chat
 
 from langextract import exceptions
 from langextract import factory
+from langextract import providers
+import langextract as lx
 from langextract.core import base_model
+from langextract.core import data
 from langextract.core import types
 from langextract.providers import router
+
+
+class OpenAIRoutingExtractionTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    router.clear()
+    self.addCleanup(router.clear)
+    self.enter_context(
+        mock.patch.object(providers, "load_plugins_once", autospec=True)
+    )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="fallback",
+          env={"LANGEXTRACT_API_KEY": "fallback"},
+          kwargs={},
+          expected="fallback",
+      ),
+      dict(
+          testcase_name="provider_precedence",
+          env={"OPENAI_API_KEY": "provider", "LANGEXTRACT_API_KEY": "fallback"},
+          kwargs={},
+          expected="provider",
+      ),
+      dict(
+          testcase_name="explicit_precedence",
+          env={"OPENAI_API_KEY": "env"},
+          kwargs={"api_key": "explicit"},
+          expected="explicit",
+      ),
+  )
+  def test_reasoning_model_key_precedence(self, env, kwargs, expected):
+    with mock.patch.dict(os.environ, env, clear=True):
+      result = factory._kwargs_with_environment_defaults("o3-mini", kwargs)
+
+    self.assertEqual(result["api_key"], expected)
+
+  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True)
+  def test_unrelated_o_prefix_does_not_receive_openai_key(self):
+    result = factory._kwargs_with_environment_defaults("openchat", {})
+
+    self.assertNotIn("api_key", result)
+
+  @parameterized.named_parameters(
+      dict(testcase_name="o1", model_id="o1"),
+      dict(testcase_name="o3_mini", model_id="o3-mini"),
+      dict(testcase_name="o4_mini", model_id="o4-mini"),
+      dict(testcase_name="gpt35", model_id="gpt-3.5-turbo"),
+  )
+  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True)
+  @mock.patch.object(openai_sdk, "OpenAI", autospec=True)
+  def test_extract_with_environment_key(self, mock_client_class, model_id):
+    client = mock_client_class.return_value
+    client.chat = chat_resources.Chat(client)
+    mock_create = self.enter_context(
+        mock.patch.object(chat_resources.Completions, "create", autospec=True)
+    )
+    mock_create.return_value = chat.ChatCompletion(
+        id="test",
+        created=0,
+        model=model_id,
+        object="chat.completion",
+        choices=[{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {
+                "role": "assistant",
+                "content": '{"extractions": [{"person": "Bob"}]}',
+            },
+        }],
+    )
+
+    result = lx.extract(
+        text_or_documents="Bob arrived.",
+        prompt_description="Extract person names.",
+        examples=[
+            data.ExampleData(
+                text="Alice arrived.",
+                extractions=[
+                    data.Extraction(
+                        extraction_class="person", extraction_text="Alice"
+                    )
+                ],
+            )
+        ],
+        model_id=model_id,
+        use_schema_constraints=False,
+        show_progress=False,
+    )
+
+    self.assertLen(result.extractions, 1)
+    extraction = result.extractions[0]
+    self.assertEqual(extraction.extraction_class, "person")
+    self.assertEqual(extraction.extraction_text, "Bob")
+    self.assertEqual(extraction.char_interval, data.CharInterval(0, 3))
+    self.assertEqual(mock_client_class.call_args.kwargs["api_key"], "test-key")
+    mock_create.assert_called_once()
+    request = mock_create.call_args.kwargs
+    self.assertEqual(request["model"], model_id)
+    self.assertNotIn("temperature", request)
 
 
 class FakeGeminiProvider(base_model.BaseLanguageModel):
@@ -70,9 +178,7 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
   def setUp(self):
     super().setUp()
     router.clear()
-    import langextract.providers as providers_module  # pylint: disable=import-outside-toplevel
-
-    providers_module._plugins_loaded = True
+    self.enter_context(mock.patch.object(providers, "_plugins_loaded", True))
     # Use direct registration for test providers to avoid module path issues
     router.register(r"^gemini", priority=100)(FakeGeminiProvider)
     router.register(r"^gpt", r"^o1", priority=100)(FakeOpenAIProvider)
@@ -80,9 +186,6 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
   def tearDown(self):
     super().tearDown()
     router.clear()
-    import langextract.providers as providers_module  # pylint: disable=import-outside-toplevel
-
-    providers_module._plugins_loaded = False
 
   def test_create_model_basic(self):
     """Test basic model creation."""

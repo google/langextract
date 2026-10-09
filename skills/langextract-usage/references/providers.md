@@ -29,21 +29,24 @@ result = lx.extract(
 
 Env: `OPENAI_API_KEY` (falls back to `LANGEXTRACT_API_KEY`).
 
-The OpenAI provider uses JSON mode (`response_format={"type":"json_object"}`)
-and reports `requires_fence_output=False`. Leave `fence_output` unset —
+The OpenAI provider uses JSON Schema constraints by default. For models
+without JSON Schema support, such as `gpt-3.5-turbo`, set
+`use_schema_constraints=False` to use JSON mode
+(`response_format={"type":"json_object"}`). Leave `fence_output` unset —
 `extract()` and the factory/provider layer auto-determine fence behavior
 from the provider's schema. The OpenAI provider parallelizes batched
 prompts with a `ThreadPoolExecutor` when `max_workers > 1`.
 
-The OpenAI provider does not expose a schema class, so
-`use_schema_constraints` is a no-op here. You can omit it (as shown above)
-or leave it at its default.
+**Auto-routing scope:** the built-in OpenAI provider matches GPT-3.5,
+GPT-4, GPT-5, and o-series model IDs (`^gpt-3\.5`, `^gpt-4`, `^gpt4\.`,
+`^gpt-5`, `^gpt5\.`, `^o[1-9]`). Both GPT and o-series IDs use the
+environment API keys above. Routing does not guarantee that a model
+supports every request option: o-series models currently require omitting
+`max_output_tokens`, which this provider maps to the unsupported
+`max_tokens` parameter.
 
-**Auto-routing scope:** the built-in OpenAI provider only auto-matches
-GPT-style `model_id`s (`^gpt-4`, `^gpt4\.`, `^gpt-5`, `^gpt5\.`), and the
-environment-default API-key lookup keys off `"gpt"` rather than
-`"openai"`. For **OpenAI-compatible endpoints** (LiteLLM, local servers,
-custom base URLs) or **non-GPT model IDs**, use `ModelConfig` with an
+For **OpenAI-compatible endpoints** (LiteLLM, local servers, custom base
+URLs) or model IDs outside these families, use `ModelConfig` with an
 explicit provider and kwargs:
 
 ```python

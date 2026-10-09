@@ -27,6 +27,7 @@ import time
 from typing import Any, Final, Iterator, Sequence
 
 from absl import logging
+from google.genai import types as genai_types
 
 from langextract.core import base_model
 from langextract.core import data
@@ -96,7 +97,76 @@ def _has_sdk_retry_options(http_options: Any) -> bool:
   return attempts is None or attempts > 1
 
 
+_MAX_TOKENS_HINT: Final[str] = (
+    ' The output token budget was exhausted before any text was emitted;'
+    ' consider raising max_output_tokens (thinking models may consume the'
+    ' budget on reasoning before any text is produced).'
+)
+
+
+def _no_text_diagnostic(
+    response: genai_types.GenerateContentResponse, text: str | None
+) -> str | None:
+  """Diagnose missing output that the SDK reports without raising.
+
+  Returning missing text as success can silently drop a blocked chunk.
+
+  Returns:
+    A provider diagnostic, or None for text and empty completions without a
+    block or abnormal finish reason, which retain existing resolver handling.
+  """
+  if text:
+    return None
+
+  prompt_feedback = response.prompt_feedback
+  block_reason = prompt_feedback.block_reason if prompt_feedback else None
+  candidate = response.candidates[0] if response.candidates else None
+  finish_reason = candidate.finish_reason if candidate else None
+  if block_reason == genai_types.BlockedReason.BLOCKED_REASON_UNSPECIFIED:
+    block_reason = None
+  if finish_reason == genai_types.FinishReason.FINISH_REASON_UNSPECIFIED:
+    finish_reason = None
+
+  if (
+      text == ''
+      and block_reason is None
+      and finish_reason in (None, genai_types.FinishReason.STOP)
+  ):
+    return None
+
+  if block_reason:
+    block_message = prompt_feedback.block_reason_message
+    detail = f': {block_message}' if block_message else ''
+    return (
+        'Gemini blocked the prompt'
+        f' (block_reason={block_reason.value}{detail}).'
+    )
+  if finish_reason and finish_reason != genai_types.FinishReason.STOP:
+    hint = (
+        _MAX_TOKENS_HINT
+        if finish_reason == genai_types.FinishReason.MAX_TOKENS
+        else ''
+    )
+    return (
+        f'Gemini returned no text (finish_reason={finish_reason.value}).{hint}'
+    )
+  if candidate and candidate.content and candidate.content.parts:
+    return (
+        'Gemini returned only non-text parts (e.g. a function call or'
+        ' thought-only output) where text output was expected.'
+    )
+  detail = f' (finish_reason={finish_reason.value})' if finish_reason else ''
+  return f'Gemini returned no text content{detail}.'
+
+
+_GENERATION_CONFIG_KEYS: Final[tuple[str, ...]] = (
+    'max_output_tokens',
+    'top_p',
+    'top_k',
+)
+
 _API_CONFIG_KEYS: Final[set[str]] = {
+    *_GENERATION_CONFIG_KEYS,
     'response_mime_type',
     'response_schema',
     'response_json_schema',
@@ -105,6 +175,7 @@ _API_CONFIG_KEYS: Final[set[str]] = {
     'tools',
     'stop_sequences',
     'candidate_count',
+    'thinking_config',
 }
 
 
@@ -205,9 +276,11 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         Subsequent delays increase exponentially.
       max_retry_delay: Maximum delay in seconds between retries.
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
-        forwarded to the API (response_schema, response_mime_type, tools,
-        safety_settings, stop_sequences, candidate_count, system_instruction).
-        See https://ai.google.dev/api/generate-content for details.
+        forwarded to the API, including generation settings
+        (max_output_tokens, top_p, top_k), response schemas, tools, safety
+        settings, stop sequences, candidate count, system instructions, and
+        thinking_config. See https://ai.google.dev/api/generate-content for
+        details.
     """
     try:
       # pylint: disable=import-outside-toplevel
@@ -365,11 +438,20 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           for key, value in self.gemini_schema.to_provider_config().items():
             call_config.setdefault(key, value)
 
+        # Generation-setting None markers suppress constructor fallbacks above
+        # but must not reach the SDK.
+        call_config = {
+            key: value
+            for key, value in call_config.items()
+            if value is not None
+        }
         response = self._client.models.generate_content(
             model=self.model_id, contents=prompt, config=call_config
         )
-        return core_types.ScoredOutput(score=1.0, output=response.text)
+        return self._response_to_scored_output(response)
 
+      except exceptions.InferenceRuntimeError:
+        raise
       except Exception as e:
         if attempt < self.max_retries and self._is_retryable_error(e):
           # Cap after jitter so the named maximum applies to the real sleep.
@@ -387,8 +469,23 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           delay = min(delay * 2, self.max_retry_delay)
           continue
         raise exceptions.InferenceRuntimeError(
-            f'Gemini API error: {e}', original=e
+            f'Gemini API error: {e}', original=e, provider='Gemini'
         ) from e
+
+  @staticmethod
+  def _response_to_scored_output(
+      response: genai_types.GenerateContentResponse,
+  ) -> core_types.ScoredOutput:
+    """Translate one Gemini SDK response into LangExtract output.
+
+    Raises:
+      InferenceRuntimeError: If the response has no usable text.
+    """
+    output_text = response.text
+    diagnostic = _no_text_diagnostic(response, output_text)
+    if diagnostic is not None:
+      raise exceptions.InferenceRuntimeError(diagnostic, provider='Gemini')
+    return core_types.ScoredOutput(score=1.0, output=output_text)
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs
@@ -407,11 +504,12 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     config = {
         'temperature': merged_kwargs.get('temperature', self.temperature),
     }
-    for key in ('max_output_tokens', 'top_p', 'top_k'):
+    # Preserve None here as an explicit marker that clears a constructor value.
+    for key in _GENERATION_CONFIG_KEYS:
       if key in merged_kwargs:
         config[key] = merged_kwargs[key]
 
-    handled_keys = {'temperature', 'max_output_tokens', 'top_p', 'top_k'}
+    handled_keys = {'temperature', *_GENERATION_CONFIG_KEYS}
     for key, value in merged_kwargs.items():
       if (
           key not in handled_keys
@@ -431,15 +529,18 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
               if self.gemini_schema
               else None
           )
-          # Remove schema fields from config for batch API - they're handled
-          # via schema_config
-          batch_config = dict(config)
+          # None markers implement clearing but must not reach the batch SDK.
+          batch_config = {
+              key: value for key, value in config.items() if value is not None
+          }
+          # Schema fields use the separate schema_config argument.
           batch_config.pop('response_mime_type', None)
           batch_config.pop('response_schema', None)
           batch_config.pop('response_json_schema', None)
           # Extract top-level fields that don't belong in generationConfig
           system_instruction = batch_config.pop('system_instruction', None)
           safety_settings = batch_config.pop('safety_settings', None)
+          tools = batch_config.pop('tools', None)
           outputs = gemini_batch.infer_batch(
               client=self._client,
               model_id=self.model_id,
@@ -449,6 +550,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
               cfg=self._batch_cfg,
               system_instruction=system_instruction,
               safety_settings=safety_settings,
+              tools=tools,
               project=self.project,
               location=self.location,
           )
@@ -491,6 +593,8 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           index = future_to_index[future]
           try:
             results[index] = future.result()
+          except exceptions.InferenceRuntimeError:
+            raise
           except Exception as e:
             raise exceptions.InferenceRuntimeError(
                 f'Parallel inference error: {str(e)}', original=e

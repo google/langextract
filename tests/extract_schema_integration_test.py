@@ -18,6 +18,7 @@ from unittest import mock
 import warnings
 
 from absl.testing import absltest
+from google import genai
 
 from langextract import factory
 import langextract as lx
@@ -78,6 +79,39 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
 
           # Result should be an AnnotatedDocument
           self.assertIsInstance(result, data.AnnotatedDocument)
+
+  def test_extract_forwards_gemini_generation_params(self):
+    """Gemini generation settings reach the SDK through extract()."""
+    generation_params = {
+        "max_output_tokens": 8192,
+        "top_p": 0.95,
+        "top_k": 40,
+    }
+
+    with mock.patch.object(genai, "Client", autospec=True) as client_class:
+      client = client_class.return_value
+      client.models.generate_content.return_value = mock.Mock(
+          text='{"extractions": []}'
+      )
+
+      result = lx.extract(
+          text_or_documents=self.test_text,
+          prompt_description="Extract conditions",
+          examples=self.examples,
+          model_id="gemini-3.5-flash",
+          api_key="test-key",
+          language_model_params=generation_params,
+          max_workers=1,
+          batch_length=1,
+          show_progress=False,
+      )
+
+    self.assertIsInstance(result, data.AnnotatedDocument)
+    client.models.generate_content.assert_called_once()
+    config = client.models.generate_content.call_args.kwargs["config"]
+    for key, value in generation_params.items():
+      self.assertIn(key, config)
+      self.assertEqual(value, config[key])
 
   @mock.patch.dict("os.environ", {"OLLAMA_BASE_URL": "http://localhost:11434"})
   def test_extract_with_ollama_uses_json_mode(self):

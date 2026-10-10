@@ -563,6 +563,25 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
               ),
           ],
       ),
+      dict(
+          testcase_name="invisible_only_values_skipped",
+          test_input=[{
+              "medication": "\ufeffLisinopril",
+              "medication_index": 1,
+              "dosage": "\u200b",
+              "dosage_index": 2,
+              "frequency": "\ufeff \u200b\u2060\x00",
+              "frequency_index": 3,
+          }],
+          expected_output=[
+              data.Extraction(
+                  extraction_class="medication",
+                  extraction_text="\ufeffLisinopril",
+                  extraction_index=1,
+                  group_index=0,
+              ),
+          ],
+      ),
   )
   def test_extract_ordered_extractions_success(
       self,

@@ -31,6 +31,7 @@ import math
 import operator
 import typing
 from typing import Final
+import unicodedata
 import warnings
 
 from absl import logging
@@ -83,6 +84,25 @@ ALIGNMENT_PARAM_KEYS: Final[frozenset[str]] = frozenset({
     "accept_match_lesser",
     "suppress_parse_errors",
 })
+
+# Unicode categories of control (Cc) and format (Cf) characters, which are
+# mostly invisible, such as zero-width spaces and byte order marks.
+_INVISIBLE_CATEGORIES: Final[frozenset[str]] = frozenset({"Cc", "Cf"})
+
+
+def _is_blank(text: str) -> bool:
+  """Returns whether text has nothing to ground in the source.
+
+  True for empty or whitespace-only text, and for text made only of control or
+  format characters such as zero-width spaces, which `str.strip()` keeps.
+
+  Args:
+    text: The extraction text to check.
+  """
+  return all(
+      char.isspace() or unicodedata.category(char) in _INVISIBLE_CATEGORIES
+      for char in text
+  )
 
 
 class AbstractResolver(abc.ABC):
@@ -455,8 +475,9 @@ class Resolver(AbstractResolver):
     associated index keys (identified by the index_suffix). It sorts these pairs
     by their indices in ascending order and excludes pairs without an index key,
     returning a list of lists of tuples (extraction_class: str, extraction_text:
-    str). Empty or whitespace-only values are skipped because they have no text
-    to ground in the source.
+    str). Values made only of whitespace, control, or format characters (such
+    as zero-width spaces) are skipped because they have no text to ground in
+    the source.
 
     Args:
         extraction_data: A list of dictionaries. Each dictionary contains pairs
@@ -516,7 +537,7 @@ class Resolver(AbstractResolver):
         if not isinstance(extraction_value, str):
           extraction_value = str(extraction_value)
 
-        if not extraction_value.strip():
+        if _is_blank(extraction_value):
           # No text to ground in the source; treat it like an omitted key.
           logging.debug(
               "Empty value for %s. Skipping extraction.", extraction_class

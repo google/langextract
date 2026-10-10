@@ -70,7 +70,8 @@ result = lx.extract(
     model_id="gemini-3.5-flash",
     extraction_passes=3,      # Multiple passes for improved recall
     max_workers=20,           # Parallel processing for speed
-    max_char_buffer=1000      # Smaller contexts for better accuracy
+    max_char_buffer=1000,     # Smaller contexts for better accuracy
+    fetch_urls=True
 )
 
 print(f"Extracted {len(result.extractions)} entities from {len(result.text):,} characters")

@@ -214,7 +214,13 @@ def _read_csv(
 
   try:
     with open(filepath, 'r', encoding='utf-8') as f:
-      df = pd.read_csv(f, usecols=column_names, dtype=str, delimiter=delimiter)
+      df = pd.read_csv(
+          f,
+          usecols=column_names,
+          dtype=str,
+          delimiter=delimiter,
+          keep_default_na=False,
+      )
       for _, row in df.iterrows():
         yield row.to_dict()
   except pd.errors.EmptyDataError as e:

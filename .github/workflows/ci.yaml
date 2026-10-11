@@ -16,7 +16,10 @@ name: CI
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch' &&
       (github.event.inputs.pr_number != '' || github.event.inputs.pr_head_sha != '') &&
-      format('Fork live tests: PR {0} @ {1}', github.event.inputs.pr_number, github.event.inputs.pr_head_sha) ||
+      format('Fork live tests: PR {0} @ {1}{2}', github.event.inputs.pr_number, github.event.inputs.pr_head_sha,
+        (github.event.inputs.acknowledge_security_findings != '' &&
+         github.event.inputs.acknowledge_security_findings == github.event.inputs.pr_head_sha) &&
+        ' (security findings acknowledged)' || '') ||
       format('CI: {0} on {1}', github.event_name, github.ref) }}
 
 on:
@@ -29,6 +32,13 @@ on:
         default: ""
       pr_head_sha:
         description: "Exact fork PR head SHA to test"
+        required: false
+        type: string
+        default: ""
+      acknowledge_security_findings:
+        description: >-
+          Only after reviewing high-severity security check findings: repeat
+          the exact PR head SHA to run live tests anyway
         required: false
         type: string
         default: ""
@@ -309,8 +319,81 @@ jobs:
               throw new Error('Invalid pr_head_sha: provide the full lowercase 40-character SHA.');
             }
 
-  test-fork-pr:
+  # Checks the exact fork commit before the live-keys environment can be
+  # approved. The check runs from main and reads the PR only as diff text.
+  security-check-fork-pr:
     needs: validate-fork-inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event.inputs.pr_number != '' ||
+       github.event.inputs.pr_head_sha != '')
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch PR commit as data only
+        env:
+          PR_HEAD_SHA: ${{ github.event.inputs.pr_head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --no-recurse-submodules origin "$PR_HEAD_SHA"
+          test "$(git rev-parse --verify "$PR_HEAD_SHA^{commit}")" = "$PR_HEAD_SHA"
+
+      - name: Save PR text
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('fs');
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(context.payload.inputs.pr_number),
+            });
+            const dir = process.env.RUNNER_TEMP;
+            fs.writeFileSync(`${dir}/title.txt`, pr.title || '');
+            fs.writeFileSync(`${dir}/body.txt`, pr.body || '');
+            fs.writeFileSync(`${dir}/branch.txt`, pr.head.ref || '');
+
+      - name: Run security check
+        env:
+          PR_HEAD_SHA: ${{ github.event.inputs.pr_head_sha }}
+          ACKNOWLEDGED_SHA: ${{ github.event.inputs.acknowledge_security_findings }}
+        run: |
+          set -euo pipefail
+          fail_flag=(--fail-on-high)
+          if [ -n "$ACKNOWLEDGED_SHA" ] && [ "$ACKNOWLEDGED_SHA" = "$PR_HEAD_SHA" ]; then
+            fail_flag=()
+            echo "::warning::A maintainer acknowledged security findings for $PR_HEAD_SHA."
+            printf '> Security findings acknowledged by %s for %s.\n\n' "$GITHUB_ACTOR" "$PR_HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          status=0
+          python3 .github/scripts/pr_security_check.py \
+            --base "$(git rev-parse HEAD)" --head "$PR_HEAD_SHA" \
+            --title-file "$RUNNER_TEMP/title.txt" \
+            --body-file "$RUNNER_TEMP/body.txt" \
+            --branch="$(cat "$RUNNER_TEMP/branch.txt")" \
+            --summary-out "$GITHUB_STEP_SUMMARY" \
+            --brief \
+            ${fail_flag[@]+"${fail_flag[@]}"} || status=$?
+          if [ "$status" -eq 3 ]; then
+            echo "::error::Live tests were not started: the security check found high-severity issues. See the job summary."
+          elif [ "$status" -ne 0 ]; then
+            echo "::error::Live tests were not started: the security check itself failed (exit $status)."
+          fi
+          exit "$status"
+
+  test-fork-pr:
+    needs: [validate-fork-inputs, security-check-fork-pr]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:

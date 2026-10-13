@@ -143,7 +143,7 @@ lx.io.save_annotated_documents([result], output_name="extraction_results.jsonl",
 
 # Generate the visualization from the file
 html_content = lx.visualize("extraction_results.jsonl")
-with open("visualization.html", "w") as f:
+with open("visualization.html", "w", encoding="utf-8") as f:
     if hasattr(html_content, 'data'):
         f.write(html_content.data)  # For Jupyter/Colab
     else:
@@ -164,6 +164,7 @@ For larger texts, you can process entire documents directly from URLs with paral
 # Process Romeo & Juliet directly from Project Gutenberg
 result = lx.extract(
     text_or_documents="https://www.gutenberg.org/files/1513/1513-0.txt",
+    fetch_urls=True,
     prompt_description=prompt,
     examples=examples,
     model_id="gemini-3.5-flash",

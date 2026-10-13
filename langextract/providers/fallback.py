@@ -116,6 +116,17 @@ def _looks_transient(error: BaseException) -> bool:
   )
 
 
+# (property name, getter) pairs that must match across all models.
+_OUTPUT_FORMAT_PROPERTIES = (
+    ('requires_fence_output', lambda model: model.requires_fence_output),
+    (
+        'format_type',
+        lambda model: getattr(model, 'format_type', types.FormatType.JSON),
+    ),
+    ('schema', lambda model: type(model.schema)),
+)
+
+
 def _model_label(model: base_model.BaseLanguageModel) -> str:
   """Returns the model's `model_id`, else its class name."""
   return getattr(model, 'model_id', None) or type(model).__name__
@@ -128,6 +139,42 @@ def _resolve_model(
   if isinstance(model_or_config, factory.ModelConfig):
     return factory.create_model(model_or_config)
   return model_or_config
+
+
+def _validate_models(models: Sequence[base_model.BaseLanguageModel]) -> None:
+  """Rejects an empty, nested or mixed-output-format model list.
+
+  Raises:
+    InferenceConfigError: If `models` is empty, contains a
+      `FallbackLanguageModel`, or the models differ in output format.
+  """
+  if not models:
+    raise exceptions.InferenceConfigError(
+        'FallbackLanguageModel needs at least one model.'
+    )
+  for model in models:
+    if isinstance(model, FallbackLanguageModel):
+      raise exceptions.InferenceConfigError(
+          f'Fallback model {_model_label(model)!r} is a'
+          ' FallbackLanguageModel, which cannot be nested.'
+      )
+  _check_same_output_format(models)
+
+
+def _check_same_output_format(
+    models: Sequence[base_model.BaseLanguageModel],
+) -> None:
+  """Raises if any model's output format differs from the first model's."""
+  first = models[0]
+  for model in models[1:]:
+    for name, getter in _OUTPUT_FORMAT_PROPERTIES:
+      if getter(model) != getter(first):
+        raise exceptions.InferenceConfigError(
+            f'Fallback model {_model_label(model)!r} has'
+            f' {name}={getter(model)!r} but first model'
+            f' {_model_label(first)!r} has {getter(first)!r}; all models must'
+            ' share one output format.'
+        )
 
 
 class FallbackLanguageModel(base_model.BaseLanguageModel):
@@ -179,6 +226,7 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
     """
     super().__init__()
     self._models = tuple(_resolve_model(entry) for entry in models)
+    _validate_models(self._models)
     self._retry_policy = retry_policy
     self._sleep = sleep
     self._served_model_ids: list[str] = []
@@ -267,17 +315,20 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
   @property
   def schema(self) -> schema_lib.BaseSchema | None:
     """The first model's schema."""
-    return None
+    return self._models[0].schema
 
   @property
   def requires_fence_output(self) -> bool:
     """The first model's fence requirement."""
-    return True
+    return self._models[0].requires_fence_output
 
   def set_fence_output(self, fence_output: bool | None) -> None:
     """Applies the fence preference to every model."""
-    del fence_output
+    for model in self._models:
+      model.set_fence_output(fence_output)
 
   def apply_output_schema(self, output_schema: types.JsonSchema) -> None:
     """Applies the output schema to every model."""
-    del output_schema
+    for model in self._models:
+      model.apply_output_schema(output_schema)
+    _check_same_output_format(self._models)

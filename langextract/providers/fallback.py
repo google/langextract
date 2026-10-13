@@ -25,6 +25,7 @@ from absl import logging
 
 from langextract import factory
 from langextract.core import base_model
+from langextract.core import exceptions
 from langextract.core import schema as schema_lib
 from langextract.core import types
 
@@ -56,6 +57,22 @@ class RetryPolicy:
   initial_delay_seconds: float = 1.0
   max_delay_seconds: float = 30.0
 
+  def __post_init__(self) -> None:
+    if self.max_attempts < 1:
+      raise exceptions.InferenceConfigError(
+          f'max_attempts must be at least 1, got {self.max_attempts}.'
+      )
+    if self.initial_delay_seconds < 0:
+      raise exceptions.InferenceConfigError(
+          'initial_delay_seconds must be non-negative, got'
+          f' {self.initial_delay_seconds}.'
+      )
+    if self.max_delay_seconds < self.initial_delay_seconds:
+      raise exceptions.InferenceConfigError(
+          f'max_delay_seconds ({self.max_delay_seconds}) must be at least'
+          f' initial_delay_seconds ({self.initial_delay_seconds}).'
+      )
+
   def delay_before_retry(self, retry_index: int) -> float:
     """Returns the capped exponential delay before a retry.
 
@@ -65,8 +82,9 @@ class RetryPolicy:
     Returns:
       Seconds to sleep before that retry.
     """
-    del retry_index
-    return 0.0
+    return min(
+        self.initial_delay_seconds * 2**retry_index, self.max_delay_seconds
+    )
 
 
 def _is_transient(error: Exception) -> bool:
@@ -213,15 +231,38 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
       batch_prompts: Sequence[str],
       kwargs: dict[str, Any],
   ) -> list[list[types.ScoredOutput]]:
-    """Runs the whole batch on one model, so a partial failure yields nothing."""
-    try:
-      return [list(outputs) for outputs in model.infer(batch_prompts, **kwargs)]
-    except Exception as error:
-      if _is_transient(error):
+    """Runs the whole batch on one model, retrying transient errors.
+
+    Each attempt materializes the full batch, so a partial failure yields
+    nothing. The backoff restarts for every model.
+
+    Returns:
+      The model's outputs for every prompt.
+
+    Raises:
+      Exception: A non-transient error at once, or the last transient error
+        after `max_attempts` attempts.
+    """
+    max_attempts = self._retry_policy.max_attempts
+    for attempt_index in range(max_attempts):
+      try:
+        return [
+            list(outputs) for outputs in model.infer(batch_prompts, **kwargs)
+        ]
+      except Exception as error:
+        if not _is_transient(error):
+          raise
         logging.warning(
-            'Transient %s from %s', type(error).__name__, _model_label(model)
+            'Transient %s from %s on attempt %d/%d',
+            type(error).__name__,
+            _model_label(model),
+            attempt_index + 1,
+            max_attempts,
         )
-      raise
+        if attempt_index + 1 == max_attempts:
+          raise
+        self._sleep(self._retry_policy.delay_before_retry(attempt_index))
+    raise AssertionError('unreachable: max_attempts is validated >= 1')
 
   @property
   def schema(self) -> schema_lib.BaseSchema | None:

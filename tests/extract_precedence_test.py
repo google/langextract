@@ -15,6 +15,7 @@
 """Tests for parameter precedence in extract()."""
 
 from unittest import mock
+import warnings
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -155,7 +156,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
   def test_temperature_merges_into_config_provider_kwargs(
       self, mock_create_model, mock_annotator_cls
   ):
-    """Test that an explicit temperature reaches the config's provider_kwargs."""
+    """Test that an explicit temperature reaches config.provider_kwargs."""
     config = factory.ModelConfig(
         model_id="config-model", provider_kwargs={"api_key": "config-key"}
     )
@@ -187,7 +188,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
   def test_explicit_temperature_overrides_config_provider_kwargs(
       self, mock_create_model, mock_annotator_cls
   ):
-    """Test that an explicit temperature wins over one set in provider_kwargs."""
+    """Test that an explicit temperature wins over config.provider_kwargs."""
     config = factory.ModelConfig(
         model_id="config-model", provider_kwargs={"temperature": 0.9}
     )
@@ -254,6 +255,75 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
       )
 
     mock_create_model.assert_not_called()
+
+  @mock.patch("langextract.annotation.Annotator")
+  def test_model_without_temperature_emits_no_temperature_warning(
+      self, mock_annotator_cls
+  ):
+    """Test that the model temperature warning needs an explicit value."""
+    provided_model = mock.MagicMock()
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    with warnings.catch_warnings(record=True) as caught:
+      warnings.simplefilter("always")
+      lx.extract(
+          text_or_documents="text",
+          prompt_description=self.description,
+          examples=self.examples,
+          model=provided_model,
+          use_schema_constraints=False,
+      )
+
+    self.assertEmpty(
+        [w for w in caught if "'temperature' is ignored" in str(w.message)]
+    )
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_explicit_temperature_overrides_language_model_params(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that an explicit temperature wins over language_model_params."""
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = True
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        model_id="gemini-3.5-flash",
+        temperature=0.0,
+        language_model_params={"temperature": 0.9},
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(called_config.provider_kwargs["temperature"], 0.0)
+
+  @mock.patch("langextract.annotation.Annotator")
+  @mock.patch("langextract.extraction.factory.create_model")
+  def test_language_model_params_temperature_used_without_explicit_temperature(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that a temperature in language_model_params applies by default."""
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = True
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        model_id="gemini-3.5-flash",
+        language_model_params={"temperature": 0.9},
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(called_config.provider_kwargs["temperature"], 0.9)
 
   @mock.patch("langextract.annotation.Annotator")
   @mock.patch("langextract.extraction.factory.create_model")

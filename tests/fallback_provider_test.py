@@ -105,11 +105,13 @@ class _ScriptedModel(base_model.BaseLanguageModel):
 
   The last outcome repeats once the list is used up. A `str` outcome answers
   every prompt, an `Exception` is raised on the first `next()`, and a
-  `_PartialFailure` answers the first prompt before raising.
+  `_PartialFailure` answers the first prompt before raising. Like a provider
+  built with schema constraints, it starts with a `FormatModeSchema` applied.
   """
 
   def __init__(self, model_id="scripted-a", outcomes=(_ALICE_OUTPUT,)):
     super().__init__()
+    self.apply_schema(schema_lib.FormatModeSchema())
     self.model_id = model_id
     self.outcomes = outcomes
     self.infer_calls = 0
@@ -128,8 +130,24 @@ class _ScriptedModel(base_model.BaseLanguageModel):
     for _ in batch_prompts:
       yield [types.ScoredOutput(score=1.0, output=outcome)]
 
+  @classmethod
+  def get_schema_class(cls):
+    return schema_lib.FormatModeSchema
+
   def apply_output_schema(self, output_schema):
     self.output_schemas.append(output_schema)
+
+
+class _SchemalessModel(_ScriptedModel):
+  """Fake provider whose type supports no schema."""
+
+  @classmethod
+  def get_schema_class(cls):
+    return None
+
+
+class _OtherFormatModeSchema(schema_lib.FormatModeSchema):
+  """Same output format as `FormatModeSchema`, different schema class."""
 
 
 def _base_member_handling(wrapper_class):
@@ -168,16 +186,10 @@ class _FallbackTestCase(parameterized.TestCase):
         sleep=self.sleeps.append,
     )
 
-  def _rate_limited_primary_configs(self):
+  def _rate_limited_primary_models(self):
     return [
-        factory.ModelConfig(
-            model_id="scripted-a",
-            provider_kwargs={"outcomes": (_RATE_LIMIT_ERROR,)},
-        ),
-        factory.ModelConfig(
-            model_id="scripted-b",
-            provider_kwargs={"outcomes": (_BOB_OUTPUT,)},
-        ),
+        _ScriptedModel("scripted-a", (_RATE_LIMIT_ERROR,)),
+        _ScriptedModel("scripted-b", (_BOB_OUTPUT,)),
     ]
 
 
@@ -328,7 +340,7 @@ class RouterIntegrationTest(_FallbackTestCase):
         factory.ModelConfig(
             provider="fallback",
             provider_kwargs={
-                "models": self._rate_limited_primary_configs(),
+                "models": self._rate_limited_primary_models(),
                 "retry_policy": fallback.RetryPolicy(max_attempts=1),
                 "sleep": self.sleeps.append,
             },
@@ -340,7 +352,7 @@ class RouterIntegrationTest(_FallbackTestCase):
     self.assertEqual(model.served_model_ids, ("scripted-b",))
 
   def test_extract_with_fallback_model_returns_fallback_extractions(self):
-    wrapper = self._wrap(*self._rate_limited_primary_configs())
+    wrapper = self._wrap(*self._rate_limited_primary_models())
 
     result = lx.extract(
         "Bob went home.",
@@ -352,7 +364,6 @@ class RouterIntegrationTest(_FallbackTestCase):
                 extractions=[data.Extraction("person", "Carol")],
             ),
         ],
-        use_schema_constraints=False,
         show_progress=False,
     )
 
@@ -520,9 +531,9 @@ class RetryPolicyTest(_FallbackTestCase):
       fallback.RetryPolicy(**policy_kwargs)
 
 
-def _turn_off_fence_of_second(first, second):
+def _turn_on_fence_of_second(first, second):
   del first
-  second.set_fence_output(False)
+  second.set_fence_output(True)
 
 
 def _make_second_yaml(first, second):
@@ -530,10 +541,9 @@ def _make_second_yaml(first, second):
   second.format_type = types.FormatType.YAML
 
 
-def _give_first_a_schema(first, second):
+def _give_first_another_schema_class(first, second):
   del second
-  first.apply_schema(schema_lib.FormatModeSchema())
-  first.set_fence_output(True)
+  first.apply_schema(_OtherFormatModeSchema())
 
 
 class ConfigurationTest(_FallbackTestCase):
@@ -552,13 +562,13 @@ class ConfigurationTest(_FallbackTestCase):
           ],
       ),
       dict(
-          testcase_name="fallback_model_config",
+          testcase_name="fallback_model_from_config",
           build_models=lambda: [
-              factory.ModelConfig(
-                  provider="fallback",
-                  provider_kwargs={
-                      "models": [factory.ModelConfig(model_id="scripted-a")]
-                  },
+              factory.create_model(
+                  factory.ModelConfig(
+                      provider="fallback",
+                      provider_kwargs={"models": [_ScriptedModel()]},
+                  )
               )
           ],
       ),
@@ -569,10 +579,42 @@ class ConfigurationTest(_FallbackTestCase):
     ):
       self._wrap(*build_models())
 
+  def test_create_model_rejects_model_config_entry(self):
+    config = factory.ModelConfig(
+        provider="fallback",
+        provider_kwargs={
+            "models": [factory.ModelConfig(model_id="scripted-a")]
+        },
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, r"ModelConfig.*create_model"
+    ):
+      factory.create_model(config)
+
+  def test_rejects_provider_without_schema_support(self):
+    first = _ScriptedModel("scripted-a")
+    second = _SchemalessModel("scripted-b")
+
+    with self.assertRaisesRegex(
+        NotImplementedError, r"scripted-b.*_SchemalessModel.*schema"
+    ):
+      self._wrap(first, second)
+
+  def test_rejects_model_without_schema(self):
+    first = _ScriptedModel("scripted-a")
+    second = _ScriptedModel("scripted-b")
+    second.apply_schema(None)
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, r"scripted-b.*no schema"
+    ):
+      self._wrap(first, second)
+
   @parameterized.named_parameters(
       dict(
           testcase_name="fence",
-          setup=_turn_off_fence_of_second,
+          setup=_turn_on_fence_of_second,
           property_name="requires_fence_output",
       ),
       dict(
@@ -582,7 +624,7 @@ class ConfigurationTest(_FallbackTestCase):
       ),
       dict(
           testcase_name="schema_class",
-          setup=_give_first_a_schema,
+          setup=_give_first_another_schema_class,
           property_name="schema",
       ),
   )
@@ -613,7 +655,7 @@ class ConfigurationTest(_FallbackTestCase):
     second = _ScriptedModel("scripted-b")
     wrapper = self._wrap(first, second)
 
-    wrapper.set_fence_output(False)
+    wrapper.set_fence_output(True)
 
     self.assertEqual(
         [
@@ -621,7 +663,7 @@ class ConfigurationTest(_FallbackTestCase):
             second.requires_fence_output,
             wrapper.requires_fence_output,
         ],
-        [False, False, False],
+        [True, True, True],
     )
 
   def test_schema_is_first_model_schema(self):

@@ -25,7 +25,6 @@ from typing import Any
 
 from absl import logging
 
-from langextract import factory
 from langextract.core import base_model
 from langextract.core import exceptions
 from langextract.core import schema as schema_lib
@@ -163,33 +162,52 @@ def _model_label(model: base_model.BaseLanguageModel) -> str:
   return getattr(model, 'model_id', None) or type(model).__name__
 
 
-def _resolve_model(
-    model_or_config: factory.ModelConfig | base_model.BaseLanguageModel,
-) -> base_model.BaseLanguageModel:
-  """Builds a model from a config; returns an already-built model as is."""
-  if isinstance(model_or_config, factory.ModelConfig):
-    return factory.create_model(model_or_config)
-  return model_or_config
-
-
 def _validate_models(models: Sequence[base_model.BaseLanguageModel]) -> None:
-  """Rejects an empty, nested or mixed-output-format model list.
+  """Rejects an empty model list, unsupported models or mixed output formats.
 
   Raises:
-    InferenceConfigError: If `models` is empty, contains a
-      `FallbackLanguageModel`, or the models differ in output format.
+    InferenceConfigError: If `models` is empty, an entry is not a built model
+      (for example a `ModelConfig`), is a `FallbackLanguageModel`, has no
+      schema applied, or the models differ in output format.
+    NotImplementedError: If a model's provider type supports no schema.
   """
   if not models:
     raise exceptions.InferenceConfigError(
         'FallbackLanguageModel needs at least one model.'
     )
   for model in models:
-    if isinstance(model, FallbackLanguageModel):
-      raise exceptions.InferenceConfigError(
-          f'Fallback model {_model_label(model)!r} is a'
-          ' FallbackLanguageModel, which cannot be nested.'
-      )
+    _check_schema_configured_model(model)
   _check_same_output_format(models)
+
+
+def _check_schema_configured_model(model: Any) -> None:
+  """Raises unless `model` is a built, schema-configured, non-fallback model."""
+  label = _model_label(model)
+  if not isinstance(model, base_model.BaseLanguageModel):
+    raise exceptions.InferenceConfigError(
+        f'Fallback model {label!r} is a {type(model).__name__}, not a built'
+        ' model. Build it with factory.create_model(config,'
+        ' examples=examples, use_schema_constraints=True) so it keeps its'
+        ' schema.'
+    )
+  if isinstance(model, FallbackLanguageModel):
+    raise exceptions.InferenceConfigError(
+        f'Fallback model {label!r} is a FallbackLanguageModel, which cannot'
+        ' be nested.'
+    )
+  if type(model).get_schema_class() is None:
+    # why: an unsupported provider type is a missing feature, not a bad value.
+    raise NotImplementedError(
+        f'Fallback model {label!r} is a {type(model).__name__}, whose'
+        ' provider supports no schema; FallbackLanguageModel only wraps'
+        ' schema-capable providers (Gemini, OpenAI, Ollama).'
+    )
+  if model.schema is None:
+    raise exceptions.InferenceConfigError(
+        f'Fallback model {label!r} has no schema applied. Build it with'
+        ' factory.create_model(config, examples=examples,'
+        ' use_schema_constraints=True) or output_schema=...'
+    )
 
 
 def _check_same_output_format(
@@ -228,26 +246,35 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
   `served_model_ids` is the ordered list of serving-model labels for every
   successful `infer` call on this wrapper instance since construction (it
   accumulates across documents, passes and extract calls; it is not reset
-  per run). All models must share one output format and cannot be fallback
-  models themselves. Inner providers keep their own internal retries (for
-  example Gemini `max_retries`), so you may want to set those to 0.
+  per run). Inner providers keep their own internal retries (for example
+  Gemini `max_retries`), so you may want to set those to 0.
 
-  Select it through the router with `provider='fallback'` and leave
-  `model_id` unset::
+  Only schema-capable providers are supported: the built-in Gemini
+  (`GeminiSchema`), OpenAI (`OpenAISchema`) and Ollama (`FormatModeSchema`)
+  models, or any provider whose `get_schema_class()` returns a schema class.
+  Every model must be built, with its schema already applied, because the
+  wrapper never sees the examples a schema is built from. All models must
+  share one output format, including the schema class, so a constrained chain
+  stays within one provider family. Fallback models cannot be nested.
 
-    factory.ModelConfig(
-        provider='fallback',
-        provider_kwargs={
-            'models': [config_a, config_b],
-            'retry_policy': RetryPolicy(max_attempts=3),
-            'sleep': time.sleep,
-        },
+  Build the models first, then wrap them (or pass the built models as
+  `provider_kwargs={'models': [...]}` with `provider='fallback'`)::
+
+    flash = factory.create_model(
+        flash_config, examples=examples, use_schema_constraints=True
     )
+    pro = factory.create_model(
+        pro_config, examples=examples, use_schema_constraints=True
+    )
+    model = FallbackLanguageModel(
+        [flash, pro], retry_policy=RetryPolicy(max_attempts=3)
+    )
+    lx.extract(..., model=model)
   """
 
   def __init__(
       self,
-      models: Sequence[factory.ModelConfig | base_model.BaseLanguageModel],
+      models: Sequence[base_model.BaseLanguageModel],
       *,
       retry_policy: RetryPolicy = RetryPolicy(),
       sleep: Callable[[float], None] = time.sleep,
@@ -255,12 +282,18 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
     """Initializes the fallback chain.
 
     Args:
-      models: Ordered model configs or built models; the first is tried first.
+      models: Ordered built models with schemas applied; the first is tried
+        first.
       retry_policy: Retry count and backoff applied to each model.
       sleep: Called with the backoff delay; inject a recorder in tests.
+
+    Raises:
+      InferenceConfigError: If a model is not built, has no schema, is a
+        fallback model, or the models differ in output format.
+      NotImplementedError: If a model's provider type supports no schema.
     """
     super().__init__()
-    self._models = tuple(_resolve_model(entry) for entry in models)
+    self._models = tuple(models)
     _validate_models(self._models)
     self._retry_policy = retry_policy
     self._sleep = sleep

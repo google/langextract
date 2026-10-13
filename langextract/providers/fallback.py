@@ -31,6 +31,7 @@ from langextract.core import types
 
 __all__ = ['FallbackLanguageModel', 'RetryPolicy']
 
+_BACKOFF_MULTIPLIER = 2
 _TRANSIENT_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
 _TRANSIENT_ERROR_TYPE_NAMES = frozenset({
     'ReadTimeout',
@@ -82,9 +83,10 @@ class RetryPolicy:
     Returns:
       Seconds to sleep before that retry.
     """
-    return min(
-        self.initial_delay_seconds * 2**retry_index, self.max_delay_seconds
+    uncapped_delay = self.initial_delay_seconds * (
+        _BACKOFF_MULTIPLIER**retry_index
     )
+    return min(uncapped_delay, self.max_delay_seconds)
 
 
 def _is_transient(error: Exception) -> bool:
@@ -256,20 +258,19 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
     last_error = None
     for model in self._models:
       try:
-        outputs = self._infer_with_retries(model, batch_prompts, kwargs)
+        batch_outputs = self._infer_with_retries(model, batch_prompts, kwargs)
       except Exception as error:
         # why: only transient errors fall through to the next model.
         if not _is_transient(error):
           raise
         last_error = error
         continue
-      self._served_model_ids.append(_model_label(model))
+      label = _model_label(model)
+      self._served_model_ids.append(label)
       logging.info(
-          'Batch of %d prompts served by %s',
-          len(batch_prompts),
-          _model_label(model),
+          'Batch of %d prompts served by %s', len(batch_prompts), label
       )
-      yield from outputs
+      yield from batch_outputs
       return
     raise last_error
 
@@ -295,7 +296,8 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
     for attempt_index in range(max_attempts):
       try:
         return [
-            list(outputs) for outputs in model.infer(batch_prompts, **kwargs)
+            list(prompt_outputs)
+            for prompt_outputs in model.infer(batch_prompts, **kwargs)
         ]
       except Exception as error:
         if not _is_transient(error):
@@ -323,12 +325,24 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
     return self._models[0].requires_fence_output
 
   def set_fence_output(self, fence_output: bool | None) -> None:
-    """Applies the fence preference to every model."""
+    """Applies the fence preference to every model.
+
+    Args:
+      fence_output: True to force fences, False to disable, None for auto.
+    """
     for model in self._models:
       model.set_fence_output(fence_output)
 
   def apply_output_schema(self, output_schema: types.JsonSchema) -> None:
-    """Applies the output schema to every model."""
+    """Applies the output schema to every model.
+
+    Args:
+      output_schema: JSON schema for the raw output envelope.
+
+    Raises:
+      InferenceConfigError: If a model rejects the schema or applying it
+        leaves the models with different output formats.
+    """
     for model in self._models:
       model.apply_output_schema(output_schema)
     _check_same_output_format(self._models)

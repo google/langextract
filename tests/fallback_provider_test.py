@@ -69,7 +69,7 @@ class _CodeError(Exception):
     self.code = code
 
 
-class ReadTimeout(OSError):  # pylint: disable=invalid-name
+class ReadTimeout(OSError):
   """requests-style timeout: the class name matters, not the base."""
 
 
@@ -152,12 +152,12 @@ class _FallbackTestCase(parameterized.TestCase):
     )
     router.register(r"^scripted-")(_ScriptedModel)
     self.sleeps = []
-    self.policy = fallback.RetryPolicy(max_attempts=1)
+    self.retry_policy = fallback.RetryPolicy(max_attempts=1)
 
   def _wrap(self, *models, retry_policy=None):
     return fallback.FallbackLanguageModel(
         models,
-        retry_policy=retry_policy or self.policy,
+        retry_policy=retry_policy or self.retry_policy,
         sleep=self.sleeps.append,
     )
 
@@ -267,19 +267,6 @@ class FallbackOrderTest(_FallbackTestCase):
     self.assertIs(raised.exception, error)
     self.assertEqual(second.infer_calls, 0)
     self.assertEqual(self.sleeps, [])
-
-  def test_infer_raises_last_error_when_every_model_fails_transiently(self):
-    error_a = _runtime_error(_StatusError(429))
-    error_b = _runtime_error(_StatusError(503))
-    first = _ScriptedModel("scripted-a", (error_a,))
-    second = _ScriptedModel("scripted-b", (error_b,))
-
-    with self.assertRaises(exceptions.InferenceRuntimeError) as raised:
-      list(self._wrap(first, second).infer(["p1"]))
-
-    self.assertIs(raised.exception, error_b)
-    self.assertEqual(first.infer_calls, 1)
-    self.assertEqual(second.infer_calls, 1)
 
   def test_infer_restarts_from_first_model_for_each_batch(self):
     first = _ScriptedModel("scripted-a", (_RATE_LIMIT_ERROR, _ALICE_OUTPUT))
@@ -398,21 +385,29 @@ class RetryPolicyTest(_FallbackTestCase):
     self.assertEqual(first.infer_calls, 3)
     self.assertEqual(second.infer_calls, 1)
 
-  def test_infer_raises_last_error_after_retries_on_every_model(self):
+  @parameterized.named_parameters(
+      dict(testcase_name="single_attempt", max_attempts=1),
+      dict(testcase_name="repeated_attempts", max_attempts=2),
+  )
+  def test_infer_raises_last_error_when_every_model_fails_transiently(
+      self, max_attempts
+  ):
     error_a = _runtime_error(_StatusError(429))
     error_b = _runtime_error(_StatusError(503))
     first = _ScriptedModel("scripted-a", (error_a,))
     second = _ScriptedModel("scripted-b", (error_b,))
     wrapper = self._wrap(
-        first, second, retry_policy=fallback.RetryPolicy(max_attempts=2)
+        first,
+        second,
+        retry_policy=fallback.RetryPolicy(max_attempts=max_attempts),
     )
 
     with self.assertRaises(exceptions.InferenceRuntimeError) as raised:
       list(wrapper.infer(["p1"]))
 
     self.assertIs(raised.exception, error_b)
-    self.assertEqual(first.infer_calls, 2)
-    self.assertEqual(second.infer_calls, 2)
+    self.assertEqual(first.infer_calls, max_attempts)
+    self.assertEqual(second.infer_calls, max_attempts)
 
   def test_infer_sleeps_capped_exponential_backoff(self):
     first = _ScriptedModel("scripted-a", (_RATE_LIMIT_ERROR,))
@@ -569,7 +564,7 @@ class ConfigurationTest(_FallbackTestCase):
 
     wrapper = self._wrap(first, second)
 
-    self.assertFalse(wrapper.requires_fence_output)
+    self.assertIs(wrapper.requires_fence_output, False)
 
   def test_set_fence_output_applies_to_every_model(self):
     first = _ScriptedModel("scripted-a")

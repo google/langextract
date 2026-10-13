@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 import dataclasses
+import math
+import numbers
 import time
 from typing import Any
 
@@ -28,11 +30,12 @@ from langextract.core import base_model
 from langextract.core import exceptions
 from langextract.core import schema as schema_lib
 from langextract.core import types
+from langextract.providers import retryable_http
 
 __all__ = ['FallbackLanguageModel', 'RetryPolicy']
 
 _BACKOFF_MULTIPLIER = 2
-_TRANSIENT_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_TRANSIENT_STATUS_CODES = retryable_http.RETRYABLE_HTTP_STATUS_CODES
 _TRANSIENT_ERROR_TYPE_NAMES = frozenset({
     'ReadTimeout',
     'ConnectTimeout',
@@ -40,6 +43,7 @@ _TRANSIENT_ERROR_TYPE_NAMES = frozenset({
     'TimeoutException',
     'APITimeoutError',
     'APIConnectionError',
+    'ConnectionError',  # requests/urllib3; builtin ConnectionError is isinstance
     'NetworkError',
 })
 
@@ -59,15 +63,16 @@ class RetryPolicy:
   max_delay_seconds: float = 30.0
 
   def __post_init__(self) -> None:
+    if not _is_non_bool_integral(self.max_attempts):
+      raise exceptions.InferenceConfigError(
+          f'max_attempts must be an integer >= 1, got {self.max_attempts!r}.'
+      )
     if self.max_attempts < 1:
       raise exceptions.InferenceConfigError(
           f'max_attempts must be at least 1, got {self.max_attempts}.'
       )
-    if self.initial_delay_seconds < 0:
-      raise exceptions.InferenceConfigError(
-          'initial_delay_seconds must be non-negative, got'
-          f' {self.initial_delay_seconds}.'
-      )
+    _reject_invalid_delay('initial_delay_seconds', self.initial_delay_seconds)
+    _reject_invalid_delay('max_delay_seconds', self.max_delay_seconds)
     if self.max_delay_seconds < self.initial_delay_seconds:
       raise exceptions.InferenceConfigError(
           f'max_delay_seconds ({self.max_delay_seconds}) must be at least'
@@ -87,6 +92,30 @@ class RetryPolicy:
         _BACKOFF_MULTIPLIER**retry_index
     )
     return min(uncapped_delay, self.max_delay_seconds)
+
+
+def _is_non_bool_integral(value: Any) -> bool:
+  """Returns True when `value` is an integer-like value, excluding bool."""
+  return isinstance(value, numbers.Integral) and not isinstance(value, bool)
+
+
+def _reject_invalid_delay(field_name: str, delay_seconds: float) -> None:
+  """Raises InferenceConfigError when a delay is not a finite non-negative number."""
+  if isinstance(delay_seconds, bool) or not isinstance(
+      delay_seconds, (int, float)
+  ):
+    raise exceptions.InferenceConfigError(
+        f'{field_name} must be a non-negative number, got {delay_seconds!r}.'
+    )
+  if math.isnan(delay_seconds) or math.isinf(delay_seconds):
+    raise exceptions.InferenceConfigError(
+        f'{field_name} must be a finite non-negative number, got'
+        f' {delay_seconds!r}.'
+    )
+  if delay_seconds < 0:
+    raise exceptions.InferenceConfigError(
+        f'{field_name} must be non-negative, got {delay_seconds}.'
+    )
 
 
 def _is_transient(error: Exception) -> bool:
@@ -188,16 +217,20 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
   next batch starts at the first model again, so put the cheaper model first.
 
   A transient error is one marked `retryable=True`, a timeout or connection
-  error, or one carrying an HTTP status of 408, 429, 500, 502, 503 or 504 (on
-  the error or its `original`). Other errors, such as configuration or
-  authentication failures, are raised unchanged without retry or fallback.
-  When every model fails transiently, the last error is raised unchanged.
-  Outputs of a model that fails part-way through a batch are discarded.
+  error, or one carrying a transient HTTP status (see
+  `retryable_http.RETRYABLE_HTTP_STATUS_CODES`) on the error or its
+  `original`. Other errors, such as configuration or authentication
+  failures, are raised unchanged without retry or fallback. When every model
+  fails transiently, the last error is raised unchanged. Outputs of a model
+  that fails part-way through a batch are discarded. Each retry or fallback
+  re-sends the whole batch of prompts.
 
-  `served_model_ids` records which model served each successful batch. All
-  models must share one output format and cannot be fallback models
-  themselves. Inner providers keep their own internal retries (for example
-  Gemini `max_retries`), so you may want to set those to 0.
+  `served_model_ids` is the ordered list of serving-model labels for every
+  successful `infer` call on this wrapper instance since construction (it
+  accumulates across documents, passes and extract calls; it is not reset
+  per run). All models must share one output format and cannot be fallback
+  models themselves. Inner providers keep their own internal retries (for
+  example Gemini `max_retries`), so you may want to set those to 0.
 
   Select it through the router with `provider='fallback'` and leave
   `model_id` unset::
@@ -236,7 +269,10 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
 
   @property
   def served_model_ids(self) -> tuple[str, ...]:
-    """Labels of the models that served each successful batch, in order."""
+    """Serving-model labels for each successful `infer`, in call order.
+
+    Grows for the lifetime of this wrapper; not cleared between extract runs.
+    """
     return tuple(self._served_model_ids)
 
   def infer(
@@ -293,7 +329,8 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
         after `max_attempts` attempts.
     """
     max_attempts = self._retry_policy.max_attempts
-    for attempt_index in range(max_attempts):
+    attempt_index = 0
+    while True:
       try:
         return [
             list(prompt_outputs)
@@ -309,10 +346,10 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
             attempt_index + 1,
             max_attempts,
         )
-        if attempt_index + 1 == max_attempts:
+        attempt_index += 1
+        if attempt_index >= max_attempts:
           raise
-        self._sleep(self._retry_policy.delay_before_retry(attempt_index))
-    raise AssertionError('unreachable: max_attempts is validated >= 1')
+        self._sleep(self._retry_policy.delay_before_retry(attempt_index - 1))
 
   @property
   def schema(self) -> schema_lib.BaseSchema | None:

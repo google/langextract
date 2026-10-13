@@ -73,6 +73,13 @@ class ReadTimeout(OSError):
   """requests-style timeout: the class name matters, not the base."""
 
 
+class _RequestsConnectionError(OSError):
+  """Stand-in for requests.exceptions.ConnectionError (MRO name matters)."""
+
+
+_RequestsConnectionError.__name__ = "ConnectionError"
+
+
 def _runtime_error(original=None, message="inference failed"):
   return exceptions.InferenceRuntimeError(message, original=original)
 
@@ -211,6 +218,10 @@ class FallbackOrderTest(_FallbackTestCase):
       dict(
           testcase_name="requests_read_timeout",
           error=_runtime_error(ReadTimeout()),
+      ),
+      dict(
+          testcase_name="requests_connection_error",
+          error=_runtime_error(_RequestsConnectionError()),
       ),
       dict(
           testcase_name="explicit_retryable",
@@ -424,6 +435,22 @@ class RetryPolicyTest(_FallbackTestCase):
 
     self.assertEqual(self.sleeps, [1.0, 2.0, 3.0])
 
+  def test_infer_restarts_backoff_for_each_model(self):
+    first = _ScriptedModel("scripted-a", (_RATE_LIMIT_ERROR,))
+    second = _ScriptedModel("scripted-b", (_RATE_LIMIT_ERROR,))
+    wrapper = self._wrap(
+        first,
+        second,
+        retry_policy=fallback.RetryPolicy(
+            max_attempts=3, initial_delay_seconds=1.0, max_delay_seconds=30.0
+        ),
+    )
+
+    with self.assertRaises(exceptions.InferenceRuntimeError):
+      list(wrapper.infer(["p1"]))
+
+    self.assertEqual(self.sleeps, [1.0, 2.0, 1.0, 2.0])
+
   def test_infer_does_not_sleep_after_success(self):
     first = _ScriptedModel("scripted-a", (_RATE_LIMIT_ERROR, _ALICE_OUTPUT))
     wrapper = self._wrap(
@@ -471,6 +498,21 @@ class RetryPolicyTest(_FallbackTestCase):
           testcase_name="max_below_initial",
           policy_kwargs=dict(initial_delay_seconds=2.0, max_delay_seconds=1.0),
           field="max_delay_seconds",
+      ),
+      dict(
+          testcase_name="nan_initial_delay",
+          policy_kwargs=dict(initial_delay_seconds=float("nan")),
+          field="initial_delay_seconds",
+      ),
+      dict(
+          testcase_name="fractional_attempts",
+          policy_kwargs=dict(max_attempts=2.5),
+          field="max_attempts",
+      ),
+      dict(
+          testcase_name="bool_attempts",
+          policy_kwargs=dict(max_attempts=True),
+          field="max_attempts",
       ),
   )
   def test_retry_policy_rejects_invalid_values(self, policy_kwargs, field):

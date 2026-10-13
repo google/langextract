@@ -18,6 +18,8 @@ This module defines the registration details for all built-in providers,
 using patterns from the centralized patterns module.
 """
 
+from __future__ import annotations
+
 from typing import TypedDict
 
 from langextract.providers import patterns

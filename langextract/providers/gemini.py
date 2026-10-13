@@ -36,6 +36,7 @@ from langextract.core import schema
 from langextract.core import types as core_types
 from langextract.providers import gemini_batch
 from langextract.providers import patterns
+from langextract.providers import retryable_http
 from langextract.providers import router
 from langextract.providers import schemas
 
@@ -47,7 +48,7 @@ _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_RETRY_DELAY = 1.0
 _DEFAULT_MAX_RETRY_DELAY = 16.0
 
-_RETRYABLE_API_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_RETRYABLE_API_CODES = retryable_http.RETRYABLE_HTTP_STATUS_CODES
 
 # Phrases are narrow on purpose: bare "quota" or "unavailable" can be permanent
 # (denied quota, region out of service); we only match the transient forms.

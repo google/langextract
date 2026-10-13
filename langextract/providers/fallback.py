@@ -21,12 +21,25 @@ import dataclasses
 import time
 from typing import Any
 
+from absl import logging
+
 from langextract import factory
 from langextract.core import base_model
 from langextract.core import schema as schema_lib
 from langextract.core import types
 
 __all__ = ['FallbackLanguageModel', 'RetryPolicy']
+
+_TRANSIENT_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_TRANSIENT_ERROR_TYPE_NAMES = frozenset({
+    'ReadTimeout',
+    'ConnectTimeout',
+    'Timeout',
+    'TimeoutException',
+    'APITimeoutError',
+    'APIConnectionError',
+    'NetworkError',
+})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,6 +67,49 @@ class RetryPolicy:
     """
     del retry_index
     return 0.0
+
+
+def _is_transient(error: Exception) -> bool:
+  """Returns whether `error` is worth retrying; never reads the message."""
+  explicit = getattr(error, 'retryable', None)
+  if isinstance(explicit, bool):
+    return explicit
+  candidates = (error, getattr(error, 'original', None))
+  return any(
+      _looks_transient(candidate)
+      for candidate in candidates
+      if candidate is not None
+  )
+
+
+def _looks_transient(error: BaseException) -> bool:
+  """Returns whether one error is a timeout, connection or 5xx/429 failure."""
+  if isinstance(error, (TimeoutError, ConnectionError)):
+    return True
+  for attribute in ('status_code', 'code'):
+    status = getattr(error, attribute, None)
+    if isinstance(status, int) and status in _TRANSIENT_STATUS_CODES:
+      return True
+  # why: SDK timeout classes (requests, httpx, openai) are matched by class
+  # name so optional SDKs need not be imported.
+  return any(
+      klass.__name__ in _TRANSIENT_ERROR_TYPE_NAMES
+      for klass in type(error).__mro__
+  )
+
+
+def _model_label(model: base_model.BaseLanguageModel) -> str:
+  """Returns the model's `model_id`, else its class name."""
+  return getattr(model, 'model_id', None) or type(model).__name__
+
+
+def _resolve_model(
+    model_or_config: factory.ModelConfig | base_model.BaseLanguageModel,
+) -> base_model.BaseLanguageModel:
+  """Builds a model from a config; returns an already-built model as is."""
+  if isinstance(model_or_config, factory.ModelConfig):
+    return factory.create_model(model_or_config)
+  return model_or_config
 
 
 class FallbackLanguageModel(base_model.BaseLanguageModel):
@@ -104,16 +160,16 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
       sleep: Called with the backoff delay; inject a recorder in tests.
     """
     super().__init__()
-    self._models = tuple(models)
+    self._models = tuple(_resolve_model(entry) for entry in models)
     self._retry_policy = retry_policy
     self._sleep = sleep
     self._served_model_ids: list[str] = []
-    self.model_id = None
+    self.model_id = _model_label(self._models[0])
 
   @property
   def served_model_ids(self) -> tuple[str, ...]:
     """Labels of the models that served each successful batch, in order."""
-    return ()
+    return tuple(self._served_model_ids)
 
   def infer(
       self, batch_prompts: Sequence[str], **kwargs: Any
@@ -124,14 +180,48 @@ class FallbackLanguageModel(base_model.BaseLanguageModel):
       batch_prompts: Batch of prompts.
       **kwargs: Passed to the serving model's `infer`.
 
-    Returns:
+    Yields:
       The serving model's outputs for the batch.
 
     Raises:
       Exception: The first non-transient error, or the last model's last
         transient error once every model is exhausted.
     """
-    yield from ()
+    last_error = None
+    for model in self._models:
+      try:
+        outputs = self._infer_with_retries(model, batch_prompts, kwargs)
+      except Exception as error:
+        # why: only transient errors fall through to the next model.
+        if not _is_transient(error):
+          raise
+        last_error = error
+        continue
+      self._served_model_ids.append(_model_label(model))
+      logging.info(
+          'Batch of %d prompts served by %s',
+          len(batch_prompts),
+          _model_label(model),
+      )
+      yield from outputs
+      return
+    raise last_error
+
+  def _infer_with_retries(
+      self,
+      model: base_model.BaseLanguageModel,
+      batch_prompts: Sequence[str],
+      kwargs: dict[str, Any],
+  ) -> list[list[types.ScoredOutput]]:
+    """Runs the whole batch on one model, so a partial failure yields nothing."""
+    try:
+      return [list(outputs) for outputs in model.infer(batch_prompts, **kwargs)]
+    except Exception as error:
+      if _is_transient(error):
+        logging.warning(
+            'Transient %s from %s', type(error).__name__, _model_label(model)
+        )
+      raise
 
   @property
   def schema(self) -> schema_lib.BaseSchema | None:

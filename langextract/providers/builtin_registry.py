@@ -48,4 +48,9 @@ BUILTIN_PROVIDERS: list[ProviderConfig] = [
         'target': 'langextract.providers.openai:OpenAILanguageModel',
         'priority': patterns.OPENAI_PRIORITY,
     },
+    {
+        'patterns': patterns.FALLBACK_PATTERNS,
+        'target': 'langextract.providers.fallback:FallbackLanguageModel',
+        'priority': patterns.FALLBACK_PRIORITY,
+    },
 ]

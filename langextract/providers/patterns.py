@@ -65,3 +65,7 @@ OLLAMA_PATTERNS = (
     r'^WizardLM/',
 )
 OLLAMA_PRIORITY = 10
+
+# Fallback provider patterns
+FALLBACK_PATTERNS = (r'^fallback$',)
+FALLBACK_PRIORITY = 10

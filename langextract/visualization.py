@@ -414,6 +414,19 @@ def _prepare_extraction_data(
   return extraction_data
 
 
+def _to_script_safe_json(value: object) -> str:
+  """Returns `value` as JSON that is safe to embed in an inline <script>."""
+  # Without these escapes, a string containing '</script>' or '<!--' could end
+  # the script element early or change how the rest of the page is parsed.
+  # The escapes decode back to the original characters.
+  return (
+      json.dumps(value)
+      .replace('<', '\\u003c')
+      .replace('>', '\\u003e')
+      .replace('&', '\\u0026')
+  )
+
+
 def _build_visualization_html(
     text: str,
     extractions: list[data.Extraction],
@@ -446,7 +459,7 @@ def _build_visualization_html(
   )
   legend_html = _build_legend_html(color_map) if show_legend else ''
 
-  js_data = json.dumps(extraction_data)
+  js_data = _to_script_safe_json(extraction_data)
 
   # Prepare pos_info_str safely for pytype for the f-string below
   first_extraction = extractions[0]

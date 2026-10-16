@@ -175,6 +175,8 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
     .lx-gif-optimized .lx-current-highlight { text-decoration-thickness: 4px; }
     </style>""")
 
+# The output starts with this tag because HTML requires a charset declaration
+# within the first 1024 bytes, and the CSS alone is longer than that.
 _HTML_CHARSET_META = '<meta charset="UTF-8">\n'
 
 
@@ -602,7 +604,7 @@ def visualize(
         '<div class="lx-animated-wrapper"><p>No valid extractions to'
         ' animate.</p></div>'
     )
-    full_html = _HTML_CHARSET_META + _VISUALIZATION_CSS + empty_html
+    full_html = f'{_HTML_CHARSET_META}{_VISUALIZATION_CSS}{empty_html}'
     if HTML is not None and _is_jupyter():
       return HTML(full_html)
     return full_html
@@ -617,7 +619,7 @@ def visualize(
       show_legend,
   )
 
-  full_html = _HTML_CHARSET_META + _VISUALIZATION_CSS + visualization_html
+  full_html = f'{_HTML_CHARSET_META}{_VISUALIZATION_CSS}{visualization_html}'
 
   # Apply GIF optimizations if requested
   if gif_optimized:

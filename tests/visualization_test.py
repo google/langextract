@@ -135,7 +135,7 @@ class VisualizationTest(absltest.TestCase):
 
     actual_html = visualization.visualize(doc)
 
-    self.assertTrue(actual_html.startswith(_HTML_CHARSET_META))
+    self.assertStartsWith(actual_html, '<meta charset="UTF-8">')
     # Verify expected components appear in output
     for component in expected_components:
       self.assertIn(component, actual_html)
@@ -151,7 +151,7 @@ class VisualizationTest(absltest.TestCase):
         " animate.</p></div>"
     )
     css_html = _VISUALIZATION_CSS
-    expected_html = _HTML_CHARSET_META + css_html + body_html
+    expected_html = f"{_HTML_CHARSET_META}{css_html}{body_html}"
 
     actual_html = visualization.visualize(doc)
 

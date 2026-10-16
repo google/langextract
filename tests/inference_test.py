@@ -18,6 +18,7 @@ Note: This file contains test helper classes that intentionally have
 few public methods and define attributes outside __init__. These
 pylint warnings are expected for test fixtures.
 """
+
 # pylint: disable=attribute-defined-outside-init
 
 from unittest import mock
@@ -979,6 +980,41 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(call_args.kwargs["frequency_penalty"], 0.5)
     self.assertEqual(call_args.kwargs["presence_penalty"], 0.7)
     self.assertEqual(call_args.kwargs["seed"], 42)
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_default_headers_passed_to_client(self, mock_openai_class):
+    """Test that default_headers reach the OpenAI client, not the API params."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+    mock_response = mock.Mock()
+    mock_response.choices = [
+        mock.Mock(
+            message=mock.Mock(content='{"result": "test"}', refusal=None),
+            finish_reason="stop",
+        )
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
+
+    model = openai.OpenAILanguageModel(
+        api_key="test-key",
+        base_url="http://localhost:8000/v1",
+        default_headers={"X-Run-Id": "job-1"},
+    )
+    list(model.infer(["test prompt"]))
+
+    self.assertEqual(
+        mock_openai_class.call_args.kwargs["default_headers"],
+        {"X-Run-Id": "job-1"},
+    )
+    self.assertNotIn(
+        "default_headers", mock_client.chat.completions.create.call_args.kwargs
+    )
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_default_headers_unset_by_default(self, mock_openai_class):
+    """Test that no headers are added when default_headers is not given."""
+    openai.OpenAILanguageModel(api_key="test-key")
+    self.assertIsNone(mock_openai_class.call_args.kwargs["default_headers"])
 
   @mock.patch("openai.OpenAI")
   def test_openai_runtime_kwargs_override(self, mock_openai_class):

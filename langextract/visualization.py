@@ -173,6 +173,24 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
     .lx-gif-optimized .lx-text-window { font-size: 16px; line-height: 1.8; }
     .lx-gif-optimized .lx-attributes-panel { font-size: 15px; }
     .lx-gif-optimized .lx-current-highlight { text-decoration-thickness: 4px; }
+
+    .lx-unaligned-panel {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px dashed #e0e0e0;
+      font-size: 12px;
+      color: #333;
+    }
+    .lx-unaligned-title { font-weight: 600; margin-bottom: 6px; }
+    .lx-unaligned-item { margin: 4px 0; }
+    .lx-unaligned-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: #eee;
+      margin-right: 6px;
+      font-family: monospace;
+    }
     </style>""")
 
 # The output starts with this tag because HTML requires a charset declaration
@@ -360,6 +378,34 @@ def _format_attributes(attributes: dict | None) -> str:
   return '{' + ', '.join(attrs_parts) + '}'
 
 
+def _build_unaligned_extractions_html(
+    unaligned_extractions: list[data.Extraction],
+) -> str:
+  """Builds HTML listing extractions that don't have valid char intervals."""
+  if not unaligned_extractions:
+    return ''
+
+  items: list[str] = []
+  for e in unaligned_extractions:
+    # Avoid PII/secrets; only show what the user already provided in extraction output.
+    cls = html.escape(str(e.extraction_class))
+    txt = html.escape(str(e.extraction_text))
+    attrs = _format_attributes(e.attributes)
+    items.append(
+        '<div class="lx-unaligned-item">'
+        f'<span class="lx-unaligned-badge">{cls}</span>'
+        f'{txt} <span style="opacity:0.85;">(attributes: {attrs})</span>'
+        '</div>'
+    )
+
+  return (
+      '<div class="lx-unaligned-panel">'
+      '<div class="lx-unaligned-title">Unaligned extractions (no char_interval, not highlighted):</div>'
+      + ''.join(items)
+      + '</div>'
+  )
+
+
 def _prepare_extraction_data(
     text: str,
     extractions: list[data.Extraction],
@@ -435,6 +481,7 @@ def _build_visualization_html(
     text: str,
     extractions: list[data.Extraction],
     color_map: dict[str, str],
+    unaligned_html: str = '',
     animation_speed: float = 1.0,
     show_legend: bool = True,
 ) -> str:
@@ -479,6 +526,7 @@ def _build_visualization_html(
       <div class="lx-attributes-panel">
         {legend_html}
         <div id="attributesContainer"></div>
+        {unaligned_html}
       </div>
       <div class="lx-text-window" id="textWindow">
         {highlighted_text}
@@ -609,8 +657,19 @@ def visualize(
   if annotated_doc.extractions is None:
     raise ValueError('annotated_doc must contain extractions to visualise.')
 
-  # Filter valid extractions - show ALL of them
+  # Filter valid extractions (char_interval must be present for highlighting)
   valid_extractions = _filter_valid_extractions(annotated_doc.extractions)
+
+  unaligned_extractions = [
+      e
+      for e in (annotated_doc.extractions or [])
+      if not (
+          e.char_interval
+          and e.char_interval.start_pos is not None
+          and e.char_interval.end_pos is not None
+      )
+  ]
+  unaligned_html = _build_unaligned_extractions_html(unaligned_extractions)
 
   if not valid_extractions:
     empty_html = (
@@ -628,6 +687,7 @@ def visualize(
       annotated_doc.text,
       valid_extractions,
       color_map,
+      unaligned_html,
       animation_speed,
       show_legend,
   )

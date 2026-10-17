@@ -46,6 +46,13 @@ import sys
 import tempfile
 import textwrap
 
+# Windows consoles default stdout/stderr to the legacy code page (e.g.
+# cp1252), which cannot encode the Unicode checkmarks this script prints.
+# Reconfigure to UTF-8 so `print("✓ ...")` doesn't raise UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+  if hasattr(_stream, "reconfigure"):
+    _stream.reconfigure(encoding="utf-8")
+
 _PACKAGE_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
 
 # Values pip's own option parser treats as true for boolean env vars.
@@ -716,6 +723,12 @@ def create_test_script(
   import os
   import re
   import sys
+
+  # Windows consoles default stdout/stderr to the legacy code page (e.g.
+  # cp1252), which cannot encode the Unicode checkmarks this script prints.
+  for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+      _stream.reconfigure(encoding="utf-8")
 
   # Test the INSTALLED plugin, never the adjacent source tree: drop this
   # script's directory from the import path so an uninstalled plugin

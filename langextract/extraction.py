@@ -80,6 +80,11 @@ def extract(
   examples. Supports sequential extraction passes to improve recall at the cost
   of additional API calls.
 
+  Note:
+      By default, parsing errors log a warning and omit the affected chunk.
+      Set `resolver_params={'suppress_parse_errors': False}` to raise
+      `ResolverParsingError` instead.
+
   Args:
       text_or_documents: The source text to extract information from, or an
         iterable of Document objects. An http:// or https:// string is fetched
@@ -107,9 +112,13 @@ def extract(
         the model, config, or model_id parameters instead.
       format_type: The format type for the output (JSON or YAML).
       max_char_buffer: Max number of characters for inference.
-      temperature: The sampling temperature for generation. When None (default),
-        uses the model's default temperature. Set to 0.0 for deterministic output
-        or higher values for more variation.
+      temperature: The sampling temperature for generation. Set to 0.0 for
+        deterministic output or higher values for more variation. An explicit
+        value overrides a temperature in `language_model_params` or
+        `config.provider_kwargs`. When None (default), that temperature is
+        used if set, else the model's default. A pre-built `model` keeps its
+        own temperature, so a value passed with `model` is ignored with a
+        warning.
       fence_output: Whether to expect/generate fenced output (```json or
         ```yaml). When True, the model is prompted to generate fenced output and
         the resolver expects it. When False, raw JSON/YAML is expected. When None,
@@ -145,7 +154,9 @@ def extract(
         'accept_match_lesser' (bool, True).
       language_model_params: Additional provider-specific constructor kwargs,
         such as Gemini retry settings ('max_retries', 'retry_delay',
-        'max_retry_delay') or 'http_options'.
+        'max_retry_delay'), generation settings ('max_output_tokens', 'top_p',
+        'top_k'), or 'http_options'. For Gemini output truncated at the model's
+        token limit, increase 'max_output_tokens'.
       debug: Whether to enable debug logging. When True, enables detailed logging
         of function calls, arguments, return values, and timing for the langextract
         namespace. Note: Debug logging remains enabled for the process once activated.
@@ -279,6 +290,14 @@ def extract(
           UserWarning,
           stacklevel=2,
       )
+    if temperature is not None:
+      warnings.warn(
+          "'temperature' is ignored when 'model' is provided. Set the "
+          "temperature on the model instance before passing it to extract(), "
+          "or pass 'config' instead so that 'temperature' can be forwarded.",
+          UserWarning,
+          stacklevel=2,
+      )
   elif config:
     if use_schema_constraints and output_schema is None:
       warnings.warn(
@@ -286,6 +305,17 @@ def extract(
           "Or pass output_schema=... for an explicit schema.",
           UserWarning,
           stacklevel=2,
+      )
+
+    if temperature is not None:
+      # Replace rather than mutate so the caller's ModelConfig is left
+      # untouched and stays reusable.
+      config = dataclasses.replace(
+          config,
+          provider_kwargs={
+              **(config.provider_kwargs or {}),
+              "temperature": temperature,
+          },
       )
 
     language_model = factory.create_model(
@@ -307,7 +337,6 @@ def extract(
     base_lm_kwargs: dict[str, typing.Any] = {
         "api_key": api_key,
         "format_type": format_type,
-        "temperature": temperature,
         "model_url": model_url,
         "base_url": model_url,
         "max_workers": max_workers,
@@ -325,6 +354,10 @@ def extract(
       language_model_params.pop("gemini_schema", None)
 
     base_lm_kwargs.update(language_model_params or {})
+    # Set after the update so an explicit temperature wins over
+    # language_model_params, as it does over config.provider_kwargs.
+    if temperature is not None:
+      base_lm_kwargs["temperature"] = temperature
     filtered_kwargs = {k: v for k, v in base_lm_kwargs.items() if v is not None}
 
     config = factory.ModelConfig(

@@ -29,6 +29,7 @@ from langextract import providers as providers_module
 from langextract.core import base_model
 from langextract.core import types
 from langextract.providers import builtin_registry
+from langextract.providers import openai
 from langextract.providers import router
 
 
@@ -150,15 +151,40 @@ class RegistryTest(absltest.TestCase):
     self.assertEqual(router.list_providers(), first_providers)
 
   def test_minimax_models_resolve_to_openai_provider(self):
-    """MiniMax model IDs use the existing OpenAI provider routing."""
-    providers_module._builtins_loaded = False  # pylint: disable=protected-access
+    """Current MiniMax model IDs use the OpenAI-compatible provider."""
     providers_module.load_builtins_once()
 
-    for model_id in ("MiniMax-M3", "MiniMax-M2.7"):
+    for model_id in ("MiniMax-M3", "MiniMax-M3.1-Flash"):
       with self.subTest(model_id=model_id):
-        self.assertEqual(
-            router.resolve(model_id).__name__, "OpenAILanguageModel"
-        )
+        self.assertIs(router.resolve(model_id), openai.OpenAILanguageModel)
+
+  def test_minimax_patterns_match_only_current_model_ids(self):
+    """Retired models and near matches do not gain automatic routing."""
+    providers_module.load_builtins_once()
+
+    for model_id in (
+        "MiniMax-M2.7",
+        "MiniMax-M2.5",
+        "MiniMax-M3x1-Flash",
+        "MiniMax-M3.1-Flash-extra",
+    ):
+      with self.subTest(model_id=model_id):
+        with self.assertRaises(exceptions.InferenceConfigError):
+          router.resolve(model_id)
+
+  def test_openai_patterns_cover_reasoning_and_gpt35_models(self):
+    providers_module.load_builtins_once()
+
+    for model_id in ("o1", "o3-mini", "o4-mini", "gpt-3.5-turbo", "gpt-4o"):
+      with self.subTest(model_id=model_id):
+        resolved = router.resolve(model_id)
+        self.assertIs(resolved, openai.OpenAILanguageModel)
+
+  def test_openai_patterns_do_not_capture_unrelated_o_prefix(self):
+    providers_module.load_builtins_once()
+
+    with self.assertRaises(exceptions.InferenceConfigError):
+      router.resolve("openchat")
 
   def test_list_entries(self):
     """Test listing registered entries."""

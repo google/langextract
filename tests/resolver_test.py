@@ -518,6 +518,70 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
               ),
           ],
       ),
+      dict(
+          testcase_name="empty_and_whitespace_values_skipped",
+          test_input=[{
+              "medication": "Lisinopril",
+              "medication_index": 1,
+              "dosage": "",
+              "dosage_index": 2,
+              "frequency": " \n",
+              "frequency_index": 3,
+          }],
+          expected_output=[
+              data.Extraction(
+                  extraction_class="medication",
+                  extraction_text="Lisinopril",
+                  extraction_index=1,
+                  group_index=0,
+              ),
+          ],
+      ),
+      dict(
+          testcase_name="empty_values_skipped_without_index_suffix",
+          resolver=resolver_lib.Resolver(
+              extraction_index_suffix=None,
+              format_type=data.FormatType.JSON,
+          ),
+          test_input=[
+              {"medication": "Aspirin"},
+              {"dosage": "", "dosage_attributes": {"NOTE": "not stated"}},
+              {"refills": 0},
+          ],
+          expected_output=[
+              data.Extraction(
+                  extraction_class="medication",
+                  extraction_text="Aspirin",
+                  extraction_index=1,
+                  group_index=0,
+              ),
+              data.Extraction(
+                  extraction_class="refills",
+                  extraction_text="0",
+                  extraction_index=2,
+                  group_index=2,
+              ),
+          ],
+      ),
+      dict(
+          testcase_name="invisible_only_values_skipped",
+          test_input=[{
+              "medication": "\ufeffLisinopril",
+              "medication_index": 1,
+              "dosage": "\u200b",
+              "dosage_index": 2,
+              "frequency": "\ufeff \u200b\u2060\x00",
+              "frequency_index": 3,
+          }],
+          expected_output=[
+              data.Extraction(
+                  extraction_class="medication",
+                  extraction_text="\ufeffLisinopril",
+                  extraction_index=1,
+                  group_index=0,
+              ),
+          ],
+      ),
   )
   def test_extract_ordered_extractions_success(
       self,
@@ -1865,6 +1929,68 @@ class ResolverTest(parameterized.TestCase):
     with self.assertRaises(resolver_lib.ResolverParsingError):
       self.default_resolver.resolve(test_input, suppress_parse_errors=False)
 
+  def test_resolve_and_align_skip_empty_extraction_values(self):
+    resolver = resolver_lib.Resolver(format_type=data.FormatType.JSON)
+    model_output = textwrap.dedent(f"""\
+        {{
+          "{data.EXTRACTIONS_KEY}": [
+            {{"dosage": "10mg"}},
+            {{"medication": "Lisinopril"}},
+            {{"frequency": ""}}
+          ]
+        }}""")
+
+    aligned = list(
+        resolver.align(
+            resolver.resolve(model_output),
+            "Patient takes 10mg Lisinopril daily.",
+            token_offset=0,
+            char_offset=0,
+        )
+    )
+
+    self.assertEqual(
+        [e.extraction_text for e in aligned], ["10mg", "Lisinopril"]
+    )
+    for extraction in aligned:
+      self.assertIsNotNone(extraction.char_interval)
+
+  def test_resolve_and_align_only_empty_value_returns_no_extractions(self):
+    resolver = resolver_lib.Resolver(format_type=data.FormatType.JSON)
+    model_output = textwrap.dedent(f"""\
+        {{
+          "{data.EXTRACTIONS_KEY}": [
+            {{"frequency": ""}}
+          ]
+        }}""")
+
+    # Before empty values were skipped, align raised ValueError here because
+    # no extraction tokens remained to match against the source.
+    aligned = list(
+        resolver.align(
+            resolver.resolve(model_output),
+            "Patient takes 10mg Lisinopril daily.",
+            token_offset=0,
+            char_offset=0,
+        )
+    )
+
+    self.assertEmpty(aligned)
+
+  def test_resolve_parse_error_suppressed_logs_opt_out(self):
+    test_input = "```json\n```not valid at all"
+    with mock.patch.object(resolver_lib, "logging", autospec=True) as mock_log:
+      actual = self.default_resolver.resolve(
+          test_input, suppress_parse_errors=True
+      )
+      self.assertEmpty(actual)
+      mock_log.warning.assert_called_once()
+      log_msg = mock_log.warning.call_args[0][0]
+      self.assertIn("Chunk omitted from results", log_msg)
+      self.assertIn("parse error", log_msg)
+      self.assertIn("resolver_params={'suppress_parse_errors': False}", log_msg)
+      mock_log.error.assert_not_called()
+
   @parameterized.named_parameters(
       dict(
           testcase_name="non_dict_attributes",
@@ -1885,14 +2011,16 @@ class ResolverTest(parameterized.TestCase):
   )
   def test_resolve_schema_error_suppressed(self, test_input):
     """Schema errors are suppressed with warning-only logging."""
-    with mock.patch("langextract.resolver.logging") as mock_log:
+    with mock.patch.object(resolver_lib, "logging", autospec=True) as mock_log:
       actual = self.default_resolver.resolve(
           test_input, suppress_parse_errors=True
       )
       self.assertEmpty(actual)
-      mock_log.warning.assert_called()
+      mock_log.warning.assert_called_once()
       log_msg = mock_log.warning.call_args[0][0]
+      self.assertIn("Chunk omitted from results", log_msg)
       self.assertIn("schema error", log_msg)
+      self.assertIn("resolver_params={'suppress_parse_errors': False}", log_msg)
       mock_log.error.assert_not_called()
 
   def test_resolve_schema_error_raises_without_suppression(self):

@@ -110,6 +110,7 @@ behavior.
 ```python
 result = lx.extract(
     text_or_documents=text,          # str, URL, or list of Documents
+    fetch_urls=False,                 # True to fetch a URL input
     prompt_description=prompt,        # what to extract (optional)
     examples=examples,                # few-shot examples (required)
     model_id="gemini-2.5-flash",     # model to use
@@ -121,7 +122,9 @@ result = lx.extract(
 )
 ```
 
-- `text_or_documents` accepts a URL string (fetch_urls=True by default).
+- `text_or_documents` accepts a URL string, which is fetched only when
+  `fetch_urls=True`; otherwise it is treated as text. Only enable fetching
+  for URLs from a trusted source, in a sandboxed process.
 - For full parallelism, keep `batch_length >= max_workers`. Parallel
   processing via `max_workers` is provider-dependent; some providers
   parallelize batched prompts, while others (such as the current Ollama
@@ -151,7 +154,7 @@ lx.io.save_annotated_documents(
 
 # Visualize from JSONL (shows first document)
 html = lx.visualize("results.jsonl")
-with open("visualization.html", "w") as f:
+with open("visualization.html", "w", encoding="utf-8") as f:
     if hasattr(html, "data"):
         f.write(html.data)  # Jupyter/Colab
     else:

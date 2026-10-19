@@ -10,6 +10,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/google/langextract.svg?style=social&label=Star)](https://github.com/google/langextract)
 ![Tests](https://github.com/google/langextract/actions/workflows/ci.yaml/badge.svg)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17015089.svg)](https://doi.org/10.5281/zenodo.17015089)
+[![Live demo](https://img.shields.io/badge/%F0%9F%A4%97%20demo-LangExtract-yellow)](https://google-langextract.hf.space/)
 
 ## Table of Contents
 
@@ -28,11 +29,24 @@
 - [Community Providers](#community-providers)
 - [Contributing](#contributing)
 - [Testing](#testing)
+- [How to Cite](#how-to-cite)
 - [Disclaimer](#disclaimer)
 
 ## Introduction
 
 LangExtract is a Python library that uses LLMs to extract structured information from unstructured text documents based on user-defined instructions. It processes materials such as clinical notes or reports, identifying and organizing key details while ensuring the extracted data corresponds to the source text.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/google/langextract/main/docs/_static/langextract_concept_still.png" />
+    <img src="https://raw.githubusercontent.com/google/langextract/main/docs/_static/langextract_concept.gif" alt="LangExtract end to end: unstructured text is chunked, extracted in parallel by an LLM, and every extracted value is grounded back to its exact character span in the source" width="880" />
+  </picture>
+</p>
+
+<p align="center">
+  <b><a href="https://google-langextract.hf.space/">Try the live demo &rarr;</a></b><br>
+  <sub>Run grounded extraction on <i>Romeo and Juliet</i> in your browser, no install required.</sub>
+</p>
 
 ## Why LangExtract?
 
@@ -129,7 +143,7 @@ lx.io.save_annotated_documents([result], output_name="extraction_results.jsonl",
 
 # Generate the visualization from the file
 html_content = lx.visualize("extraction_results.jsonl")
-with open("visualization.html", "w") as f:
+with open("visualization.html", "w", encoding="utf-8") as f:
     if hasattr(html_content, 'data'):
         f.write(html_content.data)  # For Jupyter/Colab
     else:
@@ -150,6 +164,7 @@ For larger texts, you can process entire documents directly from URLs with paral
 # Process Romeo & Juliet directly from Project Gutenberg
 result = lx.extract(
     text_or_documents="https://www.gutenberg.org/files/1513/1513-0.txt",
+    fetch_urls=True,
     prompt_description=prompt,
     examples=examples,
     model_id="gemini-3.5-flash",
@@ -415,7 +430,7 @@ LangExtract excels at extracting structured medical information from clinical te
 
 Explore RadExtract, a live interactive demo on HuggingFace Spaces that shows how LangExtract can automatically structure radiology reports. Try it directly in your browser with no setup required.
 
-**[View RadExtract Demo →](https://huggingface.co/spaces/google/radextract)**
+**[View RadExtract Demo →](https://google-radextract.hf.space/)**
 
 ## Community Providers
 
@@ -430,7 +445,7 @@ with development, testing, and pull requests. You must sign a
 [Contributor License Agreement](https://cla.developers.google.com/about)
 before submitting patches.
 
-
+Thanks to everyone who has [contributed](https://github.com/google/langextract/graphs/contributors).
 
 ## Testing
 
@@ -497,6 +512,25 @@ pylint --rcfile=.pylintrc langextract tests
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full development guidelines.
+
+## How to Cite
+
+If you use LangExtract in your research, please cite it:
+
+```bibtex
+@software{goel_langextract,
+  author  = {Goel, Akshay},
+  title   = {{LangExtract}},
+  year    = {2026},
+  version = {1.6.0},
+  doi     = {10.5281/zenodo.21126643},
+  url     = {https://github.com/google/langextract}
+}
+```
+
+Cite the version you used — each release has its own DOI on
+[Zenodo](https://doi.org/10.5281/zenodo.17015089). If your style rejects
+`@software`, use `@misc`.
 
 ## Disclaimer
 

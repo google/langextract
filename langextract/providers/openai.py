@@ -20,7 +20,7 @@ from __future__ import annotations
 import concurrent.futures
 import dataclasses
 import logging
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterator, Sequence, TYPE_CHECKING
 import warnings
 
 from langextract.core import base_model
@@ -32,6 +32,9 @@ from langextract.providers import openai_batch
 from langextract.providers import patterns
 from langextract.providers import router
 from langextract.providers import schemas
+
+if TYPE_CHECKING:
+  from openai.types import chat
 
 
 @router.register(
@@ -248,17 +251,59 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     try:
       api_params = self._build_chat_completions_params(prompt, config)
       response = self._client.chat.completions.create(**api_params)
-
-      output_text = response.choices[0].message.content
-
-      return core_types.ScoredOutput(score=1.0, output=output_text)
+      return self._response_to_scored_output(response)
 
     except exceptions.InferenceConfigError:
       raise
+    except exceptions.InferenceRuntimeError:
+      raise
     except Exception as e:
       raise exceptions.InferenceRuntimeError(
-          f'OpenAI API error: {str(e)}', original=e
+          f'OpenAI API error: {str(e)}', original=e, provider='OpenAI'
       ) from e
+
+  @staticmethod
+  def _response_to_scored_output(
+      response: chat.ChatCompletion,
+  ) -> core_types.ScoredOutput:
+    """Translate one OpenAI SDK response into LangExtract output.
+
+    Raises:
+      InferenceRuntimeError: If the response has no usable content.
+    """
+    if not response.choices:
+      raise exceptions.InferenceRuntimeError(
+          'OpenAI response contained no choices.', provider='OpenAI'
+      )
+
+    choice = response.choices[0]
+    output_text = choice.message.content
+    finish_reason = choice.finish_reason
+
+    # Refusals may accompany content, so do not tie them to empty output.
+    refusal = choice.message.refusal
+    if refusal:
+      raise exceptions.InferenceRuntimeError(
+          f'OpenAI refused the request: {refusal}', provider='OpenAI'
+      )
+
+    if output_text is None or (
+        not output_text and finish_reason not in (None, 'stop')
+    ):
+      detail = f' (finish_reason={finish_reason})' if finish_reason else ''
+      hint = (
+          ' The output token budget was exhausted before any text was'
+          ' emitted; consider raising max_output_tokens (reasoning models'
+          ' may consume the budget before any text is produced).'
+          if finish_reason == 'length'
+          else ''
+      )
+      raise exceptions.InferenceRuntimeError(
+          f'OpenAI response contained no message content{detail}.{hint}',
+          provider='OpenAI',
+      )
+
+    return core_types.ScoredOutput(score=1.0, output=output_text)
 
   def infer_batch(
       self, prompts: Sequence[str], batch_size: int = 32
@@ -371,6 +416,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           try:
             results[index] = future.result()
           except exceptions.InferenceConfigError:
+            raise
+          except exceptions.InferenceRuntimeError:
             raise
           except Exception as e:
             raise exceptions.InferenceRuntimeError(

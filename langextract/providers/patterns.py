@@ -23,13 +23,16 @@ GEMINI_PATTERNS = (r'^gemini',)
 GEMINI_PRIORITY = 10
 
 # OpenAI provider patterns
+OPENAI_REASONING_PATTERN = r'^o[1-9]'
 OPENAI_PATTERNS = (
+    r'^gpt-3\.5',
     r'^gpt-4',
     r'^gpt4\.',
     r'^gpt-5',
     r'^gpt5\.',
-    r'^MiniMax-M2\.7$',
+    OPENAI_REASONING_PATTERN,
     r'^MiniMax-M3$',
+    r'^MiniMax-M3\.1-Flash$',
 )
 OPENAI_PRIORITY = 10
 

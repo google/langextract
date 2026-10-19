@@ -1,0 +1,129 @@
+# Copyright 2025 Google LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Checks every pull request, including drafts, for changes that need a
+# security review, such as credentials being sent off the runner or hidden
+# characters in code.
+#
+# How it stays safe:
+# - pull_request_target is used only so the job can add a label. The job
+#   checks out main and runs the check from there, so a pull request cannot
+#   change how it is checked.
+# - Pull request code is fetched as git objects and read as diff text. It is
+#   never checked out, installed, imported, or run.
+# - The title, description, and branch name reach the check only through
+#   files written by github-script, never through shell interpolation.
+# - The public job summary shows counts only. Maintainers reproduce the
+#   details locally with the command in the summary.
+# - By default the check only labels. Set the repository variable
+#   PR_SECURITY_CHECK_ENFORCE to "true" to fail on high-severity findings.
+
+name: PR Security Check
+
+on:
+  pull_request_target:  # zizmor: ignore[dangerous-triggers] see header.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+    branches: [main]
+
+permissions: {}
+
+# No concurrency group: GitHub replaces a queued run with a newer one, which
+# would skip checking an intermediate revision. Runs and labels are idempotent.
+
+jobs:
+  security-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Look up author role and save PR text
+        id: pr
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('fs');
+            const pr = context.payload.pull_request;
+            let maintainer = false;
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: pr.user.login,
+              });
+              maintainer = ['admin', 'maintain'].includes(data.role_name);
+            } catch (error) {
+              core.info(`Treating author as a contributor: ${error.message}`);
+            }
+            core.setOutput('maintainer', maintainer ? 'true' : 'false');
+            const dir = process.env.RUNNER_TEMP;
+            fs.writeFileSync(`${dir}/title.txt`, pr.title || '');
+            fs.writeFileSync(`${dir}/body.txt`, pr.body || '');
+            fs.writeFileSync(`${dir}/branch.txt`, pr.head.ref || '');
+
+      - name: Check out main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch pull request commit as data only
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --no-recurse-submodules origin "$HEAD_SHA"
+          test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
+
+      - name: Run security check
+        id: check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MAINTAINER: ${{ steps.pr.outputs.maintainer }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$MAINTAINER" = "true" ]; then args+=(--maintainer); fi
+          python3 .github/scripts/pr_security_check.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --title-file "$RUNNER_TEMP/title.txt" \
+            --body-file "$RUNNER_TEMP/body.txt" \
+            --branch="$(cat "$RUNNER_TEMP/branch.txt")" \
+            --json-out "$RUNNER_TEMP/check.json" \
+            --summary-out "$GITHUB_STEP_SUMMARY" \
+            --brief \
+            ${args[@]+"${args[@]}"}
+          high="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["high"])' "$RUNNER_TEMP/check.json")"
+          echo "high=$high" >> "$GITHUB_OUTPUT"
+
+      - name: Label for maintainer review
+        if: steps.check.outputs.high != '0'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['needs-security-review'],
+            });
+
+      - name: Enforce
+        if: steps.check.outputs.high != '0' && vars.PR_SECURITY_CHECK_ENFORCE == 'true'
+        run: |
+          echo "::error::This pull request needs a security review before CI runs it with credentials."
+          exit 1

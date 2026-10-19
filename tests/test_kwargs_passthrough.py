@@ -33,7 +33,11 @@ def _configure_openai_mock(mock_openai_class, content='{"result": "test"}'):
   mock_client = mock.Mock()
   mock_openai_class.return_value = mock_client
   mock_response = mock.Mock()
-  mock_response.choices = [mock.Mock(message=mock.Mock(content=content))]
+  mock_response.choices = [
+      mock.Mock(
+          message=mock.Mock(content=content, refusal=None), finish_reason='stop'
+      )
+  ]
   mock_client.chat.completions.create.return_value = mock_response
   return mock_client
 

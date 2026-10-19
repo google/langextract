@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import typing
 import warnings
 
@@ -32,6 +33,7 @@ from langextract.core import exceptions
 from langextract.core import output_schema as output_schema_lib
 from langextract.core import schema as core_schema
 from langextract.core import types as core_types
+from langextract.providers import patterns
 from langextract.providers import router
 
 
@@ -69,13 +71,17 @@ def _kwargs_with_environment_defaults(
 
   if "api_key" not in resolved and not resolved.get("vertexai", False):
     model_lower = model_id.lower()
-    env_vars_by_provider = {
+    env_vars_by_model_pattern = {
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
         "gpt": ("OPENAI_API_KEY", "LANGEXTRACT_API_KEY"),
+        patterns.OPENAI_REASONING_PATTERN: (
+            "OPENAI_API_KEY",
+            "LANGEXTRACT_API_KEY",
+        ),
     }
 
-    for provider_prefix, env_vars in env_vars_by_provider.items():
-      if provider_prefix in model_lower:
+    for model_pattern, env_vars in env_vars_by_model_pattern.items():
+      if re.search(model_pattern, model_lower):
         found_keys = []
         for env_var in env_vars:
           key_val = os.getenv(env_var)

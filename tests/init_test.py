@@ -155,6 +155,51 @@ class InitTest(parameterized.TestCase):
 
     self.assertDataclassEqual(expected_result, actual_result)
 
+  @parameterized.named_parameters(
+      dict(testcase_name="enum", format_type=data.FormatType.YAML),
+      dict(testcase_name="string", format_type="yaml"),
+  )
+  def test_extract_legacy_yaml_format_without_fences(self, format_type):
+    prompts = []
+
+    class FakeModel(base_model.BaseLanguageModel):
+
+      def infer(self, batch_prompts, **kwargs):
+        for prompt in batch_prompts:
+          prompts.append(prompt)
+          yield [
+              types.ScoredOutput(
+                  score=1.0, output="extractions:\n- person: Alice\n"
+              )
+          ]
+
+    with self.assertWarnsRegex(DeprecationWarning, "Resolver legacy params"):
+      result = lx.extract(
+          "Alice went home.",
+          prompt_description="Extract people.",
+          examples=[
+              data.ExampleData(
+                  text="Bob met Carol.",
+                  extractions=[data.Extraction("person", "Bob")],
+              )
+          ],
+          model=FakeModel(),
+          use_schema_constraints=False,
+          resolver_params={"format_type": format_type, "fence_output": False},
+          show_progress=False,
+      )
+
+    self.assertLen(prompts, 1)
+    self.assertIn("extractions:\n- person: Bob", prompts[0])
+    self.assertNotIn("```", prompts[0])
+    self.assertLen(result.extractions, 1)
+    extraction = result.extractions[0]
+    self.assertEqual(extraction.extraction_class, "person")
+    self.assertEqual(extraction.extraction_text, "Alice")
+    self.assertEqual(
+        extraction.char_interval, data.CharInterval(start_pos=0, end_pos=5)
+    )
+
   @mock.patch("langextract.extraction.resolver.Resolver.align")
   @mock.patch("langextract.extraction.factory.create_model")
   def test_extract_resolver_params_alignment_passthrough(

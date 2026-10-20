@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import json
 
 from absl.testing import absltest
@@ -202,6 +203,40 @@ class DataLibToDictParameterizedTest(parameterized.TestCase):
 
     json_str = json.dumps(doc_dict, ensure_ascii=False)
     self.assertIn('"extraction_index": 42', json_str)
+
+
+class DictToAnnotatedDocumentTest(absltest.TestCase):
+
+  def test_does_not_mutate_input_and_is_reusable(self):
+    payload = data_lib.annotated_document_to_dict(
+        data.AnnotatedDocument(
+            document_id="doc-1",
+            text="Alice",
+            extractions=[
+                data.Extraction(
+                    extraction_class="person",
+                    extraction_text="Alice",
+                    char_interval=data.CharInterval(start_pos=0, end_pos=5),
+                    token_interval=tokenizer.TokenInterval(
+                        start_index=0, end_index=1
+                    ),
+                    alignment_status=data.AlignmentStatus.MATCH_EXACT,
+                )
+            ],
+        )
+    )
+    original = copy.deepcopy(payload)
+
+    first = data_lib.dict_to_annotated_document(payload)
+    self.assertEqual(payload, original)
+    json.dumps(payload)
+
+    second = data_lib.dict_to_annotated_document(payload)
+    self.assertEqual(first, second)
+    self.assertEqual(
+        first.extractions[0].char_interval,
+        data.CharInterval(start_pos=0, end_pos=5),
+    )
 
 
 class IsUrlTest(absltest.TestCase):

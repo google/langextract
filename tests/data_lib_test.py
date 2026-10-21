@@ -225,6 +225,12 @@ class DictToAnnotatedDocumentTest(absltest.TestCase):
             ],
         )
     )
+    # annotated_document_to_dict does not serialize token_interval, so set it
+    # explicitly to exercise the token_interval path.
+    payload["extractions"][0]["token_interval"] = {
+        "start_index": 0,
+        "end_index": 1,
+    }
     original = copy.deepcopy(payload)
 
     first = data_lib.dict_to_annotated_document(payload)
@@ -237,6 +243,12 @@ class DictToAnnotatedDocumentTest(absltest.TestCase):
         first.extractions[0].char_interval,
         data.CharInterval(start_pos=0, end_pos=5),
     )
+    # token_interval is excluded from Extraction equality, so check it directly.
+    for doc in (first, second):
+      self.assertEqual(
+          doc.extractions[0].token_interval,
+          tokenizer.TokenInterval(start_index=0, end_index=1),
+      )
 
 
 class IsUrlTest(absltest.TestCase):

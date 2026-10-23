@@ -279,5 +279,35 @@ class DocumentWithAdditionalContextTest(absltest.TestCase):
     self.assertEqual(new_doc.text, "hello")
 
 
+class TokenizedTextCacheTest(absltest.TestCase):
+  """The cached tokenization must follow the current `text`."""
+
+  def test_document_retokenizes_after_text_changes(self):
+    doc = data.Document(text="Alice lives here.")
+    self.assertEqual(doc.tokenized_text.text, "Alice lives here.")
+
+    doc.text = "Bob moved away."
+
+    self.assertEqual(doc.tokenized_text.text, "Bob moved away.")
+    self.assertEqual(
+        doc.tokenized_text.tokens,
+        tokenizer.tokenize("Bob moved away.").tokens,
+    )
+
+  def test_document_keeps_cache_for_unchanged_text(self):
+    doc = data.Document(text="hello world")
+    custom = tokenizer.TokenizedText(text="hello world", tokens=[])
+    doc.tokenized_text = custom
+    self.assertIs(doc.tokenized_text, custom)
+
+  def test_annotated_document_retokenizes_after_text_changes(self):
+    doc = data.AnnotatedDocument(text="Alice lives here.")
+    self.assertEqual(doc.tokenized_text.text, "Alice lives here.")
+
+    doc.text = "Bob moved away."
+
+    self.assertEqual(doc.tokenized_text.text, "Bob moved away.")
+
+
 if __name__ == "__main__":
   absltest.main()

@@ -96,7 +96,11 @@ def dict_to_annotated_document(
   if not adoc_dic:
     return data.AnnotatedDocument()
 
-  for extractions in adoc_dic.get("extractions", []):
+  # A document saved without extractions has `"extractions": null`; `.get`
+  # returns that None instead of the default, so treat it as an empty list
+  # when iterating but keep None on the restored document.
+  raw_extractions = adoc_dic.get("extractions", [])
+  for extractions in raw_extractions or []:
     token_int = extractions.get("token_interval")
     if token_int:
       extractions["token_interval"] = tokenizer.TokenInterval(**token_int)
@@ -118,7 +122,9 @@ def dict_to_annotated_document(
   return data.AnnotatedDocument(
       document_id=adoc_dic.get("document_id"),
       text=adoc_dic.get("text"),
-      extractions=[
-          data.Extraction(**ent) for ent in adoc_dic.get("extractions", [])
-      ],
+      extractions=(
+          None
+          if raw_extractions is None
+          else [data.Extraction(**ent) for ent in raw_extractions]
+      ),
   )

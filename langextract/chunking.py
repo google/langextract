@@ -393,10 +393,20 @@ class ChunkIterator:
 
     Args:
       text: Document to chunk. Can be either a string or a tokenized text.
-      max_char_buffer: Size of buffer that we can run inference on.
+      max_char_buffer: Size of buffer that we can run inference on. Must be at
+        least 1.
       tokenizer_impl: Tokenizer instance to use.
       document: Optional source document.
+
+    Raises:
+      ValueError: If max_char_buffer is less than 1, or if neither text nor
+        document is provided.
     """
+    if max_char_buffer < 1:
+      raise ValueError(
+          f"max_char_buffer must be at least 1, got {max_char_buffer}."
+      )
+
     if text is None:
       if document is None:
         raise ValueError("Either text or document must be provided.")

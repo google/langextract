@@ -657,6 +657,43 @@ class BatchParseItemTest(parameterized.TestCase):
     self.assertIn("idx-1", logs.output[0])
     self.assertIn(expected, logs.output[0])
 
+  def test_truncated_item_is_kept_and_logged(self):
+    line = {
+        "key": "idx-3",
+        "response": {
+            "candidates": [{
+                "content": {"parts": [{"text": '{"extractions": [{"a'}]},
+                "finishReason": "MAX_TOKENS",
+            }]
+        },
+    }
+    outputs = {}
+
+    with self.assertLogs(level="WARNING") as logs:
+      gb._parse_batch_line(json.dumps(line), outputs, gb.BatchConfig())
+
+    self.assertDictEqual(outputs, {3: '{"extractions": [{"a'})
+    self.assertLen(logs.output, 1)
+    self.assertIn("idx-3", logs.output[0])
+    self.assertIn("MAX_TOKENS", logs.output[0])
+
+  def test_complete_item_is_not_logged(self):
+    line = {
+        "key": "idx-3",
+        "response": {
+            "candidates": [{
+                "content": {"parts": [{"text": '{"extractions": []}'}]},
+                "finishReason": "STOP",
+            }]
+        },
+    }
+    outputs = {}
+
+    with self.assertNoLogs(level="WARNING"):
+      gb._parse_batch_line(json.dumps(line), outputs, gb.BatchConfig())
+
+    self.assertDictEqual(outputs, {3: '{"extractions": []}'})
+
   @parameterized.named_parameters(
       dict(
           testcase_name="prompt_camel",

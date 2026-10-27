@@ -244,7 +244,8 @@ class Annotator:
         resolution across chunk boundaries. Defaults to None (disabled).
       show_progress: Whether to show progress bar. Defaults to True.
       tokenizer: Optional tokenizer to use. If None, uses default tokenizer.
-      **kwargs: Additional arguments passed to LanguageModel.infer and Resolver.
+      **kwargs: Additional arguments passed to LanguageModel.infer and
+        Resolver.
 
     Yields:
       Resolved annotations from input documents.
@@ -291,6 +292,7 @@ class Annotator:
       show_progress: bool = True,
       context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
+      suppress_parse_errors: bool = False,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
     """Single-pass annotation with stable ordering and streaming emission.
@@ -390,6 +392,8 @@ class Annotator:
         outputs = self._language_model.infer(batch_prompts=prompts, **kwargs)
         if not isinstance(outputs, list):
           outputs = list(outputs)
+        # Avoid retaining these prompts while constructing the next batch.
+        del prompts
 
         for text_chunk, scored_outputs in zip(batch, outputs):
           if not isinstance(scored_outputs, list):
@@ -400,7 +404,10 @@ class Annotator:
             )
 
           resolved_extractions = resolver.resolve(
-              scored_outputs[0].output, debug=debug, **kwargs
+              scored_outputs[0].output,
+              debug=debug,
+              suppress_parse_errors=suppress_parse_errors,
+              **kwargs,
           )
 
           token_offset = (

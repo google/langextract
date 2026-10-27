@@ -18,24 +18,37 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import copy
 import dataclasses
 from typing import Any
 import warnings
 
 from langextract.core import data
 from langextract.core import format_handler as fh
+from langextract.core import output_schema as output_schema_lib
 from langextract.core import schema
+from langextract.core import types as core_types
 
 
 @dataclasses.dataclass
 class GeminiSchema(schema.BaseSchema):
   """Schema implementation for Gemini structured output.
 
-  Converts ExampleData objects into an OpenAPI/JSON-schema definition
-  that Gemini can interpret via 'response_schema'.
+  Converts ExampleData objects into Gemini's OpenAPI-style
+  `response_schema`. User-authored schemas stay on Gemini's native JSON Schema
+  `response_json_schema` field.
   """
 
   _schema_dict: dict[str, Any]
+  _use_json_schema: bool = False
+  from_output_schema: bool = dataclasses.field(
+      default=False, repr=False, compare=False
+  )
+
+  def __post_init__(self) -> None:
+    # Direct construction should get the same caller-mutation isolation as
+    # from_schema_dict().
+    self._schema_dict = copy.deepcopy(self._schema_dict)
 
   @property
   def schema_dict(self) -> dict[str, Any]:
@@ -45,18 +58,30 @@ class GeminiSchema(schema.BaseSchema):
   @schema_dict.setter
   def schema_dict(self, schema_dict: dict[str, Any]) -> None:
     """Sets the schema dictionary."""
-    self._schema_dict = schema_dict
+    self._schema_dict = copy.deepcopy(schema_dict)
 
   def to_provider_config(self) -> dict[str, Any]:
     """Convert schema to Gemini-specific configuration.
 
     Returns:
-      Dictionary with response_schema and response_mime_type for Gemini API.
+      Dictionary with Gemini response schema config for the provider API.
     """
+    schema_key = (
+        "response_json_schema" if self._use_json_schema else "response_schema"
+    )
     return {
-        "response_schema": self._schema_dict,
+        schema_key: self._schema_dict,
         "response_mime_type": "application/json",
     }
+
+  def output_schema_reserved_provider_kwargs(self) -> frozenset[str]:
+    """Provider kwargs that would override an explicit output_schema."""
+    return frozenset({
+        "gemini_schema",
+        "response_json_schema",
+        "response_mime_type",
+        "response_schema",
+    })
 
   @property
   def requires_raw_output(self) -> bool:
@@ -68,9 +93,8 @@ class GeminiSchema(schema.BaseSchema):
 
     Gemini requires:
     - No fence markers (outputs raw JSON via response_mime_type)
-    - Wrapper with EXTRACTIONS_KEY (built into response_schema)
+    - Wrapper with EXTRACTIONS_KEY (built into LangExtract schemas)
     """
-    # Check for fence usage with raw JSON output
     if format_handler.use_fences:
       warnings.warn(
           "Gemini outputs native JSON via"
@@ -80,7 +104,6 @@ class GeminiSchema(schema.BaseSchema):
           stacklevel=3,
       )
 
-    # Verify wrapper is enabled with correct key
     if (
         not format_handler.use_wrapper
         or format_handler.wrapper_key != data.EXTRACTIONS_KEY
@@ -113,9 +136,8 @@ class GeminiSchema(schema.BaseSchema):
         attributes field name (defaults to "_attributes").
 
     Returns:
-      A GeminiSchema with internal dictionary represents the JSON constraint.
+      A GeminiSchema whose internal dictionary represents the JSON constraint.
     """
-    # Track attribute types for each category
     extraction_categories: dict[str, dict[str, set[type]]] = {}
     for example in examples_data:
       for extraction in example.extractions:
@@ -137,12 +159,10 @@ class GeminiSchema(schema.BaseSchema):
       attributes_field = f"{category}{attribute_suffix}"
       attr_properties = {}
 
-      # Default property for categories without attributes
       if not attrs:
         attr_properties["_unused"] = {"type": "string"}
       else:
         for attr_name, attr_types in attrs.items():
-          # List attributes become arrays
           if list in attr_types:
             attr_properties[attr_name] = {
                 "type": "array",
@@ -171,3 +191,14 @@ class GeminiSchema(schema.BaseSchema):
     }
 
     return cls(_schema_dict=schema_dict)
+
+  @classmethod
+  def from_schema_dict(
+      cls, output_schema: core_types.JsonSchema
+  ) -> GeminiSchema:
+    """Creates a GeminiSchema from a user-provided output schema."""
+    return cls(
+        _schema_dict=output_schema_lib.validate_output_schema(output_schema),
+        _use_json_schema=True,
+        from_output_schema=True,
+    )

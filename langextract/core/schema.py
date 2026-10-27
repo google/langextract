@@ -28,6 +28,7 @@ __all__ = [
     "Constraint",
     "BaseSchema",
     "FormatModeSchema",
+    "mark_from_output_schema",
 ]
 
 # Backward compat re-exports
@@ -47,6 +48,16 @@ class BaseSchema(abc.ABC):
   ) -> BaseSchema:
     """Factory method to build a schema instance from example data."""
 
+  @classmethod
+  def from_schema_dict(cls, output_schema: types.JsonSchema) -> BaseSchema:
+    """Build a schema instance from a LangExtract output envelope schema.
+
+    Providers override this to opt in to user-provided schemas.
+    """
+    raise NotImplementedError(
+        f"{cls.__name__} does not support user-provided output_schema."
+    )
+
   @abc.abstractmethod
   def to_provider_config(self) -> dict[str, Any]:
     """Convert schema to provider-specific configuration.
@@ -55,6 +66,10 @@ class BaseSchema(abc.ABC):
       Dictionary of provider kwargs (e.g., response_schema for Gemini).
       Should be a pure data mapping with no side effects.
     """
+
+  def output_schema_reserved_provider_kwargs(self) -> frozenset[str]:
+    """Provider kwargs that would conflict with explicit output_schema."""
+    return frozenset(self.to_provider_config())
 
   @property
   @abc.abstractmethod
@@ -88,6 +103,16 @@ class BaseSchema(abc.ABC):
     Args:
       kwargs: The effective provider kwargs after merging.
     """
+
+
+def mark_from_output_schema(schema_instance: BaseSchema) -> None:
+  """Mark a schema as coming from a user-authored output_schema when possible."""
+  if getattr(schema_instance, "from_output_schema", False):
+    return
+  try:
+    setattr(schema_instance, "from_output_schema", True)
+  except (AttributeError, TypeError):
+    return
 
 
 class FormatModeSchema(BaseSchema):

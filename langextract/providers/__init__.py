@@ -19,8 +19,8 @@ Each provider can be imported independently for fine-grained dependency
 management in build systems.
 """
 
-import importlib
 from importlib import metadata
+import importlib
 import os
 
 from absl import logging
@@ -55,9 +55,6 @@ def load_builtins_once() -> None:
   are already in sys.modules.
   """
   global _builtins_loaded  # pylint: disable=global-statement
-
-  if _builtins_loaded:
-    return
 
   # Register built-ins lazily so they can be re-registered after a registry.clear()
   # even if their modules were already imported earlier in the test run.

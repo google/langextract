@@ -65,9 +65,10 @@ print("Downloading and processing Romeo and Juliet from Project Gutenberg...")
 
 result = lx.extract(
     text_or_documents="https://www.gutenberg.org/files/1513/1513-0.txt",
+    fetch_urls=True,
     prompt_description=prompt,
     examples=examples,
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     extraction_passes=3,      # Multiple passes for improved recall
     max_workers=20,           # Parallel processing for speed
     max_char_buffer=1000      # Smaller contexts for better accuracy
@@ -80,7 +81,7 @@ lx.io.save_annotated_documents([result], output_name="romeo_juliet_extractions.j
 
 # Generate the interactive visualization
 html_content = lx.visualize("romeo_juliet_extractions.jsonl")
-with open("romeo_juliet_visualization.html", "w") as f:
+with open("romeo_juliet_visualization.html", "w", encoding="utf-8") as f:
     if hasattr(html_content, 'data'):
         f.write(html_content.data)  # For Jupyter/Colab
     else:

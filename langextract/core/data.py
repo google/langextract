@@ -72,7 +72,8 @@ class Extraction:
     extraction_class: The class of the extraction.
     extraction_text: The text of the extraction.
     char_interval: The character interval of the extraction in the original
-      text.
+      text. None when the extraction text could not be located in the source
+      document.
     alignment_status: The alignment status of the extraction.
     extraction_index: The index of the extraction in the list of extractions.
     group_index: The index of the group the extraction belongs to.
@@ -178,6 +179,27 @@ class Document:
   @tokenized_text.setter
   def tokenized_text(self, value: tokenizer.TokenizedText) -> None:
     self._tokenized_text = value
+
+  def with_additional_context(
+      self, additional_context: str | None
+  ) -> "Document":
+    """Return a copy of this Document with additional_context overridden.
+
+    The copy shares this Document's ID, generating one if needed, and
+    preserves any cached tokenization without invoking the tokenization
+    property getter.
+
+    Args:
+      additional_context: Value to set on the returned copy.
+    """
+    new_doc = Document(
+        text=self.text,
+        document_id=self.document_id,
+        additional_context=additional_context,
+    )
+    if self._tokenized_text is not None:
+      new_doc.tokenized_text = self._tokenized_text
+    return new_doc
 
 
 @dataclasses.dataclass

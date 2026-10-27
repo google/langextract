@@ -67,16 +67,17 @@ results = lx.extract(
     text_or_documents=text_subset,
     prompt_description=prompt,
     examples=examples,
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3.5-flash",
     max_char_buffer=500,
     batch_length=1000,
     language_model_params={
         "vertexai": True,
         "project": "your-gcp-project", # TODO: Replace with your Project ID.
-        "location": "us-central1",
+        "location": "us",
         "batch": batch_config
     }
 )
+```
 
 ## GCS File Structure
 
@@ -101,6 +102,8 @@ LangExtract's batch processing is designed to minimize costs:
     -   **Lifecycle Management**: Use `retention_days` (e.g., 30) to automatically clean up old data and manage storage usage.
 
 ## Analyze Results
+
+```python
 print(f"Extracted {len(results.extractions)} entities.")
 print("First 5 extractions:")
 for extraction in results.extractions[:5]:
@@ -145,7 +148,7 @@ tail -f batch_process.log
 When running a batch job, `langextract` provides clear log feedback with a direct link to the Google Cloud Console:
 
 ```text
-INFO - Batch job created successfully: projects/123456789/locations/us-central1/batchPredictionJobs/987654321
+INFO - Batch job created successfully: projects/123456789/locations/us/batchPredictionJobs/987654321
 INFO - Job State: JobState.JOB_STATE_PENDING
 INFO - Job Console URL: https://console.cloud.google.com/vertex-ai/jobs/batch-predictions/987654321?project=123456789
 INFO - Batch job is running... (State: JOB_STATE_PENDING)

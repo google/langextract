@@ -22,6 +22,7 @@ from typing import Any, Mapping
 
 import yaml
 
+from langextract.core import exceptions
 from langextract.core import schema
 from langextract.core import types
 
@@ -64,6 +65,54 @@ class BaseLanguageModel(abc.ABC):
     """
     self._schema = schema_instance
 
+  def apply_output_schema(self, output_schema: types.JsonSchema) -> None:
+    """Apply a user-provided LangExtract output schema to this model.
+
+    Args:
+      output_schema: JSON schema for LangExtract's raw output envelope.
+
+    Raises:
+      InferenceConfigError: If this provider cannot consume user schemas, or
+        if the model already has conflicting schema configuration.
+    """
+    schema_class = self.get_schema_class()
+    if schema_class is None:
+      raise exceptions.unsupported_output_schema_error(type(self).__name__)
+    try:
+      schema_instance = schema_class.from_schema_dict(output_schema)
+    except NotImplementedError as e:
+      raise exceptions.unsupported_output_schema_error(
+          type(self).__name__
+      ) from e
+    schema.mark_from_output_schema(schema_instance)
+
+    current_schema = self.schema
+    if current_schema is not None:
+      requested_schema_dict = getattr(schema_instance, 'schema_dict', None)
+      if (
+          getattr(current_schema, 'from_output_schema', False)
+          and requested_schema_dict is not None
+          and getattr(current_schema, 'schema_dict', None)
+          == requested_schema_dict
+      ):
+        return
+      raise exceptions.InferenceConfigError(
+          f'output_schema cannot be applied to {type(self).__name__} because '
+          'the model already has a schema configured. Create the model '
+          'without schema settings, or pass output_schema when the model is '
+          'created.'
+      )
+
+    provider_kwargs = getattr(self, '_extra_kwargs', None) or {}
+    conflicts = sorted(
+        key
+        for key in schema_instance.output_schema_reserved_provider_kwargs()
+        if provider_kwargs.get(key) is not None
+    )
+    if conflicts:
+      raise exceptions.output_schema_provider_kwargs_error(conflicts)
+    self.apply_schema(schema_instance)
+
   @property
   def schema(self) -> schema.BaseSchema | None:
     """The current schema instance if one is configured.
@@ -71,7 +120,7 @@ class BaseLanguageModel(abc.ABC):
     Returns:
       The schema instance or None if no schema is applied.
     """
-    return self._schema
+    return getattr(self, '_schema', None)
 
   def set_fence_output(self, fence_output: bool | None) -> None:
     """Set explicit fence output preference.

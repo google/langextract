@@ -155,6 +155,51 @@ class InitTest(parameterized.TestCase):
 
     self.assertDataclassEqual(expected_result, actual_result)
 
+  @parameterized.named_parameters(
+      dict(testcase_name="enum", format_type=data.FormatType.YAML),
+      dict(testcase_name="string", format_type="yaml"),
+  )
+  def test_extract_legacy_yaml_format_without_fences(self, format_type):
+    prompts = []
+
+    class FakeModel(base_model.BaseLanguageModel):
+
+      def infer(self, batch_prompts, **kwargs):
+        for prompt in batch_prompts:
+          prompts.append(prompt)
+          yield [
+              types.ScoredOutput(
+                  score=1.0, output="extractions:\n- person: Alice\n"
+              )
+          ]
+
+    with self.assertWarnsRegex(DeprecationWarning, "Resolver legacy params"):
+      result = lx.extract(
+          "Alice went home.",
+          prompt_description="Extract people.",
+          examples=[
+              data.ExampleData(
+                  text="Bob met Carol.",
+                  extractions=[data.Extraction("person", "Bob")],
+              )
+          ],
+          model=FakeModel(),
+          use_schema_constraints=False,
+          resolver_params={"format_type": format_type, "fence_output": False},
+          show_progress=False,
+      )
+
+    self.assertLen(prompts, 1)
+    self.assertIn("extractions:\n- person: Bob", prompts[0])
+    self.assertNotIn("```", prompts[0])
+    self.assertLen(result.extractions, 1)
+    extraction = result.extractions[0]
+    self.assertEqual(extraction.extraction_class, "person")
+    self.assertEqual(extraction.extraction_text, "Alice")
+    self.assertEqual(
+        extraction.char_interval, data.CharInterval(start_pos=0, end_pos=5)
+    )
+
   @mock.patch("langextract.extraction.resolver.Resolver.align")
   @mock.patch("langextract.extraction.factory.create_model")
   def test_extract_resolver_params_alignment_passthrough(
@@ -246,6 +291,57 @@ class InitTest(parameterized.TestCase):
     self.assertIn("suppress_parse_errors", kwargs)
     self.assertTrue(kwargs.get("suppress_parse_errors"))
     self.assertFalse(kwargs.get("enable_fuzzy_alignment"))
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="default_true",
+          resolver_params=None,
+          expected=True,
+      ),
+      dict(
+          testcase_name="caller_override_false",
+          resolver_params={"suppress_parse_errors": False},
+          expected=False,
+      ),
+  )
+  @mock.patch("langextract.annotation.Annotator.annotate_text", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_extract_suppress_parse_errors_routing(
+      self, mock_create_model, mock_annotate, resolver_params, expected
+  ):
+    mock_model = mock.MagicMock()
+    mock_model.requires_fence_output = False
+    mock_model.schema = None
+    mock_create_model.return_value = mock_model
+    mock_annotate.return_value = lx.data.AnnotatedDocument(
+        text="test", extractions=[]
+    )
+    mock_examples = [
+        lx.data.ExampleData(
+            text="Example text",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="example",
+                ),
+            ],
+        )
+    ]
+
+    extract_kwargs = {
+        "text_or_documents": "test text",
+        "prompt_description": "desc",
+        "examples": mock_examples,
+        "api_key": "test_key",
+    }
+    if resolver_params is not None:
+      extract_kwargs["resolver_params"] = resolver_params
+
+    lx.extract(**extract_kwargs)
+
+    mock_annotate.assert_called()
+    _, kwargs = mock_annotate.call_args
+    self.assertEqual(kwargs.get("suppress_parse_errors"), expected)
 
   @mock.patch("langextract.extraction.resolver.Resolver")
   @mock.patch("langextract.extraction.factory.create_model")
@@ -739,7 +835,7 @@ class InitTest(parameterized.TestCase):
                   ],
               )
           ],
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           language_model_params={"gemini_schema": "deprecated"},
       )
@@ -752,6 +848,150 @@ class InitTest(parameterized.TestCase):
           ),
           "Expected deprecation warning for gemini_schema",
       )
+
+
+class AnnotationSuppressParseErrorsTest(absltest.TestCase):
+  """Tests for suppress_parse_errors isolation in the annotation layer."""
+
+  def setUp(self):
+    super().setUp()
+    self._mock_model = mock.MagicMock()
+    self._mock_model.requires_fence_output = False
+    self._mock_model.schema = None
+    examples = [
+        lx.data.ExampleData(
+            text="Example text",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="entity",
+                    extraction_text="example",
+                ),
+            ],
+        )
+    ]
+    handler = fh.FormatHandler(
+        format_type=data.FormatType.JSON, use_wrapper=True
+    )
+    self._annotator = lx.annotation.Annotator(
+        language_model=self._mock_model,
+        prompt_template=prompting.PromptTemplateStructured(
+            description="desc", examples=examples
+        ),
+        format_handler=handler,
+    )
+    self._resolver = lx.resolver.Resolver(format_handler=handler)
+
+  def test_suppress_parse_errors_not_sent_to_infer(self):
+    """Provider infer() must not receive suppress_parse_errors."""
+    self._mock_model.infer.return_value = [
+        [types.ScoredOutput(output='{"extractions": []}')]
+    ]
+
+    _ = self._annotator.annotate_text(
+        text="test text",
+        resolver=self._resolver,
+        suppress_parse_errors=True,
+    )
+
+    self._mock_model.infer.assert_called()
+    _, infer_kwargs = self._mock_model.infer.call_args
+    self.assertNotIn("suppress_parse_errors", infer_kwargs)
+
+  def test_warning_excludes_raw_chunk_text(self):
+    """Suppressed parse error logs must not contain raw document text."""
+    sensitive_text = "Patient has diabetes and hypertension"
+    self._mock_model.infer.return_value = [
+        [types.ScoredOutput(output="I cannot extract entities")]
+    ]
+
+    with mock.patch("langextract.resolver.logging") as mock_logging:
+      _ = self._annotator.annotate_text(
+          text=sensitive_text,
+          resolver=self._resolver,
+          suppress_parse_errors=True,
+      )
+
+      for call in mock_logging.warning.call_args_list:
+        log_message = str(call)
+        self.assertNotIn(sensitive_text, log_message)
+
+  def test_mixed_chunks_valid_extractions_survive(self):
+    """Valid extractions survive when other chunks fail to parse."""
+    self._mock_model.infer.return_value = [
+        [
+            types.ScoredOutput(
+                output='{"extractions": [{"entity": "diabetes"}]}'
+            )
+        ],
+        [types.ScoredOutput(output="I don't see any entities.")],
+    ]
+
+    result = self._annotator.annotate_text(
+        text="The patient has diabetes and takes insulin daily",
+        resolver=self._resolver,
+        max_char_buffer=25,
+        suppress_parse_errors=True,
+    )
+
+    self.assertIsNotNone(result)
+    self.assertGreater(len(result.extractions), 0)
+    self.assertEqual(result.extractions[0].extraction_class, "entity")
+
+  def test_mixed_chunks_raises_when_suppression_disabled(self):
+    """Unparseable chunk raises when suppress_parse_errors=False."""
+    self._mock_model.infer.return_value = [
+        [types.ScoredOutput(output="No entities here.")],
+    ]
+
+    with self.assertRaises(lx.resolver.ResolverParsingError):
+      self._annotator.annotate_text(
+          text="Test text",
+          resolver=self._resolver,
+          suppress_parse_errors=False,
+      )
+
+
+class FetchUrlsOptInTest(absltest.TestCase):
+  """URL fetching must be opt-in to keep the library SSRF-safe by default."""
+
+  def setUp(self):
+    super().setUp()
+    self._example = lx.data.ExampleData(
+        text="hi",
+        extractions=[
+            lx.data.Extraction(extraction_class="thing", extraction_text="hi")
+        ],
+    )
+
+  def _extract(self, **overrides):
+    kwargs = dict(
+        text_or_documents="http://example.com/doc",
+        prompt_description="x",
+        examples=[self._example],
+        model_id="gemini-3.5-flash",
+        api_key="fake",
+    )
+    kwargs.update(overrides)
+    return lx.extract(**kwargs)
+
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  @mock.patch("langextract.extraction.io.download_text_from_url", autospec=True)
+  def test_url_is_not_fetched_by_default(self, downloader, create_model):
+    sentinel = RuntimeError("short-circuit after URL decision")
+    create_model.side_effect = sentinel
+    with self.assertRaises(RuntimeError) as cm:
+      self._extract()
+    self.assertIs(cm.exception, sentinel)
+    downloader.assert_not_called()
+
+  @mock.patch("langextract.extraction.io.download_text_from_url", autospec=True)
+  def test_fetch_urls_true_invokes_downloader(self, downloader):
+    sentinel = RuntimeError("download invoked")
+    downloader.side_effect = sentinel
+    with self.assertRaises(RuntimeError) as cm:
+      self._extract(fetch_urls=True)
+    self.assertIs(cm.exception, sentinel)
+    downloader.assert_called_once_with("http://example.com/doc")
 
 
 if __name__ == "__main__":

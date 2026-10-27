@@ -20,12 +20,75 @@ import requests
 
 import langextract as lx
 
+pytestmark = pytest.mark.integration
+
 
 def _ollama_available():
   """Check if Ollama is running on localhost:11434."""
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     result = sock.connect_ex(("localhost", 11434))
     return result == 0
+
+
+@pytest.mark.skipif(not _ollama_available(), reason="Ollama not running")
+def test_ollama_provider_via_model_config_must_be_first_test():
+  """
+  Test Ollama provider using ModelConfig.
+
+  This test ensures that the Ollama provider can be used via ModelConfig
+  and that the provider_kwargs are correctly passed to the provider.
+
+  Previously, if the first attempt to extract passed the provider name for
+  a built-in provider rather than allowing it to be inferred by the model_id,
+  the extract call would fail with:
+    langextract.core.exceptions.InferenceConfigError:
+    No provider found matching: 'ollama'. Available providers can be listed
+    with list_providers()
+  """
+  input_text = "Isaac Asimov was a prolific science fiction writer."
+  prompt = "Extract the author's full name and their primary literary genre."
+
+  model_id = "gemma2:2b"
+  config = lx.factory.ModelConfig(
+      model_id=model_id,
+      provider="ollama",
+      provider_kwargs={"model_url": "http://localhost:11434"},
+  )
+
+  examples = [
+      lx.data.ExampleData(
+          text=(
+              "J.R.R. Tolkien was an English writer, best known for"
+              " high-fantasy."
+          ),
+          extractions=[
+              lx.data.Extraction(
+                  extraction_class="author_details",
+                  extraction_text="J.R.R. Tolkien was an English writer...",
+                  attributes={
+                      "name": "J.R.R. Tolkien",
+                      "genre": "high-fantasy",
+                  },
+              )
+          ],
+      )
+  ]
+
+  result = lx.extract(
+      text_or_documents=input_text,
+      prompt_description=prompt,
+      examples=examples,
+      config=config,
+      temperature=0.3,
+      fence_output=False,
+      use_schema_constraints=False,
+  )
+
+  assert len(result.extractions) > 0
+  extraction = result.extractions[0]
+  assert extraction.extraction_class == "author_details"
+  if extraction.attributes:
+    assert "asimov" in extraction.attributes.get("name", "").lower()
 
 
 @pytest.mark.skipif(not _ollama_available(), reason="Ollama not running")
@@ -122,6 +185,49 @@ def _model_available(model_name):
     return any(model_name in m for m in models)
   except (requests.RequestException, KeyError, TypeError):
     return False
+
+
+@pytest.mark.skipif(
+    not _model_available("gpt-oss:20b"),
+    reason="gpt-oss:20b not available in Ollama",
+)
+def test_gpt_oss_20b_extraction():
+  """Test GPT-OSS extraction through Ollama's chat compatibility path."""
+  input_text = "Alice met Dana at the clinic."
+  prompt = "Extract only person names."
+
+  examples = [
+      lx.data.ExampleData(
+          text="Bob met Carol at the library.",
+          extractions=[
+              lx.data.Extraction(
+                  extraction_class="person",
+                  extraction_text="Bob",
+              )
+          ],
+      )
+  ]
+
+  result = lx.extract(
+      text_or_documents=input_text,
+      prompt_description=prompt,
+      examples=examples,
+      model_id="gpt-oss:20b",
+      model_url="http://localhost:11434",
+      temperature=0.0,
+      language_model_params={"timeout": 300},
+      resolver_params={"suppress_parse_errors": False},
+      max_workers=1,
+      batch_length=1,
+      show_progress=False,
+  )
+
+  person_extractions = [
+      extraction.extraction_text
+      for extraction in result.extractions
+      if extraction.extraction_class == "person"
+  ]
+  assert "Alice" in person_extractions
 
 
 @pytest.mark.skipif(

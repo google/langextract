@@ -17,6 +17,10 @@
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
+import openai as openai_sdk
+from openai.resources import chat as chat_resources
+from openai.types import chat
 
 from langextract import exceptions
 from langextract import factory
@@ -50,13 +54,13 @@ class ProviderSchemaDiscoveryTest(absltest.TestCase):
         msg="OllamaLanguageModel should return FormatModeSchema class",
     )
 
-  def test_openai_returns_none(self):
-    """Test that OpenAILanguageModel returns None (no schema support yet)."""
-    # OpenAI imports dependencies in __init__, not at module level
+  def test_openai_returns_openai_schema(self):
+    """OpenAILanguageModel advertises OpenAISchema support."""
     schema_class = openai.OpenAILanguageModel.get_schema_class()
-    self.assertIsNone(
+    self.assertIs(
         schema_class,
-        msg="OpenAILanguageModel should return None (no schema support)",
+        schemas.openai.OpenAISchema,
+        msg="OpenAILanguageModel should return OpenAISchema class",
     )
 
 
@@ -252,6 +256,61 @@ class OllamaFormatParameterTest(absltest.TestCase):
         self.assertIsNotNone(result)
         self.assertIsInstance(result, data.AnnotatedDocument)
 
+  def test_extract_with_ollama_passes_think_parameter(self):
+    """Test that lx.extract() passes Ollama think parameter correctly."""
+    with mock.patch("requests.post", autospec=True) as mock_post:
+      mock_response = mock.Mock(spec=["status_code", "json"])
+      mock_response.status_code = 200
+      mock_response.json.return_value = {
+          "response": (
+              '{"extractions": [{"extraction_class": "test", "extraction_text":'
+              ' "example"}]}'
+          )
+      }
+      mock_post.return_value = mock_response
+
+      with mock.patch("langextract.providers.registry.resolve") as mock_resolve:
+        mock_resolve.return_value = ollama.OllamaLanguageModel
+
+        examples = [
+            data.ExampleData(
+                text="Sample text",
+                extractions=[
+                    data.Extraction(
+                        extraction_class="test",
+                        extraction_text="sample",
+                    )
+                ],
+            )
+        ]
+
+        lx.extract(
+            text_or_documents="Test document",
+            prompt_description="Extract test information",
+            examples=examples,
+            model_id="gemma2:2b",
+            model_url="http://localhost:11434",
+            format_type=data.FormatType.JSON,
+            language_model_params={"think": True},
+            use_schema_constraints=True,
+        )
+
+        mock_post.assert_called()
+
+        last_call = mock_post.call_args_list[-1]
+        payload = last_call[1]["json"]
+
+        self.assertIs(
+            payload["think"],
+            True,
+            msg="think should be top-level in the Ollama request",
+        )
+        self.assertNotIn(
+            "think",
+            payload["options"],
+            msg="think should not be passed inside Ollama options",
+        )
+
 
 class OllamaYAMLOverrideTest(absltest.TestCase):
   """Tests for Ollama YAML format override behavior."""
@@ -434,7 +493,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
 
     with mock.patch("google.genai.Client", autospec=True):
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           format_type=data.FormatType.YAML,
       )
@@ -473,7 +532,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
       mock_model_instance.return_value.text = '{"extractions": []}'
 
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           response_schema=test_schema.schema_dict,
           response_mime_type="application/json",
@@ -515,7 +574,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
       mock_model_instance.return_value.text = '{"extractions": []}'
 
       model = gemini.GeminiLanguageModel(
-          model_id="gemini-2.5-flash",
+          model_id="gemini-3.5-flash",
           api_key="test_key",
           max_workers=5,
           response_schema={"test": "schema"},  # API parameter
@@ -573,6 +632,349 @@ class SchemaShimTest(absltest.TestCase):
             " compatibility"
         ),
     )
+
+
+class ApplyOutputSchemaTest(absltest.TestCase):
+  """Tests for BaseLanguageModel.apply_output_schema across providers."""
+
+  def setUp(self):
+    super().setUp()
+    self.output_schema = schema.extractions_schema(
+        schema.extraction_item_schema("condition")
+    )
+
+  def test_gemini_output_schema_reaches_generate_config(self):
+    with mock.patch("google.genai.Client", autospec=True) as mock_client:
+      mock_generate = mock.Mock(spec=["return_value"])
+      mock_client.return_value.models.generate_content = mock_generate
+      mock_generate.return_value.text = '{"extractions": []}'
+
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash", api_key="test_key"
+      )
+      model.apply_output_schema(self.output_schema)
+      list(model.infer(["Test prompt"]))
+
+      config = mock_generate.call_args[1]["config"]
+      self.assertEqual(config["response_json_schema"], self.output_schema)
+      self.assertEqual(config["response_mime_type"], "application/json")
+
+  def test_openai_output_schema_reaches_response_format(self):
+    with mock.patch("openai.OpenAI", autospec=True) as mock_client_cls:
+      mock_client = mock.Mock()
+      mock_client_cls.return_value = mock_client
+      mock_response = mock.Mock()
+      mock_response.choices = [
+          mock.Mock(
+              message=mock.Mock(content='{"extractions": []}', refusal=None),
+              finish_reason="stop",
+          )
+      ]
+      mock_client.chat.completions.create.return_value = mock_response
+
+      model = openai.OpenAILanguageModel(model_id="gpt-4o", api_key="test_key")
+      model.apply_output_schema(self.output_schema)
+      list(model.infer(["Test prompt"]))
+
+      call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+      response_format = call_kwargs["response_format"]
+      self.assertEqual(response_format["type"], "json_schema")
+      self.assertEqual(
+          response_format["json_schema"]["schema"], self.output_schema
+      )
+
+  def test_ollama_apply_output_schema_raises(self):
+    model = ollama.OllamaLanguageModel(model_id="gemma2:2b")
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "does not support output_schema"
+    ):
+      model.apply_output_schema(self.output_schema)
+
+  def test_apply_output_schema_rejects_conflicting_schema_kwargs(self):
+    with mock.patch("google.genai.Client", autospec=True):
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash",
+          api_key="test_key",
+          response_schema={"type": "object"},
+      )
+
+      with self.assertRaisesRegex(
+          exceptions.InferenceConfigError, "response_schema"
+      ):
+        model.apply_output_schema(self.output_schema)
+
+  def test_apply_output_schema_is_idempotent_for_same_schema(self):
+    with mock.patch("google.genai.Client", autospec=True):
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash", api_key="test_key"
+      )
+
+      model.apply_output_schema(self.output_schema)
+      model.apply_output_schema(self.output_schema)
+
+      self.assertTrue(model.schema.from_output_schema)
+
+  def test_apply_output_schema_rejects_different_schema(self):
+    with mock.patch("google.genai.Client", autospec=True):
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash", api_key="test_key"
+      )
+      model.apply_output_schema(self.output_schema)
+
+      other_schema = schema.extractions_schema(
+          schema.extraction_item_schema("medication")
+      )
+      with self.assertRaisesRegex(
+          exceptions.InferenceConfigError, "already has a schema"
+      ):
+        model.apply_output_schema(other_schema)
+
+  def test_apply_output_schema_rejects_constructor_gemini_schema(self):
+    with mock.patch("google.genai.Client", autospec=True):
+      example_schema = schemas.gemini.GeminiSchema(
+          _schema_dict={"type": "object", "properties": {}}
+      )
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash",
+          api_key="test_key",
+          gemini_schema=example_schema,
+      )
+
+      with self.assertRaisesRegex(
+          exceptions.InferenceConfigError, "already has a schema"
+      ):
+        model.apply_output_schema(self.output_schema)
+
+
+class OpenAINoContentResponseTest(parameterized.TestCase):
+  """Responses without content must raise, not report empty success (#491)."""
+
+  def setUp(self):
+    super().setUp()
+    mock_client_cls = self.enter_context(
+        mock.patch.object(openai_sdk, "OpenAI", autospec=True)
+    )
+    mock_client = mock_client_cls.return_value
+    mock_client.chat = chat_resources.Chat(mock_client)
+    self.mock_create = self.enter_context(
+        mock.patch.object(chat_resources.Completions, "create", autospec=True)
+    )
+    self.model = openai.OpenAILanguageModel(
+        model_id="gpt-4o", api_key="test_key"
+    )
+
+  def test_content_returns_scored_output(self):
+    self.mock_create.return_value.choices = [
+        mock.Mock(
+            message=mock.Mock(content='{"ok": 1}', refusal=None),
+            finish_reason="stop",
+        )
+    ]
+
+    result = self.model._process_single_prompt("prompt", {})
+
+    self.assertEqual(result.output, '{"ok": 1}')
+    self.assertEqual(result.score, 1.0)
+
+  def test_refusal_raises_with_refusal_message(self):
+    self.mock_create.return_value.choices = [
+        mock.Mock(
+            message=mock.Mock(content=None, refusal="I can't help with that."),
+            finish_reason="stop",
+        )
+    ]
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        "OpenAI refused the request: I can't help with that.",
+    ) as cm:
+      self.model._process_single_prompt("prompt", {})
+
+    self.assertEqual(cm.exception.provider, "OpenAI")
+
+  def test_refusal_with_content_still_raises(self):
+    self.mock_create.return_value.choices = [
+        mock.Mock(
+            message=mock.Mock(content="partial", refusal="Request refused"),
+            finish_reason="stop",
+        )
+    ]
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        "OpenAI refused the request: Request refused",
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="none_content_filter",
+          content=None,
+          finish_reason="content_filter",
+      ),
+      dict(
+          testcase_name="empty_content_filter",
+          content="",
+          finish_reason="content_filter",
+      ),
+      dict(
+          testcase_name="none_tool_call",
+          content=None,
+          finish_reason="tool_calls",
+      ),
+      dict(
+          testcase_name="empty_tool_call",
+          content="",
+          finish_reason="tool_calls",
+      ),
+      dict(
+          testcase_name="none_unknown_finish_reason",
+          content=None,
+          finish_reason="future_reason",
+      ),
+      dict(
+          testcase_name="empty_unknown_finish_reason",
+          content="",
+          finish_reason="future_reason",
+      ),
+  )
+  def test_missing_content_raises_with_finish_reason(
+      self, content, finish_reason
+  ):
+    self.mock_create.return_value.choices = [
+        mock.Mock(
+            message=mock.Mock(content=content, refusal=None),
+            finish_reason=finish_reason,
+        )
+    ]
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        rf"no message content \(finish_reason={finish_reason}\)",
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+  @parameterized.named_parameters(
+      dict(testcase_name="none_content", content=None),
+      dict(testcase_name="empty_content", content=""),
+  )
+  def test_exhausted_budget_raises_with_hint(self, content):
+    self.mock_create.return_value.choices = [
+        mock.Mock(
+            message=mock.Mock(content=content, refusal=None),
+            finish_reason="length",
+        )
+    ]
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        r"finish_reason=length.*max_output_tokens",
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+  def test_empty_content_with_normal_stop_passes_through(self):
+    self.mock_create.return_value.choices = [
+        mock.Mock(
+            message=mock.Mock(content="", refusal=None),
+            finish_reason="stop",
+        )
+    ]
+
+    result = self.model._process_single_prompt("prompt", {})
+
+    self.assertEqual(result.output, "")
+
+  def test_no_choices_raises(self):
+    self.mock_create.return_value.choices = []
+
+    with self.assertRaisesRegex(exceptions.InferenceRuntimeError, "no choices"):
+      self.model._process_single_prompt("prompt", {})
+
+  def test_no_content_error_is_not_rewrapped(self):
+    self.mock_create.return_value.choices = [
+        mock.Mock(
+            message=mock.Mock(content=None, refusal=None),
+            finish_reason=None,
+        )
+    ]
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError, r"^OpenAI response contained"
+    ):
+      self.model._process_single_prompt("prompt", {})
+
+  def test_parallel_infer_preserves_no_content_error(self):
+    self.mock_create.return_value.choices = [
+        mock.Mock(
+            message=mock.Mock(content=None, refusal=None),
+            finish_reason="content_filter",
+        )
+    ]
+    model = openai.OpenAILanguageModel(
+        model_id="gpt-4o", api_key="test_key", max_workers=2
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        r"^OpenAI response contained no message content",
+    ) as cm:
+      list(model.infer(["prompt one", "prompt two"]))
+
+    self.assertEqual(cm.exception.provider, "OpenAI")
+
+  @parameterized.named_parameters(
+      dict(testcase_name="sequential", max_workers=1),
+      dict(testcase_name="parallel", max_workers=2),
+  )
+  def test_extract_propagates_refusal(self, max_workers):
+    self.mock_create.return_value = chat.ChatCompletion(
+        id="test-completion",
+        created=0,
+        model="gpt-4o",
+        object="chat.completion",
+        choices=[
+            chat.chat_completion.Choice(
+                index=0,
+                finish_reason="stop",
+                message=chat.ChatCompletionMessage(
+                    role="assistant", content=None, refusal="Request refused"
+                ),
+            )
+        ],
+    )
+    examples = [
+        data.ExampleData(
+            text="Alice lives in Paris.",
+            extractions=[
+                data.Extraction(
+                    extraction_class="person", extraction_text="Alice"
+                )
+            ],
+        )
+    ]
+    model = openai.OpenAILanguageModel(
+        model_id="gpt-4o", api_key="test_key", max_workers=max_workers
+    )
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceRuntimeError,
+        r"^OpenAI refused the request: Request refused",
+    ) as cm:
+      lx.extract(
+          text_or_documents="Alice lives in Paris. Bob lives in London.",
+          prompt_description="Extract person names.",
+          examples=examples,
+          model=model,
+          use_schema_constraints=False,
+          max_char_buffer=24,
+          batch_length=2,
+          max_workers=max_workers,
+          show_progress=False,
+      )
+
+    self.assertEqual(cm.exception.provider, "OpenAI")
+    self.assertEqual(self.mock_create.call_count, max_workers)
 
 
 if __name__ == "__main__":

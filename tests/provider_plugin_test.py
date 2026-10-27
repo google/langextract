@@ -243,7 +243,7 @@ class PluginSmokeTest(absltest.TestCase):
 
     # Core gemini registers with priority 10 in providers.gemini
     # Our plugin registered with priority 50; it should win.
-    resolved = lx.providers.registry.resolve("gemini-2.5-flash")
+    resolved = lx.providers.registry.resolve("gemini-3.5-flash")
     self.assertEqual(resolved.__name__, "OverrideGemini")
 
   def test_resolve_provider_for_plugin(self):

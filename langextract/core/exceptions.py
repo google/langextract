@@ -32,6 +32,10 @@ __all__ = [
     "SchemaError",
     "FormatError",
     "FormatParseError",
+    "unsupported_output_schema_error",
+    "output_schema_fence_error",
+    "output_schema_format_error",
+    "output_schema_provider_kwargs_error",
 ]
 
 
@@ -54,6 +58,42 @@ class InferenceConfigError(InferenceError):
   This includes missing API keys, invalid model IDs, or other
   configuration-related issues that prevent model instantiation.
   """
+
+
+def unsupported_output_schema_error(target: str) -> InferenceConfigError:
+  """Builds a consistent error for providers without user-schema support."""
+  return InferenceConfigError(
+      f"{target} does not support output_schema. "
+      "Built-in support is available for Gemini and OpenAI."
+  )
+
+
+def output_schema_fence_error() -> InferenceConfigError:
+  """Builds a consistent error for incompatible output schema fences."""
+  return InferenceConfigError(
+      "output_schema uses provider structured output/raw JSON and cannot be "
+      "combined with fence_output=True. Leave fence_output unset or set "
+      "fence_output=False."
+  )
+
+
+def output_schema_format_error() -> InferenceConfigError:
+  """Builds a consistent error for non-JSON explicit output schemas."""
+  return InferenceConfigError(
+      "output_schema uses provider structured output/raw JSON and requires "
+      "format_type=JSON. Leave format_type unset or set format_type=JSON."
+  )
+
+
+def output_schema_provider_kwargs_error(
+    conflicting_keys: list[str],
+) -> InferenceConfigError:
+  """Builds a consistent error for duplicate provider schema controls."""
+  return InferenceConfigError(
+      "output_schema cannot be combined with provider kwargs that configure "
+      f"provider schema output: {', '.join(conflicting_keys)}. Remove those "
+      "provider kwargs and let output_schema configure structured output."
+  )
 
 
 class InferenceRuntimeError(InferenceError):

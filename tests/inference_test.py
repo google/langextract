@@ -20,6 +20,7 @@ pylint warnings are expected for test fixtures.
 """
 # pylint: disable=attribute-defined-outside-init
 
+import os
 from unittest import mock
 
 from absl.testing import absltest
@@ -916,6 +917,74 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
         [types.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')]
     ]
     self.assertEqual(results, expected_results)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="openai_api",
+          base_url=None,
+          env={},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="custom_base_url",
+          base_url="http://127.0.0.1:9001/v1",
+          env={},
+          expected_param="max_tokens",
+          omitted_param="max_completion_tokens",
+      ),
+      dict(
+          testcase_name="openai_base_url_env",
+          base_url=None,
+          env={"OPENAI_BASE_URL": "http://127.0.0.1:9001/v1"},
+          expected_param="max_tokens",
+          omitted_param="max_completion_tokens",
+      ),
+      dict(
+          testcase_name="explicit_openai_base_url",
+          base_url="https://api.openai.com/v1",
+          env={},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="regional_openai_base_url",
+          base_url="https://eu.api.openai.com/v1",
+          env={},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="lookalike_openai_host",
+          base_url="https://api.openai.com.example.com/v1",
+          env={},
+          expected_param="max_tokens",
+          omitted_param="max_completion_tokens",
+      ),
+  )
+  @mock.patch("openai.OpenAI")
+  def test_max_output_tokens_request_parameter(
+      self, mock_openai_class, base_url, env, expected_param, omitted_param
+  ):
+    self.enter_context(mock.patch.dict(os.environ, env, clear=True))
+    mock_client = mock_openai_class.return_value
+    mock_client.chat.completions.create.return_value = mock.Mock(
+        choices=[
+            mock.Mock(
+                message=mock.Mock(content='{"result": "ok"}', refusal=None),
+                finish_reason="stop",
+            )
+        ]
+    )
+    model = openai.OpenAILanguageModel(
+        model_id="gpt-6-luna", api_key="test-key", base_url=base_url
+    )
+
+    list(model.infer(["test prompt"], max_output_tokens=256))
+
+    call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    self.assertEqual(call_kwargs[expected_param], 256)
+    self.assertNotIn(omitted_param, call_kwargs)
 
 
 class TestOpenAILanguageModel(absltest.TestCase):

@@ -20,6 +20,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from absl.testing import parameterized
 import pytest
 import requests
 
@@ -168,6 +169,60 @@ def test_download_text_preserves_encoding(payload, content_type, expected):
         'https://example.com/input.txt', show_progress=False
     )
   assert actual == expected
+
+
+def _load_csv(csv_text: str, delimiter: str = ',') -> list[data.Document]:
+  with tempfile.TemporaryDirectory() as tmpdir:
+    path = pathlib.Path(tmpdir) / 'input.csv'
+    path.write_text(csv_text, encoding='utf-8')
+    return list(
+        io.Dataset(path, id_key='id', text_key='text').load(delimiter=delimiter)
+    )
+
+
+class DatasetTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      dict(testcase_name='na', value='NA'),
+      dict(testcase_name='n_slash_a', value='N/A'),
+      dict(testcase_name='null_uppercase', value='NULL'),
+      dict(testcase_name='null_lowercase', value='null'),
+      dict(testcase_name='nan', value='NaN'),
+  )
+  def test_load_preserves_literal_strings(self, value):
+    documents = _load_csv(f'id,text\n{value},{value}\n')
+
+    self.assertLen(documents, 1)
+    self.assertEqual(documents[0].document_id, value)
+    self.assertEqual(documents[0].text, value)
+    self.assertEqual(documents[0].tokenized_text.text, value)
+
+  @parameterized.named_parameters(
+      dict(testcase_name='empty_field', csv_text='id,text\n0001,\n'),
+      dict(testcase_name='missing_field', csv_text='id,text\n0001\n'),
+  )
+  def test_load_reads_empty_or_missing_text_as_empty_string(self, csv_text):
+    documents = _load_csv(csv_text)
+
+    self.assertLen(documents, 1)
+    self.assertEqual(documents[0].document_id, '0001')
+    self.assertEqual(documents[0].text, '')
+    self.assertEmpty(documents[0].tokenized_text.tokens)
+
+  def test_load_generates_unique_document_ids_for_empty_ids(self):
+    documents = _load_csv('id,text\n,first\n,second\n')
+
+    self.assertLen(documents, 2)
+    self.assertStartsWith(documents[0].document_id, 'doc_')
+    self.assertStartsWith(documents[1].document_id, 'doc_')
+    self.assertNotEqual(documents[0].document_id, documents[1].document_id)
+
+  def test_load_with_custom_delimiter_preserves_literal_strings(self):
+    documents = _load_csv('id|text\n0001|NULL\n', delimiter='|')
+
+    self.assertLen(documents, 1)
+    self.assertEqual(documents[0].document_id, '0001')
+    self.assertEqual(documents[0].text, 'NULL')
 
 
 if __name__ == '__main__':

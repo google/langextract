@@ -56,7 +56,8 @@ class Dataset(abc.ABC):
       delimiter: The delimiter to use when reading the CSV file.
 
     Yields:
-      A Document for each row in the dataset.
+      A Document for each row in the dataset. Rows with an empty ID get a
+      generated document ID.
 
     Raises:
       IOError: If the file does not exist.
@@ -78,7 +79,8 @@ class Dataset(abc.ABC):
       for row in csv_data:
         yield data.Document(
             text=row[self.text_key],
-            document_id=row[self.id_key],
+            # An empty ID would be skipped on save and collide across rows.
+            document_id=row[self.id_key] or None,
         )
     else:
       raise NotImplementedError(f'Unsupported file type: {self.input_path}')
@@ -216,7 +218,15 @@ def _read_csv(
 
   try:
     with open(filepath, 'r', encoding='utf-8') as f:
-      df = pd.read_csv(f, usecols=column_names, dtype=str, delimiter=delimiter)
+      df = pd.read_csv(
+          f,
+          usecols=column_names,
+          dtype=str,
+          delimiter=delimiter,
+          # Otherwise, pandas reads 'NA', 'NULL' and empty fields as NaN, even
+          # with dtype=str.
+          keep_default_na=False,
+      )
       for _, row in df.iterrows():
         yield row.to_dict()
   except pd.errors.EmptyDataError as e:

@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for langextract.visualization."""
-
+import json
+import re
 from unittest import mock
 
 from absl.testing import absltest
@@ -22,7 +22,28 @@ from langextract import visualization
 from langextract.core import data
 
 _PALETTE = visualization._PALETTE
+_HTML_CHARSET_META = visualization._HTML_CHARSET_META
 _VISUALIZATION_CSS = visualization._VISUALIZATION_CSS
+
+# Extraction values can contain markup, as in text taken from a web page.
+_MARKUP_TEXT = "</script><b id=probe>x</b><!-- a & b"
+_MARKUP_CLASS = "</script><!--CLASS&"
+
+
+def _markup_document() -> data.AnnotatedDocument:
+  """Returns a document whose extraction text and class contain markup."""
+  return data.AnnotatedDocument(
+      text=_MARKUP_TEXT,
+      extractions=[
+          data.Extraction(
+              extraction_class=_MARKUP_CLASS,
+              extraction_text=_MARKUP_TEXT,
+              char_interval=data.CharInterval(
+                  start_pos=0, end_pos=len(_MARKUP_TEXT)
+              ),
+          )
+      ],
+  )
 
 
 class VisualizationTest(absltest.TestCase):
@@ -134,6 +155,7 @@ class VisualizationTest(absltest.TestCase):
 
     actual_html = visualization.visualize(doc)
 
+    self.assertStartsWith(actual_html, '<meta charset="UTF-8">')
     # Verify expected components appear in output
     for component in expected_components:
       self.assertIn(component, actual_html)
@@ -149,11 +171,53 @@ class VisualizationTest(absltest.TestCase):
         " animate.</p></div>"
     )
     css_html = _VISUALIZATION_CSS
-    expected_html = css_html + body_html
+    expected_html = f"{_HTML_CHARSET_META}{css_html}{body_html}"
 
     actual_html = visualization.visualize(doc)
 
     self.assertEqual(actual_html, expected_html)
+
+  def test_to_script_safe_json_escapes_markup_and_line_separators(self):
+
+    value = {"text": "</script><!-- a & b -->\u2028\u2029"}
+    expected_json = (
+        '{"text": "\\u003c/script\\u003e\\u003c!-- a \\u0026 b --\\u003e'
+        '\\u2028\\u2029"}'
+    )
+
+    actual_json = visualization._to_script_safe_json(value)
+
+    self.assertEqual(actual_json, expected_json)
+    self.assertEqual(json.loads(actual_json), value)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_visualize_markup_in_extraction_does_not_end_script_early(self):
+
+    actual_html = visualization.visualize(_markup_document())
+
+    script_start = actual_html.index("<script>")
+    script_end = actual_html.index("</script>", script_start)
+    script_body = actual_html[script_start:script_end]
+    self.assertIn("function updateDisplay", script_body)
+    self.assertNotIn("<!--", script_body)
+    self.assertEqual(actual_html.count("</script>"), 1)
+    self.assertNotIn(_MARKUP_TEXT, actual_html)
+    self.assertNotIn(_MARKUP_CLASS, actual_html)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_visualize_script_safe_json_round_trips_extraction_values(self):
+
+    actual_html = visualization.visualize(_markup_document())
+
+    match = re.search(r"const extractions = (.*);\n", actual_html)
+    self.assertIsNotNone(match)
+    embedded_data = json.loads(match.group(1))
+    self.assertEqual(embedded_data[0]["text"], _MARKUP_TEXT)
+    self.assertEqual(embedded_data[0]["class"], _MARKUP_CLASS)
 
 
 if __name__ == "__main__":

@@ -67,7 +67,7 @@ def read_prompt_template_structured_from_file(
   """
   adapter = pydantic.TypeAdapter(PromptTemplateStructured)
   try:
-    with pathlib.Path(prompt_path).open("rt") as f:
+    with pathlib.Path(prompt_path).open("rt", encoding="utf-8") as f:
       data_dict = {}
       prompt_content = f.read()
       if format_type == data.FormatType.YAML:

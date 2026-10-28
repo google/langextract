@@ -253,6 +253,23 @@ class FormatHandlerTest(parameterized.TestCase):
     self.assertEqual(parsed[0]["test"], "value")
     self.assertEqual(parsed[0]["test_attributes"]["key"], "data")
 
+  def test_format_and_parse_with_embedded_code_fences(self):
+    """Ensure extractions containing markdown fences round-trip correctly."""
+    for fmt in (data.FormatType.JSON, data.FormatType.YAML):
+      handler = format_handler.FormatHandler(
+          format_type=fmt,
+          use_wrapper=True,
+          use_fences=True,
+      )
+      value = "```python\nprint(1)\n```"
+      extractions = [
+          data.Extraction(extraction_class="code", extraction_text=value)
+      ]
+      formatted = handler.format_extraction_example(extractions)
+      parsed = handler.parse_output(formatted)
+      self.assertLen(parsed, 1)
+      self.assertEqual(parsed[0]["code"], value)
+
 
 class NonGeminiModelParsingTest(parameterized.TestCase):
   """Regression tests for non-Gemini model parsing edge cases."""

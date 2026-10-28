@@ -1048,14 +1048,18 @@ class TestOpenAILanguageModel(absltest.TestCase):
     ]
     mock_client.chat.completions.create.return_value = mock_response
 
-    model = openai.OpenAILanguageModel(api_key="test-key", temperature=0.0)
+    # gpt-6-luna accepts temperature only with reasoning disabled.
+    model = openai.OpenAILanguageModel(
+        api_key="test-key", temperature=0.0, reasoning_effort="none"
+    )
 
     list(model.infer(["test prompt"]))
 
     mock_client.chat.completions.create.assert_called_once()
     call_args = mock_client.chat.completions.create.call_args
     self.assertEqual(call_args.kwargs["temperature"], 0.0)
-    self.assertEqual(call_args.kwargs["model"], "gpt-4o-mini")
+    self.assertEqual(call_args.kwargs["reasoning_effort"], "none")
+    self.assertEqual(call_args.kwargs["model"], "gpt-6-luna")
     self.assertEqual(call_args.kwargs["n"], 1)
 
   @mock.patch("openai.OpenAI")

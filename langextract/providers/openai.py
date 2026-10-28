@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-many-instance-attributes
   """Language model inference using OpenAI's API with structured output."""
 
-  model_id: str = 'gpt-4o-mini'
+  model_id: str = 'gpt-6-luna'
   api_key: str | None = None
   base_url: str | None = None
   organization: str | None = None
@@ -108,7 +108,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
   def __init__(
       self,
-      model_id: str = 'gpt-4o-mini',
+      model_id: str = 'gpt-6-luna',
       api_key: str | None = None,
       base_url: str | None = None,
       organization: str | None = None,
@@ -121,13 +121,14 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     """Initialize the OpenAI language model.
 
     Args:
-      model_id: The OpenAI model ID to use (e.g., 'gpt-4o-mini', 'gpt-4o').
+      model_id: The OpenAI model ID to use (e.g., 'gpt-6-luna').
       api_key: API key for OpenAI service.
       base_url: Base URL for OpenAI service.
       organization: Optional OpenAI organization ID.
       openai_schema: Optional schema for structured output.
       format_type: Output format (JSON or YAML).
-      temperature: Sampling temperature.
+      temperature: Sampling temperature. The default model, gpt-6-luna,
+        accepts it only when `reasoning_effort='none'` is also passed.
       max_workers: Maximum number of parallel API calls.
       **kwargs: Additional OpenAI Chat Completions parameters. Pass `batch` as
         True, a dict, or `openai_batch.BatchConfig` to enable OpenAI Batch API

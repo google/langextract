@@ -1050,7 +1050,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
     model_default = lx.factory.create_model(config_default)
     self.assertEqual(model_default.__class__.__name__, "OpenAILanguageModel")
     # Should use the default model_id from the provider
-    self.assertEqual(model_default.model_id, "gpt-4o-mini")
+    self.assertEqual(model_default.model_id, "gpt-6-luna")
 
   @skip_if_no_openai
   @live_api

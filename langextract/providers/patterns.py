@@ -30,6 +30,7 @@ OPENAI_PATTERNS = (
     r'^gpt4\.',
     r'^gpt-5',
     r'^gpt5\.',
+    r'^gpt-6',
     OPENAI_REASONING_PATTERN,
 )
 OPENAI_PRIORITY = 10

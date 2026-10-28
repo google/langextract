@@ -41,9 +41,14 @@ prompts with a `ThreadPoolExecutor` when `max_workers > 1`.
 GPT-4, GPT-5, GPT-6, and o-series model IDs (`^gpt-3\.5`, `^gpt-4`,
 `^gpt4\.`, `^gpt-5`, `^gpt5\.`, `^gpt-6`, `^o[1-9]`). Both GPT and
 o-series IDs use the environment API keys above. Routing does not
-guarantee that a model supports every request option: o-series models
-currently require omitting `max_output_tokens`, which this provider maps
-to the unsupported `max_tokens` parameter.
+guarantee that a model supports every request option. The provider sends
+`max_output_tokens` as `max_completion_tokens` to the OpenAI API
+(including regional `*.api.openai.com` hosts), and as `max_tokens` when
+`base_url` or `OPENAI_BASE_URL` points elsewhere, because some
+OpenAI-compatible servers accept only the older name. Reasoning models
+behind such a `base_url` (for example o-series or GPT-5 deployments on
+Azure OpenAI) still need `max_output_tokens` omitted. Reasoning tokens
+count toward `max_output_tokens`.
 
 For **OpenAI-compatible endpoints** (LiteLLM, local servers, custom base
 URLs) or model IDs outside these families, use `ModelConfig` with an

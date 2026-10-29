@@ -150,6 +150,28 @@ class RegistryTest(absltest.TestCase):
 
     self.assertEqual(router.list_providers(), first_providers)
 
+  def test_minimax_models_resolve_to_openai_provider(self):
+    """Current MiniMax model IDs use the OpenAI-compatible provider."""
+    providers_module.load_builtins_once()
+
+    for model_id in ("MiniMax-M3", "MiniMax-M3.1-Flash"):
+      with self.subTest(model_id=model_id):
+        self.assertIs(router.resolve(model_id), openai.OpenAILanguageModel)
+
+  def test_minimax_patterns_match_only_current_model_ids(self):
+    """Retired models and near matches do not gain automatic routing."""
+    providers_module.load_builtins_once()
+
+    for model_id in (
+        "MiniMax-M2.7",
+        "MiniMax-M2.5",
+        "MiniMax-M3x1-Flash",
+        "MiniMax-M3.1-Flash-extra",
+    ):
+      with self.subTest(model_id=model_id):
+        with self.assertRaises(exceptions.InferenceConfigError):
+          router.resolve(model_id)
+
   def test_openai_patterns_cover_reasoning_and_gpt35_models(self):
     providers_module.load_builtins_once()
 

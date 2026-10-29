@@ -1124,7 +1124,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
     input_text = "Patient took 400 mg PO Ibuprofen q4h for two days."
 
     config = lx.factory.ModelConfig(
-        model_id="o4-mini",
+        model_id="gpt-5.6-terra",
         provider="OpenAILanguageModel",
         provider_kwargs={
             "api_key": OPENAI_API_KEY,

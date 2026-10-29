@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import json
+import pathlib
+import tempfile
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -277,6 +279,68 @@ class DocumentWithAdditionalContextTest(absltest.TestCase):
     new_doc = doc.with_additional_context(None)
     self.assertIsNone(new_doc.additional_context)
     self.assertEqual(new_doc.text, "hello")
+
+
+class AnnotatedDocumentRoundTripTest(absltest.TestCase):
+  """Tests that annotated documents survive serialization and reload."""
+
+  def test_none_extractions_survive_dict_round_trip(self):
+    doc = data.AnnotatedDocument(
+        document_id="d1", text="Nothing to extract here."
+    )
+
+    adoc_dict = data_lib.annotated_document_to_dict(doc)
+    self.assertIsNone(adoc_dict["extractions"])
+    restored = data_lib.dict_to_annotated_document(adoc_dict)
+
+    self.assertEqual(restored.document_id, "d1")
+    self.assertEqual(restored.text, "Nothing to extract here.")
+    self.assertIsNone(restored.extractions)
+
+  def test_missing_extractions_key_loads_as_empty_list(self):
+    restored = data_lib.dict_to_annotated_document(
+        {"document_id": "d1", "text": "hello"}
+    )
+
+    self.assertEqual(restored.extractions, [])
+
+  def test_extractions_survive_dict_round_trip(self):
+    doc = data.AnnotatedDocument(
+        document_id="d1",
+        text="Alice met Bob.",
+        extractions=[
+            data.Extraction(
+                extraction_class="person",
+                extraction_text="Alice",
+                char_interval=data.CharInterval(start_pos=0, end_pos=5),
+                alignment_status=data.AlignmentStatus.MATCH_EXACT,
+            )
+        ],
+    )
+
+    adoc_dict = json.loads(json.dumps(data_lib.annotated_document_to_dict(doc)))
+    restored = data_lib.dict_to_annotated_document(adoc_dict)
+
+    self.assertEqual(restored.extractions, doc.extractions)
+
+  def test_none_extractions_survive_jsonl_round_trip(self):
+    doc = data.AnnotatedDocument(
+        document_id="d1", text="Nothing to extract here."
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+      io.save_annotated_documents(
+          iter([doc]), output_dir=tmp, show_progress=False
+      )
+      restored = list(
+          io.load_annotated_documents_jsonl(
+              pathlib.Path(tmp) / "data.jsonl", show_progress=False
+          )
+      )
+
+    self.assertLen(restored, 1)
+    self.assertEqual(restored[0].document_id, "d1")
+    self.assertIsNone(restored[0].extractions)
 
 
 if __name__ == "__main__":

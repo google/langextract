@@ -96,29 +96,32 @@ def dict_to_annotated_document(
   if not adoc_dic:
     return data.AnnotatedDocument()
 
-  for extractions in adoc_dic.get("extractions", []):
-    token_int = extractions.get("token_interval")
+  extractions = []
+  for ext_dic in adoc_dic.get("extractions", []):
+    # Work on a copy so the caller's dicts are not mutated.
+    ext_dic = dict(ext_dic)
+    token_int = ext_dic.get("token_interval")
     if token_int:
-      extractions["token_interval"] = tokenizer.TokenInterval(**token_int)
+      ext_dic["token_interval"] = tokenizer.TokenInterval(**token_int)
     else:
-      extractions["token_interval"] = None
+      ext_dic["token_interval"] = None
 
-    char_int = extractions.get("char_interval")
+    char_int = ext_dic.get("char_interval")
     if char_int:
-      extractions["char_interval"] = data.CharInterval(**char_int)
+      ext_dic["char_interval"] = data.CharInterval(**char_int)
     else:
-      extractions["char_interval"] = None
+      ext_dic["char_interval"] = None
 
-    status_str = extractions.get("alignment_status")
+    status_str = ext_dic.get("alignment_status")
     if status_str:
-      extractions["alignment_status"] = data.AlignmentStatus(status_str)
+      ext_dic["alignment_status"] = data.AlignmentStatus(status_str)
     else:
-      extractions["alignment_status"] = None
+      ext_dic["alignment_status"] = None
+
+    extractions.append(data.Extraction(**ext_dic))
 
   return data.AnnotatedDocument(
       document_id=adoc_dic.get("document_id"),
       text=adoc_dic.get("text"),
-      extractions=[
-          data.Extraction(**ent) for ent in adoc_dic.get("extractions", [])
-      ],
+      extractions=extractions,
   )

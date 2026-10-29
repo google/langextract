@@ -14,6 +14,9 @@
 
 """Tests for the main package functions in __init__.py."""
 
+import os
+import re
+import tempfile
 import textwrap
 from unittest import mock
 import warnings
@@ -21,6 +24,7 @@ import warnings
 from absl.testing import absltest
 from absl.testing import parameterized
 
+from langextract import extraction
 from langextract import prompting
 import langextract as lx
 from langextract.core import base_model
@@ -992,6 +996,103 @@ class FetchUrlsOptInTest(absltest.TestCase):
       self._extract(fetch_urls=True)
     self.assertIs(cm.exception, sentinel)
     downloader.assert_called_once_with("http://example.com/doc")
+
+
+class FilePathInputWarningTest(absltest.TestCase):
+  """A string naming an existing file is literal text; warn about it."""
+
+  def setUp(self):
+    super().setUp()
+    self._example = lx.data.ExampleData(
+        text="hi",
+        extractions=[
+            lx.data.Extraction(extraction_class="thing", extraction_text="hi")
+        ],
+    )
+    tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+    tmp.close()
+    self.addCleanup(os.unlink, tmp.name)
+    self._file_path = tmp.name
+
+  def _extract(self, text):
+    # Stops right after input handling; no model is ever called.
+    with mock.patch(
+        "langextract.extraction.factory.create_model",
+        autospec=True,
+        side_effect=RuntimeError("short-circuit"),
+    ):
+      with self.assertRaises(RuntimeError):
+        lx.extract(
+            text_or_documents=text,
+            prompt_description="x",
+            examples=[self._example],
+            model_id="gemini-3.5-flash",
+            api_key="fake",
+        )
+
+  def test_existing_file_path_warns_and_names_the_path(self):
+    with self.assertWarnsRegex(UserWarning, re.escape(self._file_path)):
+      self._extract(self._file_path)
+
+  def test_plain_text_does_not_warn(self):
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      self._extract("Patient needs Aspirin.")
+
+  def test_nonexistent_path_does_not_warn(self):
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      self._extract(self._file_path + ".missing")
+
+  def test_relative_path_warns(self):
+    directory, name = os.path.split(self._file_path)
+    previous = os.getcwd()
+    self.addCleanup(os.chdir, previous)
+    os.chdir(directory)
+    with self.assertWarnsRegex(UserWarning, re.escape(name)):
+      self._extract(name)
+
+  def test_directory_path_does_not_warn(self):
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      self._extract(os.path.dirname(self._file_path))
+
+  def test_empty_string_does_not_warn(self):
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      self._extract("")
+
+  def test_string_longer_than_path_limit_is_not_checked(self):
+    long_text = "a" * (extraction._MAX_PATH_LIKE_CHARS + 1)
+    with mock.patch.object(
+        extraction.os.path, "isfile", autospec=True
+    ) as isfile:
+      with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        self._extract(long_text)
+    isfile.assert_not_called()
+
+  def test_text_with_null_byte_does_not_raise_or_warn(self):
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      self._extract(self._file_path + "\x00")
+
+  def test_document_iterable_does_not_warn(self):
+    docs = [lx.data.Document(text=self._file_path)]
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      self._extract(docs)
+
+  def test_warning_is_attributed_to_the_caller(self):
+    with warnings.catch_warnings(record=True) as caught:
+      warnings.simplefilter("always")
+      self._extract(self._file_path)
+    self.assertEqual(caught[0].filename, __file__)
+
+  def test_multiline_text_starting_with_a_real_path_does_not_warn(self):
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      self._extract(self._file_path + "\nmore text")
 
 
 if __name__ == "__main__":

@@ -23,14 +23,19 @@ result = lx.extract(
     text_or_documents=text,
     examples=examples,
     prompt_description=prompt,
-    model_id="gpt-4o",
+    model_id="gpt-6-luna",
 )
 ```
 
 Env: `OPENAI_API_KEY` (falls back to `LANGEXTRACT_API_KEY`).
 
-The OpenAI provider uses JSON Schema constraints by default. For models
-without JSON Schema support, such as `gpt-3.5-turbo`, set
+`gpt-6-luna` is a reasoning model and accepts `temperature` only when
+reasoning is disabled. To set `temperature`, also pass
+`reasoning_effort="none"` in `language_model_params` (or in
+`provider_kwargs` when using `ModelConfig`).
+
+The OpenAI provider uses JSON Schema constraints by default. For
+OpenAI-compatible servers without JSON Schema support, set
 `use_schema_constraints=False` to use JSON mode
 (`response_format={"type":"json_object"}`). Leave `fence_output` unset —
 `extract()` and the factory/provider layer auto-determine fence behavior
@@ -95,7 +100,7 @@ result = lx.extract(
     text_or_documents=text,
     examples=examples,
     config=ModelConfig(
-        model_id="gpt-4o",
+        model_id="gpt-6-luna",
         provider_kwargs={"api_key": "your_key", "base_url": "https://..."},
     ),
 )

@@ -42,7 +42,7 @@ class ModelConfig:
   """Configuration for instantiating a language model provider.
 
   Attributes:
-    model_id: The model identifier (e.g., "gemini-3.5-flash", "gpt-4o").
+    model_id: The model identifier (e.g., "gemini-3.5-flash", "gpt-6-luna").
     provider: Optional explicit provider name or class name. Use this to
       disambiguate when multiple providers support the same model_id.
     provider_kwargs: Optional provider-specific keyword arguments.

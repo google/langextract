@@ -38,12 +38,12 @@ from the provider's schema. The OpenAI provider parallelizes batched
 prompts with a `ThreadPoolExecutor` when `max_workers > 1`.
 
 **Auto-routing scope:** the built-in OpenAI provider matches GPT-3.5,
-GPT-4, GPT-5, and o-series model IDs (`^gpt-3\.5`, `^gpt-4`, `^gpt4\.`,
-`^gpt-5`, `^gpt5\.`, `^o[1-9]`). Both GPT and o-series IDs use the
-environment API keys above. Routing does not guarantee that a model
-supports every request option: o-series models currently require omitting
-`max_output_tokens`, which this provider maps to the unsupported
-`max_tokens` parameter.
+GPT-4, GPT-5, GPT-6, and o-series model IDs (`^gpt-3\.5`, `^gpt-4`,
+`^gpt4\.`, `^gpt-5`, `^gpt5\.`, `^gpt-6`, `^o[1-9]`). Both GPT and
+o-series IDs use the environment API keys above. Routing does not
+guarantee that a model supports every request option: o-series models
+currently require omitting `max_output_tokens`, which this provider maps
+to the unsupported `max_tokens` parameter.
 
 For **OpenAI-compatible endpoints** (LiteLLM, local servers, custom base
 URLs) or model IDs outside these families, use `ModelConfig` with an

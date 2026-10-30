@@ -43,7 +43,7 @@ from langextract.providers import openai_batch
 dotenv.load_dotenv(override=True)
 
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
-DEFAULT_OPENAI_MODEL = "gpt-4o"
+DEFAULT_OPENAI_MODEL = "gpt-6-luna"
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get(
     "LANGEXTRACT_API_KEY"
@@ -107,6 +107,8 @@ GEMINI_MODEL_PARAMS = {
 }
 
 OPENAI_MODEL_PARAMS = {
+    # Reasoning off: cheaper, faster, and gpt-6-luna then accepts temperature.
+    "reasoning_effort": "none",
     "temperature": 0.0,
 }
 
@@ -856,7 +858,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         text_or_documents=documents,
         prompt_description=prompt,
         examples=examples,
-        model_id="gpt-4o-mini",
+        model_id=DEFAULT_OPENAI_MODEL,
         api_key=OPENAI_API_KEY,
         use_schema_constraints=False,
         language_model_params=language_model_params,
@@ -977,7 +979,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         text_or_documents=input_text,
         prompt_description=prompt,
         examples=examples,
-        model_id="gpt-4o-mini",
+        model_id=DEFAULT_OPENAI_MODEL,
         api_key=OPENAI_API_KEY,
         use_schema_constraints=True,
         fence_output=False,
@@ -1030,6 +1032,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         provider="OpenAILanguageModel",  # Explicit provider selection
         provider_kwargs={
             "api_key": OPENAI_API_KEY,
+            "reasoning_effort": "none",
             "temperature": 0.0,
         },
     )

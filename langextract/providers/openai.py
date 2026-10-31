@@ -116,6 +116,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float | None = None,
       max_workers: int = 10,
+      timeout: float | None = None,
+      max_retries: int | None = None,
       **kwargs,
   ) -> None:
     """Initialize the OpenAI language model.
@@ -129,6 +131,10 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
       max_workers: Maximum number of parallel API calls.
+      timeout: Request timeout in seconds passed to the OpenAI client. Defaults
+        to the OpenAI SDK default when unset.
+      max_retries: Maximum automatic retries by the OpenAI client. Defaults to
+        the OpenAI SDK default when unset.
       **kwargs: Additional OpenAI Chat Completions parameters. Pass `batch` as
         True, a dict, or `openai_batch.BatchConfig` to enable OpenAI Batch API
         mode.
@@ -167,10 +173,16 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
 
     # Keep SDK initialization after schema validation so LangExtract reports
     # configuration errors before any client-side transport checks.
+    client_kwargs = {}
+    if timeout is not None:
+      client_kwargs['timeout'] = timeout
+    if max_retries is not None:
+      client_kwargs['max_retries'] = max_retries
     self._client = openai.OpenAI(
         api_key=self.api_key,
         base_url=self.base_url,
         organization=self.organization,
+        **client_kwargs,
     )
 
   def _validate_schema_config(self) -> None:

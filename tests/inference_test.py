@@ -952,6 +952,30 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(str(context.exception), "API key not provided.")
 
   @mock.patch("openai.OpenAI")
+  def test_openai_client_receives_timeout_and_max_retries(
+      self, mock_openai_class
+  ):
+    openai.OpenAILanguageModel(api_key="test-key", timeout=7.5, max_retries=0)
+
+    mock_openai_class.assert_called_once_with(
+        api_key="test-key",
+        base_url=None,
+        organization=None,
+        timeout=7.5,
+        max_retries=0,
+    )
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_client_defaults_leave_sdk_timeout_and_retries(
+      self, mock_openai_class
+  ):
+    openai.OpenAILanguageModel(api_key="test-key")
+
+    mock_openai_class.assert_called_once_with(
+        api_key="test-key", base_url=None, organization=None
+    )
+
+  @mock.patch("openai.OpenAI")
   def test_openai_extra_kwargs_passed(self, mock_openai_class):
     """Test that extra kwargs are passed to OpenAI API."""
     mock_client = mock.Mock()

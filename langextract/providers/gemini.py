@@ -103,6 +103,12 @@ _MAX_TOKENS_HINT: Final[str] = (
     ' budget on reasoning before any text is produced).'
 )
 
+_TRUNCATED_OUTPUT_WARNING: Final[str] = (
+    'Gemini stopped at the output token limit (finish_reason=MAX_TOKENS), so'
+    ' the response is likely incomplete and may fail to parse. Consider'
+    ' raising max_output_tokens or lowering max_char_buffer.'
+)
+
 
 def _no_text_diagnostic(
     response: genai_types.GenerateContentResponse, text: str | None
@@ -485,6 +491,14 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     diagnostic = _no_text_diagnostic(response, output_text)
     if diagnostic is not None:
       raise exceptions.InferenceRuntimeError(diagnostic, provider='Gemini')
+    candidates = getattr(response, 'candidates', None)
+    if (
+        output_text
+        and isinstance(candidates, (list, tuple))
+        and candidates
+        and candidates[0].finish_reason == genai_types.FinishReason.MAX_TOKENS
+    ):
+      logging.warning(_TRUNCATED_OUTPUT_WARNING)
     return core_types.ScoredOutput(score=1.0, output=output_text)
 
   def infer(

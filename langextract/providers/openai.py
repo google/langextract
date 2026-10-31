@@ -303,6 +303,13 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           provider='OpenAI',
       )
 
+    if finish_reason == 'length':
+      logging.warning(
+          'OpenAI stopped at the output token limit (finish_reason=length),'
+          ' so the response is likely incomplete and may fail to parse.'
+          ' Consider raising max_output_tokens or lowering max_char_buffer.'
+      )
+
     return core_types.ScoredOutput(score=1.0, output=output_text)
 
   def infer_batch(

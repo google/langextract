@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import json
+from typing import Any
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -205,50 +205,74 @@ class DataLibToDictParameterizedTest(parameterized.TestCase):
     self.assertIn('"extraction_index": 42', json_str)
 
 
-class DictToAnnotatedDocumentTest(absltest.TestCase):
+def _serialized_document() -> dict[str, Any]:
+  """Returns a fresh dict in the format read by dict_to_annotated_document."""
+  return {
+      "document_id": "doc-1",
+      "text": "Alice",
+      "extractions": [
+          {
+              "extraction_class": "person",
+              "extraction_text": "Alice",
+              "char_interval": {"start_pos": 0, "end_pos": 5},
+              # Not written by annotated_document_to_dict, but still loaded.
+              "token_interval": {"start_index": 0, "end_index": 1},
+              "alignment_status": "match_exact",
+              "extraction_index": 1,
+              "group_index": 0,
+              "description": None,
+              "attributes": {"role": "patient", "aliases": ["Al"]},
+          },
+      ],
+  }
 
-  def test_does_not_mutate_input_and_is_reusable(self):
-    payload = data_lib.annotated_document_to_dict(
-        data.AnnotatedDocument(
-            document_id="doc-1",
-            text="Alice",
-            extractions=[
-                data.Extraction(
-                    extraction_class="person",
-                    extraction_text="Alice",
-                    char_interval=data.CharInterval(start_pos=0, end_pos=5),
-                    token_interval=tokenizer.TokenInterval(
-                        start_index=0, end_index=1
-                    ),
-                    alignment_status=data.AlignmentStatus.MATCH_EXACT,
-                )
-            ],
-        )
-    )
-    # annotated_document_to_dict does not serialize token_interval, so set it
-    # explicitly to exercise the token_interval path.
-    payload["extractions"][0]["token_interval"] = {
-        "start_index": 0,
-        "end_index": 1,
-    }
-    original = copy.deepcopy(payload)
 
-    first = data_lib.dict_to_annotated_document(payload)
-    self.assertEqual(payload, original)
-    json.dumps(payload)
+class DictToAnnotatedDocumentTest(parameterized.TestCase):
 
-    second = data_lib.dict_to_annotated_document(payload)
-    self.assertEqual(first, second)
-    self.assertEqual(
-        first.extractions[0].char_interval,
-        data.CharInterval(start_pos=0, end_pos=5),
-    )
-    # token_interval is excluded from Extraction equality, so check it directly.
-    for doc in (first, second):
-      self.assertEqual(
-          doc.extractions[0].token_interval,
-          tokenizer.TokenInterval(start_index=0, end_index=1),
-      )
+  def test_does_not_mutate_input(self):
+    payload = _serialized_document()
+
+    data_lib.dict_to_annotated_document(payload)
+
+    self.assertEqual(payload, _serialized_document())
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="char_interval",
+          field="char_interval",
+          expected=data.CharInterval(start_pos=0, end_pos=5),
+      ),
+      dict(
+          testcase_name="token_interval",
+          field="token_interval",
+          expected=tokenizer.TokenInterval(start_index=0, end_index=1),
+      ),
+      dict(
+          testcase_name="alignment_status",
+          field="alignment_status",
+          expected=data.AlignmentStatus.MATCH_EXACT,
+      ),
+      dict(
+          testcase_name="attributes",
+          field="attributes",
+          expected={"role": "patient", "aliases": ["Al"]},
+      ),
+  )
+  def test_repeated_call_restores_field(self, field, expected):
+    payload = _serialized_document()
+    data_lib.dict_to_annotated_document(payload)
+
+    extraction = data_lib.dict_to_annotated_document(payload).extractions[0]
+
+    self.assertEqual(getattr(extraction, field), expected)
+
+  def test_result_does_not_share_attributes_with_input(self):
+    payload = _serialized_document()
+    document = data_lib.dict_to_annotated_document(payload)
+
+    document.extractions[0].attributes["aliases"].append("Ally")
+
+    self.assertEqual(payload, _serialized_document())
 
 
 class IsUrlTest(absltest.TestCase):

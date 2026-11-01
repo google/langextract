@@ -15,6 +15,7 @@
 """Library for data conversion between AnnotatedDocument and JSON."""
 from __future__ import annotations
 
+import copy
 import dataclasses
 import enum
 import numbers
@@ -91,15 +92,17 @@ def dict_to_annotated_document(
     adoc_dic: A Python dict representing an AnnotatedDocument.
 
   Returns:
-    An AnnotatedDocument object.
+    A new AnnotatedDocument that shares no mutable state with `adoc_dic`.
   """
   if not adoc_dic:
     return data.AnnotatedDocument()
 
   extractions = []
   for ext_dic in adoc_dic.get("extractions", []):
-    # Work on a copy so the caller's dicts are not mutated.
+    # Work on copies so the caller's dict is not mutated and does not share
+    # attributes with the returned extraction.
     ext_dic = dict(ext_dic)
+    ext_dic["attributes"] = copy.deepcopy(ext_dic.get("attributes"))
     token_int = ext_dic.get("token_interval")
     if token_int:
       ext_dic["token_interval"] = tokenizer.TokenInterval(**token_int)

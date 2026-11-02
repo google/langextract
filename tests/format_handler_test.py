@@ -369,6 +369,17 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
     with self.assertRaises(TypeError):
       format_handler.FormatHandler(format_type=123)  # type: ignore[arg-type]
 
+  def test_parse_output_with_backticks_in_extraction(self):
+    value = "```python\nprint(1)\n```"
+    extractions = [
+        data.Extraction(extraction_class="code", extraction_text=value)
+    ]
+    handler = format_handler.FormatHandler()
+    output = handler.format_extraction_example(extractions)
+    result = handler.parse_output(output)
+    self.assertLen(result, 1)
+    self.assertEqual(result[0]["code"], value)
+
 
 if __name__ == "__main__":
   absltest.main()

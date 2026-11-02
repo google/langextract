@@ -941,6 +941,13 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
           omitted_param="max_completion_tokens",
       ),
       dict(
+          testcase_name="explicit_base_url_overrides_env",
+          base_url="https://api.openai.com/v1",
+          env={"OPENAI_BASE_URL": "http://127.0.0.1:9001/v1"},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
           testcase_name="explicit_openai_base_url",
           base_url="https://api.openai.com/v1",
           env={},
@@ -950,6 +957,13 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
       dict(
           testcase_name="regional_openai_base_url",
           base_url="https://eu.api.openai.com/v1",
+          env={},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="uppercase_openai_host_with_port",
+          base_url="https://API.OpenAI.com:443/v1/",
           env={},
           expected_param="max_completion_tokens",
           omitted_param="max_tokens",

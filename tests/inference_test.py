@@ -25,6 +25,9 @@ from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
+import openai as openai_sdk
+from openai.resources import chat as chat_resources
+from openai.types import chat
 
 from langextract import exceptions
 from langextract.core import base_model
@@ -976,19 +979,26 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
           omitted_param="max_completion_tokens",
       ),
   )
-  @mock.patch("openai.OpenAI")
+  @mock.patch.object(openai_sdk, "OpenAI", autospec=True)
   def test_max_output_tokens_request_parameter(
       self, mock_openai_class, base_url, env, expected_param, omitted_param
   ):
     self.enter_context(mock.patch.dict(os.environ, env, clear=True))
-    mock_client = mock_openai_class.return_value
-    mock_client.chat.completions.create.return_value = mock.Mock(
-        choices=[
-            mock.Mock(
-                message=mock.Mock(content='{"result": "ok"}', refusal=None),
-                finish_reason="stop",
-            )
-        ]
+    client = mock_openai_class.return_value
+    client.chat = chat_resources.Chat(client)
+    mock_create = self.enter_context(
+        mock.patch.object(chat_resources.Completions, "create", autospec=True)
+    )
+    mock_create.return_value = chat.ChatCompletion(
+        id="test",
+        created=0,
+        model="gpt-6-luna",
+        object="chat.completion",
+        choices=[{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": '{"result": "ok"}'},
+        }],
     )
     model = openai.OpenAILanguageModel(
         model_id="gpt-6-luna", api_key="test-key", base_url=base_url
@@ -996,9 +1006,9 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
 
     list(model.infer(["test prompt"], max_output_tokens=256))
 
-    call_kwargs = mock_client.chat.completions.create.call_args.kwargs
-    self.assertEqual(call_kwargs[expected_param], 256)
-    self.assertNotIn(omitted_param, call_kwargs)
+    request = mock_create.call_args.kwargs
+    self.assertEqual(request[expected_param], 256)
+    self.assertNotIn(omitted_param, request)
 
 
 class TestOpenAILanguageModel(absltest.TestCase):

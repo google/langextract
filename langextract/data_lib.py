@@ -93,13 +93,12 @@ def dict_to_annotated_document(
 
   Returns:
     A new AnnotatedDocument that shares no mutable state with `adoc_dic`.
+    Extractions saved as null are restored as None.
   """
   if not adoc_dic:
     return data.AnnotatedDocument()
 
-  # A document saved without extractions has `"extractions": null`; `.get`
-  # returns that None instead of the default, so treat it as an empty list
-  # when iterating but keep None on the restored document.
+  # AnnotatedDocument.extractions defaults to None, which is saved as null.
   raw_extractions = adoc_dic.get("extractions", [])
   extractions = []
   for ext_dic in raw_extractions or []:

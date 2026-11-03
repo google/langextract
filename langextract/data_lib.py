@@ -15,6 +15,7 @@
 """Library for data conversion between AnnotatedDocument and JSON."""
 from __future__ import annotations
 
+import copy
 import dataclasses
 import enum
 import numbers
@@ -91,7 +92,7 @@ def dict_to_annotated_document(
     adoc_dic: A Python dict representing an AnnotatedDocument.
 
   Returns:
-    An AnnotatedDocument object.
+    A new AnnotatedDocument that shares no mutable state with `adoc_dic`.
   """
   if not adoc_dic:
     return data.AnnotatedDocument()
@@ -100,31 +101,34 @@ def dict_to_annotated_document(
   # returns that None instead of the default, so treat it as an empty list
   # when iterating but keep None on the restored document.
   raw_extractions = adoc_dic.get("extractions", [])
-  for extractions in raw_extractions or []:
-    token_int = extractions.get("token_interval")
+  extractions = []
+  for ext_dic in raw_extractions or []:
+    # Work on copies so the caller's dict is not mutated and does not share
+    # attributes with the returned extraction.
+    ext_dic = dict(ext_dic)
+    ext_dic["attributes"] = copy.deepcopy(ext_dic.get("attributes"))
+    token_int = ext_dic.get("token_interval")
     if token_int:
-      extractions["token_interval"] = tokenizer.TokenInterval(**token_int)
+      ext_dic["token_interval"] = tokenizer.TokenInterval(**token_int)
     else:
-      extractions["token_interval"] = None
+      ext_dic["token_interval"] = None
 
-    char_int = extractions.get("char_interval")
+    char_int = ext_dic.get("char_interval")
     if char_int:
-      extractions["char_interval"] = data.CharInterval(**char_int)
+      ext_dic["char_interval"] = data.CharInterval(**char_int)
     else:
-      extractions["char_interval"] = None
+      ext_dic["char_interval"] = None
 
-    status_str = extractions.get("alignment_status")
+    status_str = ext_dic.get("alignment_status")
     if status_str:
-      extractions["alignment_status"] = data.AlignmentStatus(status_str)
+      ext_dic["alignment_status"] = data.AlignmentStatus(status_str)
     else:
-      extractions["alignment_status"] = None
+      ext_dic["alignment_status"] = None
+
+    extractions.append(data.Extraction(**ext_dic))
 
   return data.AnnotatedDocument(
       document_id=adoc_dic.get("document_id"),
       text=adoc_dic.get("text"),
-      extractions=(
-          None
-          if raw_extractions is None
-          else [data.Extraction(**ent) for ent in raw_extractions]
-      ),
+      extractions=None if raw_extractions is None else extractions,
   )

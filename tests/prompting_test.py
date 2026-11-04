@@ -12,7 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+import pathlib
+import shutil
+import tempfile
 import textwrap
+from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -589,6 +594,56 @@ class ContextAwarePromptBuilderTest(absltest.TestCase):
     self.assertIn(context_prefix, prompt)
     self.assertIn("Previous chunk text.", prompt)
     self.assertIn("Extra info here.", prompt)
+
+
+class ReadPromptTemplateStructuredFromFileTest(parameterized.TestCase):
+
+  _DESCRIPTION = "Извлеките имена. 提取人名。"
+
+  def _write_prompt_file(self, content: str) -> str:
+    tmp_dir = tempfile.mkdtemp()
+    self.addCleanup(shutil.rmtree, tmp_dir)
+    prompt_path = pathlib.Path(tmp_dir) / "prompt"
+    prompt_path.write_text(content, encoding="utf-8")
+    return str(prompt_path)
+
+  @parameterized.named_parameters(
+      {
+          "testcase_name": "yaml",
+          "format_type": data.FormatType.YAML,
+          "content": f'description: "{_DESCRIPTION}"\nexamples: []\n',
+      },
+      {
+          "testcase_name": "json",
+          "format_type": data.FormatType.JSON,
+          "content": json.dumps(
+              {"description": _DESCRIPTION, "examples": []},
+              ensure_ascii=False,
+          ),
+      },
+  )
+  def test_reads_non_ascii_utf8_file(self, format_type, content):
+    prompt_path = self._write_prompt_file(content)
+
+    template = prompting.read_prompt_template_structured_from_file(
+        prompt_path, format_type=format_type
+    )
+
+    self.assertEqual(template.description, self._DESCRIPTION)
+
+  def test_opens_file_as_utf8_regardless_of_locale(self):
+    """The file must not be decoded with the locale encoding (e.g. cp1252)."""
+    prompt_path = self._write_prompt_file(
+        f'description: "{self._DESCRIPTION}"\n'
+    )
+    original_open = pathlib.Path.open
+
+    with mock.patch.object(
+        pathlib.Path, "open", autospec=True, side_effect=original_open
+    ) as mock_open:
+      prompting.read_prompt_template_structured_from_file(prompt_path)
+
+    self.assertEqual(mock_open.call_args.kwargs.get("encoding"), "utf-8")
 
 
 if __name__ == "__main__":

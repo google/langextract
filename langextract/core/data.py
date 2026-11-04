@@ -172,9 +172,7 @@ class Document:
 
   @property
   def tokenized_text(self) -> tokenizer.TokenizedText:
-    # `text` is a plain public field, so the cache is checked against it
-    # rather than cleared on assignment: a tokenization of earlier text is
-    # stale, and reusing it would prompt and align against the old text.
+    # `text` is a public field, so the cache may hold tokens for older text.
     if self._tokenized_text is None or self._tokenized_text.text != self.text:
       self._tokenized_text = tokenizer.tokenize(self.text)
     return self._tokenized_text
@@ -251,9 +249,9 @@ class AnnotatedDocument:
 
   @property
   def tokenized_text(self) -> tokenizer.TokenizedText | None:
-    if self.text is not None and (
-        self._tokenized_text is None or self._tokenized_text.text != self.text
-    ):
+    if self.text is None:
+      self._tokenized_text = None
+    elif self._tokenized_text is None or self._tokenized_text.text != self.text:
       self._tokenized_text = tokenizer.tokenize(self.text)
     return self._tokenized_text
 

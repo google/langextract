@@ -251,8 +251,14 @@ class Annotator:
       Resolved annotations from input documents.
 
     Raises:
-      ValueError: If there are no scored outputs during inference.
+      ValueError: If extraction_passes is less than 1, or if there are no
+        scored outputs during inference.
     """
+    if extraction_passes < 1:
+      raise ValueError(
+          f"extraction_passes must be at least 1, got {extraction_passes}."
+      )
+
     if resolver is None:
       resolver = resolver_lib.Resolver(format_type=data.FormatType.YAML)
 

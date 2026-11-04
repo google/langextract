@@ -1087,6 +1087,21 @@ class AnnotatorMultiPassTest(absltest.TestCase):
     self.assertLen(result.extractions, 1)
     self.assertEqual(result.extractions[0].extraction_class, "test")
 
+  def test_rejects_extraction_passes_below_one(self):
+    """Zero or negative passes would return no extractions without inference."""
+    for extraction_passes in (0, -1):
+      with self.subTest(extraction_passes=extraction_passes):
+        with self.assertRaisesRegex(
+            ValueError, "extraction_passes must be at least 1"
+        ):
+          self.annotator.annotate_text(
+              "Patient has fever.",
+              extraction_passes=extraction_passes,
+              debug=False,
+          )
+
+    self.mock_language_model.infer.assert_not_called()
+
 
 class MultiPassHelperFunctionsTest(parameterized.TestCase):
   """Tests for multi-pass helper functions."""

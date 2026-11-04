@@ -93,12 +93,15 @@ def dict_to_annotated_document(
 
   Returns:
     A new AnnotatedDocument that shares no mutable state with `adoc_dic`.
+    Extractions saved as null are restored as None.
   """
   if not adoc_dic:
     return data.AnnotatedDocument()
 
+  # AnnotatedDocument.extractions defaults to None, which is saved as null.
+  raw_extractions = adoc_dic.get("extractions", [])
   extractions = []
-  for ext_dic in adoc_dic.get("extractions", []):
+  for ext_dic in raw_extractions or []:
     # Work on copies so the caller's dict is not mutated and does not share
     # attributes with the returned extraction.
     ext_dic = dict(ext_dic)
@@ -126,5 +129,5 @@ def dict_to_annotated_document(
   return data.AnnotatedDocument(
       document_id=adoc_dic.get("document_id"),
       text=adoc_dic.get("text"),
-      extractions=extractions,
+      extractions=None if raw_extractions is None else extractions,
   )

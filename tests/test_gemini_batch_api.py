@@ -1568,5 +1568,60 @@ class BatchToolEncodingTest(parameterized.TestCase):
     mock_submit.assert_not_called()
 
 
+class BatchHttpLoggerSuppressionTest(absltest.TestCase):
+  """Tests for suppressing verbose HTTP transport loggers during batch runs."""
+
+  def _preserve_logger(self, name: str) -> None:
+    logger = gb.std_logging.getLogger(name)
+    orig_level = logger.level
+    orig_disabled = logger.disabled
+
+    def _restore() -> None:
+      logger.setLevel(orig_level)
+      logger.disabled = orig_disabled
+
+    self.addCleanup(_restore)
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_infer_batch_quiets_httpx_and_httpx2_loggers(self, mock_client_cls):
+    for name in gb._HTTP_TRANSPORT_LOGGER_NAMES:
+      self._preserve_logger(name)
+      logger = gb.std_logging.getLogger(name)
+      logger.setLevel(gb.std_logging.DEBUG)
+      logger.disabled = False
+
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+
+    with (
+        mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit,
+        mock.patch.object(gb, "_poll_completion", autospec=True) as mock_poll,
+        mock.patch.object(
+            gb, "_extract_from_file", autospec=True, return_value=["{}"]
+        ),
+    ):
+      job = create_mock_batch_job()
+      mock_submit.return_value = job
+      mock_poll.return_value = job
+
+      gb.infer_batch(
+          mock_client,
+          "gemini-3.5-flash",
+          ["prompt"],
+          None,
+          {},
+          gb.BatchConfig(enable_caching=False),
+          project="p",
+          location="l",
+      )
+
+    for name in gb._HTTP_TRANSPORT_LOGGER_NAMES:
+      self.assertEqual(
+          gb.std_logging.getLogger(name).level, gb.std_logging.WARNING
+      )
+    for name in gb._HTTPX_LOGGER_NAMES:
+      self.assertTrue(gb.std_logging.getLogger(name).disabled)
+
+
 if __name__ == "__main__":
   absltest.main()

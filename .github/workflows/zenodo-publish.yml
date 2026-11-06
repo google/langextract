@@ -23,6 +23,8 @@ on:
         required: true
         type: string
 
+permissions: {}
+
 concurrency:
   group: zenodo-${{ github.ref }}
   cancel-in-progress: false
@@ -47,10 +49,12 @@ jobs:
       # *fixed* script from main, not whatever script existed at the older tag.
       # The build below uses main's pyproject.toml; this only works correctly
       # when main's version still matches the tag being republished.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.11'
 

@@ -51,7 +51,7 @@ import langextract as lx
 
 # Method 1: Using factory directly with provider parameter
 config = lx.factory.ModelConfig(
-    model_id="gpt-4",
+    model_id="gpt-6-luna",
     provider="OpenAILanguageModel",  # Explicit provider
     provider_kwargs={"api_key": "..."}
 )

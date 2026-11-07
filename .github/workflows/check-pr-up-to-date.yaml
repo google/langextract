@@ -63,7 +63,7 @@ jobs:
           BEHIND: ${{ steps.check.outputs.commits_behind }}
         with:
           script: |
-            const behind = parseInt(process.env.BEHIND, 10);
+            const behind = Number(process.env.BEHIND);
             const COMMENT_COOLDOWN_HOURS = 24;
             const COOLDOWN_MS = COMMENT_COOLDOWN_HOURS * 60 * 60 * 1000;
 

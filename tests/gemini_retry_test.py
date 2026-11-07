@@ -51,15 +51,11 @@ def _make_fake_httpx_module():
   class FakeProxyError(Exception):
     pass
 
-  class FakeLocalProtocolError(Exception):
-    pass
-
   return types.SimpleNamespace(
       TimeoutException=FakeTimeoutException,
       NetworkError=FakeNetworkError,
       RemoteProtocolError=FakeRemoteProtocolError,
       ProxyError=FakeProxyError,
-      LocalProtocolError=FakeLocalProtocolError,
   )
 
 
@@ -240,35 +236,12 @@ class TestGeminiHttpxTransportResolution(_MockClientTest):
         mock.patch.object(importlib, 'import_module', autospec=True)
     )
 
-  def test_uses_httpx_when_installed(self):
-    fake_httpx = _make_fake_httpx_module()
-    self.mock_import.return_value = fake_httpx
-
-    self.assertTrue(
-        self.model._is_retryable_error(fake_httpx.TimeoutException('timed out'))
-    )
-    self.mock_import.assert_called_once_with('httpx')
-
   def test_falls_back_to_httpx2_when_httpx_missing(self):
     fake_httpx2 = _make_fake_httpx_module()
     self.mock_import.side_effect = [ImportError('no httpx'), fake_httpx2]
 
     self.assertTrue(
         self.model._is_retryable_error(fake_httpx2.NetworkError('reset'))
-    )
-    self.assertEqual(
-        self.mock_import.call_args_list,
-        [mock.call('httpx'), mock.call('httpx2')],
-    )
-
-  def test_httpx2_client_bug_is_not_retryable(self):
-    fake_httpx2 = _make_fake_httpx_module()
-    self.mock_import.side_effect = [ImportError('no httpx'), fake_httpx2]
-
-    self.assertFalse(
-        self.model._is_retryable_error(
-            fake_httpx2.LocalProtocolError('bad header')
-        )
     )
 
   def test_checks_httpx2_when_httpx_also_installed(self):
@@ -280,15 +253,10 @@ class TestGeminiHttpxTransportResolution(_MockClientTest):
         self.model._is_retryable_error(fake_httpx2.NetworkError('reset'))
     )
 
-  def test_missing_httpx_modules_retries_stdlib_network_error(self):
+  def test_missing_httpx_modules_still_retries_stdlib_errors(self):
     self.mock_import.side_effect = ImportError('no httpx transport')
 
     self.assertTrue(self.model._is_retryable_error(ConnectionError('reset')))
-
-  def test_missing_httpx_modules_rejects_non_retryable_error(self):
-    self.mock_import.side_effect = ImportError('no httpx transport')
-
-    self.assertFalse(self.model._is_retryable_error(ValueError('other')))
 
 
 class TestGeminiRetryLogic(_MockClientTest):

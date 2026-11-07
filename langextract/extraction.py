@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import dataclasses
+import os
 import typing
 import warnings
 
@@ -34,6 +35,18 @@ from langextract.core import format_handler as fh
 from langextract.core import output_schema as output_schema_lib
 from langextract.core import tokenizer as tokenizer_lib
 from langextract.core import types as core_types
+
+# Longest string treated as a possible path; real documents are far longer.
+_MAX_PATH_LIKE_CHARS = 4096
+
+
+def _is_existing_file_path(text: str) -> bool:
+  """Returns True if `text` is a single-line string naming an existing file."""
+  return (
+      0 < len(text) <= _MAX_PATH_LIKE_CHARS
+      and "\n" not in text
+      and os.path.isfile(text)
+  )
 
 
 def _has_preconfigured_output_schema(model: typing.Any) -> bool:
@@ -89,7 +102,8 @@ def extract(
       text_or_documents: The source text to extract information from, or an
         iterable of Document objects. An http:// or https:// string is fetched
         only when `fetch_urls=True`; see that parameter for the security
-        caveats.
+        caveats. Any other string is literal text, never a file path: a string
+        naming an existing file triggers a `UserWarning`.
       prompt_description: Instructions for what to extract from the text.
       examples: List of ExampleData objects to guide the extraction.
         Required unless `output_schema` is provided.
@@ -265,6 +279,18 @@ def extract(
       and io.is_url(text_or_documents)
   ):
     text_or_documents = io.download_text_from_url(text_or_documents)
+
+  if isinstance(text_or_documents, str) and _is_existing_file_path(
+      text_or_documents
+  ):
+    warnings.warn(
+        f"text_or_documents {text_or_documents!r} is the path of an existing"
+        " file, but a string is processed as literal text, so the path itself"
+        " (not the file contents) is sent to the model. Read the file first,"
+        " e.g. extract(open(path, encoding='utf-8').read(), ...).",
+        UserWarning,
+        stacklevel=3,  # Past the lx.extract wrapper, to the user's call site.
+    )
 
   prompt_template = prompting.PromptTemplateStructured(
       description=prompt_description

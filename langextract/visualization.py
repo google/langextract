@@ -30,6 +30,7 @@ import itertools
 import json
 import pathlib
 import textwrap
+import uuid
 
 from langextract import io
 from langextract.core import data
@@ -431,6 +432,13 @@ def _to_script_safe_json(value: object) -> str:
   )
 
 
+# Each rendered viewer gets its own id suffix, so several visualize() results can
+# share one page without overwriting each other's elements or handlers. The
+# suffix is a fresh UUID per rendered viewer rather than a counter: a counter
+# lives in the process, so two viewers rendered by separate processes would
+# both be numbered one and collide again (issue #578).
+
+
 def _build_visualization_html(
     text: str,
     extractions: list[data.Extraction],
@@ -465,6 +473,9 @@ def _build_visualization_html(
 
   js_data = _to_script_safe_json(extraction_data)
 
+  # Keeps this viewer's element ids and event handlers instance-scoped.
+  viewer_suffix = uuid.uuid4().hex
+
   # Prepare pos_info_str safely for pytype for the f-string below
   first_extraction = extractions[0]
   assert (
@@ -475,34 +486,36 @@ def _build_visualization_html(
   pos_info_str = f'[{first_extraction.char_interval.start_pos}-{first_extraction.char_interval.end_pos}]'
 
   html_content = textwrap.dedent(f"""
-    <div class="lx-animated-wrapper">
+    <div class="lx-animated-wrapper" id="lx-viewer-{viewer_suffix}">
       <div class="lx-attributes-panel">
         {legend_html}
-        <div id="attributesContainer"></div>
+        <div id="lx-attributes-{viewer_suffix}"></div>
       </div>
-      <div class="lx-text-window" id="textWindow">
+      <div class="lx-text-window" id="lx-text-window-{viewer_suffix}">
         {highlighted_text}
       </div>
       <div class="lx-controls">
         <div class="lx-button-row">
-          <button class="lx-control-btn" onclick="playPause()">▶️ Play</button>
-          <button class="lx-control-btn" onclick="prevExtraction()">⏮ Previous</button>
-          <button class="lx-control-btn" onclick="nextExtraction()">⏭ Next</button>
+          <button class="lx-control-btn" data-lx-action="play">▶️ Play</button>
+          <button class="lx-control-btn" data-lx-action="prev">⏮ Previous</button>
+          <button class="lx-control-btn" data-lx-action="next">⏭ Next</button>
         </div>
         <div class="lx-progress-container">
-          <input type="range" id="progressSlider" class="lx-progress-slider"
-                 min="0" max="{len(extractions)-1}" value="0"
-                 onchange="jumpToExtraction(this.value)">
+          <input type="range" id="lx-progress-{viewer_suffix}" class="lx-progress-slider"
+                 min="0" max="{len(extractions)-1}" value="0">
         </div>
         <div class="lx-status-text">
-          Entity <span id="entityInfo">1/{len(extractions)}</span> |
-          Pos <span id="posInfo">{pos_info_str}</span>
+          Entity <span id="lx-entity-{viewer_suffix}">1/{len(extractions)}</span> |
+          Pos <span id="lx-pos-{viewer_suffix}">{pos_info_str}</span>
         </div>
       </div>
     </div>
 
     <script>
       (function() {{
+        const root = document.getElementById('lx-viewer-{viewer_suffix}');
+        if (!root) return;
+
         const extractions = {js_data};
         let currentIndex = 0;
         let isPlaying = false;
@@ -513,17 +526,17 @@ def _build_visualization_html(
           const extraction = extractions[currentIndex];
           if (!extraction) return;
 
-          document.getElementById('attributesContainer').innerHTML = extraction.attributesHtml;
-          document.getElementById('entityInfo').textContent = (currentIndex + 1) + '/' + extractions.length;
-          document.getElementById('posInfo').textContent = '[' + extraction.startPos + '-' + extraction.endPos + ']';
-          document.getElementById('progressSlider').value = currentIndex;
+          root.querySelector('#lx-attributes-{viewer_suffix}').innerHTML = extraction.attributesHtml;
+          root.querySelector('#lx-entity-{viewer_suffix}').textContent = (currentIndex + 1) + '/' + extractions.length;
+          root.querySelector('#lx-pos-{viewer_suffix}').textContent = '[' + extraction.startPos + '-' + extraction.endPos + ']';
+          root.querySelector('#lx-progress-{viewer_suffix}').value = currentIndex;
 
-          const playBtn = document.querySelector('.lx-control-btn');
+          const playBtn = root.querySelector('[data-lx-action="play"]');
           if (playBtn) playBtn.textContent = isPlaying ? '⏸ Pause' : '▶️ Play';
 
-          const prevHighlight = document.querySelector('.lx-text-window .lx-current-highlight');
+          const prevHighlight = root.querySelector('.lx-text-window .lx-current-highlight');
           if (prevHighlight) prevHighlight.classList.remove('lx-current-highlight');
-          const currentSpan = document.querySelector('.lx-text-window span[data-idx="' + currentIndex + '"]');
+          const currentSpan = root.querySelector('.lx-text-window span[data-idx="' + currentIndex + '"]');
           if (currentSpan) {{
             currentSpan.classList.add('lx-current-highlight');
             currentSpan.scrollIntoView({{block: 'center', behavior: 'smooth'}});
@@ -556,10 +569,12 @@ def _build_visualization_html(
           updateDisplay();
         }}
 
-        window.playPause = playPause;
-        window.nextExtraction = nextExtraction;
-        window.prevExtraction = prevExtraction;
-        window.jumpToExtraction = jumpToExtraction;
+        root.querySelector('[data-lx-action="play"]').addEventListener('click', playPause);
+        root.querySelector('[data-lx-action="prev"]').addEventListener('click', prevExtraction);
+        root.querySelector('[data-lx-action="next"]').addEventListener('click', nextExtraction);
+        root.querySelector('.lx-progress-slider').addEventListener('change', function() {{
+          jumpToExtraction(this.value);
+        }});
 
         updateDisplay();
       }})();

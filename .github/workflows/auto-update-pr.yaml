@@ -44,18 +44,14 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
-            const prNumber = (context.payload.inputs?.pr_number || '').trim();
-            if (prNumber && !/^[1-9]\d*$/.test(prNumber)) {
-              core.setFailed('Invalid PR number; expected a positive integer.');
-              return;
-            }
+            const prNumber = context.payload.inputs?.pr_number;
 
             // Get list of open PRs
             const prs = prNumber
               ? [(await github.rest.pulls.get({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  pull_number: Number(prNumber)
+                  pull_number: parseInt(prNumber)
                 })).data]
               : await github.paginate(github.rest.pulls.list, {
                   owner: context.repo.owner,

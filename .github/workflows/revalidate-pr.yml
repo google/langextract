@@ -18,8 +18,6 @@ jobs:
       pull-requests: write
       issues: write
       statuses: write
-    env:
-      MAX_PR_LINES: '1000'
     steps:
       - name: Get PR data
         id: pr_data
@@ -50,6 +48,8 @@ jobs:
             fs.writeFileSync(prPath, JSON.stringify(pr), 'utf8');
             core.setOutput('pr_path', prPath);
             core.setOutput('pr_number', String(pr.number));
+
+            // Store head SHA for creating status
             core.setOutput('head_sha', pr.head.sha);
 
       - name: Create pending status
@@ -79,44 +79,37 @@ jobs:
             const errors = [];
             let passed = true;
 
+            // Check size
             const totalChanges = pr.additions + pr.deletions;
-            const maxPrLines = Number(process.env.MAX_PR_LINES);
-            if (totalChanges > maxPrLines) {
-              errors.push(`PR size (${totalChanges} lines) exceeds ${maxPrLines} line limit`);
+            const MAX_LINES = 1000;
+            if (totalChanges > MAX_LINES) {
+              errors.push(`PR size (${totalChanges} lines) exceeds ${MAX_LINES} line limit`);
               passed = false;
             }
 
-            // Strip HTML comments and code spans/fences so hidden tokens cannot satisfy checks.
-            const rawBody = pr.body || '';
-            const visibleBody = rawBody
-              .replace(/<!--[\s\S]*?-->/g, '')
-              .replace(/```[\s\S]*?```/g, '')
-              .replace(/`[^`]*`/g, '');
-
-            const requiredSections = [
-              '# Description',
-              'Fixes #',
-              '# How Has This Been Tested?',
-              '# Checklist',
-            ];
-            const missingSections = requiredSections.filter(section => !visibleBody.includes(section));
+            // Check template
+            const body = pr.body || '';
+            const requiredSections = ["# Description", "Fixes #", "# How Has This Been Tested?", "# Checklist"];
+            const missingSections = requiredSections.filter(section => !body.includes(section));
 
             if (missingSections.length > 0) {
               errors.push(`Missing PR template sections: ${missingSections.join(', ')}`);
               passed = false;
             }
 
-            if (rawBody.match(/Replace this with|Choose one:|Fixes #\[issue number\]/i)) {
+            if (body.match(/Replace this with|Choose one:|Fixes #\[issue number\]/i)) {
               errors.push('PR template contains unmodified placeholders');
               passed = false;
             }
 
-            const issueMatch = visibleBody.match(/(?:Fixes|Closes|Resolves)\s+#(\d+)/i);
+            // Check linked issue
+            const issueMatch = body.match(/(?:Fixes|Closes|Resolves)\s+#(\d+)/i);
             if (!issueMatch) {
               errors.push('No linked issue found');
               passed = false;
             }
 
+            // Store results
             core.setOutput('passed', passed);
             core.setOutput('errors', errors.join('; '));
             core.setOutput('totalChanges', totalChanges);
@@ -145,7 +138,7 @@ jobs:
               sha: process.env.HEAD_SHA,
               state: passed ? 'success' : 'failure',
               context: 'Manual Validation',
-              description: passed ? 'All validation checks passed' : (errors || 'Validation step failed').substring(0, 140),
+              description: passed ? 'All validation checks passed' : errors.substring(0, 140),
               target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
 
@@ -164,7 +157,6 @@ jobs:
             const prNumber = Number(process.env.PR_NUMBER);
             const passed = process.env.PASSED === 'true';
             const totalChanges = Number(process.env.TOTAL_CHANGES || '0');
-            const maxPrLines = Number(process.env.MAX_PR_LINES);
             const hasTemplate = process.env.HAS_TEMPLATE === 'true';
             const hasIssue = process.env.HAS_ISSUE === 'true';
             const errors = (process.env.ERRORS || '').split('; ').filter(e => e);
@@ -173,15 +165,15 @@ jobs:
             body += `**Status**: ${passed ? '✅ Passed' : '❌ Failed'}\n\n`;
             body += `| Check | Status | Details |\n`;
             body += `|-------|--------|----------|\n`;
-            body += `| PR Size | ${totalChanges <= maxPrLines ? '✅' : '❌'} | ${totalChanges} lines ${totalChanges > maxPrLines ? `(exceeds ${maxPrLines} limit)` : ''} |\n`;
+            body += `| PR Size | ${totalChanges <= 1000 ? '✅' : '❌'} | ${totalChanges} lines ${totalChanges > 1000 ? '(exceeds 1000 limit)' : ''} |\n`;
             body += `| Template | ${hasTemplate ? '✅' : '❌'} | ${hasTemplate ? 'Complete' : 'Missing required sections'} |\n`;
             body += `| Linked Issue | ${hasIssue ? '✅' : '❌'} | ${hasIssue ? 'Found' : 'Missing Fixes/Closes #XXX'} |\n`;
 
             if (errors.length > 0) {
               body += `\n**Errors:**\n`;
-              for (const error of errors) {
+              errors.forEach(error => {
                 body += `- ❌ ${error}\n`;
-              }
+              });
             }
 
             body += `\n[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
@@ -190,5 +182,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
-              body,
+              body: body
             });

@@ -128,7 +128,7 @@ jobs:
             }
 
       - name: Update commit status
-        if: ${{ !cancelled() && steps.pr_data.outcome == 'success' && (steps.validate.outcome == 'success' || steps.validate.outcome == 'failure') }}
+        if: always() && steps.pr_data.outcome == 'success'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           PASSED: ${{ steps.validate.outputs.passed }}
@@ -150,7 +150,7 @@ jobs:
             });
 
       - name: Add validation comment
-        if: ${{ !cancelled() && steps.pr_data.outcome == 'success' && (steps.validate.outcome == 'success' || steps.validate.outcome == 'failure') }}
+        if: always() && steps.pr_data.outcome == 'success'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           PR_NUMBER: ${{ steps.pr_data.outputs.pr_number }}

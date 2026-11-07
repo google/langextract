@@ -53,6 +53,13 @@ _EXT_JSONL = ".jsonl"
 _KEY_IDX = "idx-"
 _CACHE_PREFIX = "cache"
 _UNSET = object()
+# google-genai <3.0 uses httpx/httpcore; >=3.0 uses httpx2/httpcore2.
+_HTTPX_LOGGER_NAMES = ("httpx", "httpx2")
+_HTTP_TRANSPORT_LOGGER_NAMES = (
+    *_HTTPX_LOGGER_NAMES,
+    "httpcore",
+    "httpcore2",
+)
 
 # Vertex JSON can encode protobuf enums by name or number.
 _UNSPECIFIED_REASONS = (
@@ -898,10 +905,11 @@ def infer_batch(
       std_logging.WARNING
   )
   std_logging.getLogger("urllib3.connectionpool").setLevel(std_logging.WARNING)
-  std_logging.getLogger("httpx").setLevel(std_logging.WARNING)
-  std_logging.getLogger("httpcore").setLevel(std_logging.WARNING)
-  # Force disable httpx propagation or handlers if level setting fails
-  std_logging.getLogger("httpx").disabled = True
+  for logger_name in _HTTP_TRANSPORT_LOGGER_NAMES:
+    std_logging.getLogger(logger_name).setLevel(std_logging.WARNING)
+  # Force disable httpx/httpx2 propagation or handlers if level setting fails
+  for logger_name in _HTTPX_LOGGER_NAMES:
+    std_logging.getLogger(logger_name).disabled = True
 
   logging.info("Batch API: Processing %d prompts", len(prompts))
 

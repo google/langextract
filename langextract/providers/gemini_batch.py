@@ -53,6 +53,7 @@ _EXT_JSONL = ".jsonl"
 _KEY_IDX = "idx-"
 _CACHE_PREFIX = "cache"
 _UNSET = object()
+# google-genai <3.0 uses httpx/httpcore; >=3.0 uses httpx2/httpcore2.
 _HTTPX_LOGGER_NAMES = ("httpx", "httpx2")
 _HTTP_TRANSPORT_LOGGER_NAMES = (
     *_HTTPX_LOGGER_NAMES,

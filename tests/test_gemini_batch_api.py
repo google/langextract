@@ -18,6 +18,7 @@ import dataclasses
 import enum
 import io
 import json
+import logging
 from unittest import mock
 
 from absl.testing import absltest
@@ -1568,59 +1569,83 @@ class BatchToolEncodingTest(parameterized.TestCase):
     mock_submit.assert_not_called()
 
 
-class BatchHttpLoggerSuppressionTest(absltest.TestCase):
+class BatchHttpLoggerSuppressionTest(parameterized.TestCase):
   """Tests for suppressing verbose HTTP transport loggers during batch runs."""
 
-  def _preserve_logger(self, name: str) -> None:
-    logger = gb.std_logging.getLogger(name)
-    orig_level = logger.level
-    orig_disabled = logger.disabled
+  def setUp(self):
+    super().setUp()
+    mock_client_cls = self.enter_context(
+        mock.patch.object(genai, "Client", autospec=True)
+    )
+    self.mock_client = mock_client_cls.return_value
+    self.mock_client.vertexai = True
 
-    def _restore() -> None:
-      logger.setLevel(orig_level)
-      logger.disabled = orig_disabled
-
-    self.addCleanup(_restore)
-
-  @mock.patch.object(genai, "Client", autospec=True)
-  def test_infer_batch_quiets_httpx_and_httpx2_loggers(self, mock_client_cls):
-    for name in gb._HTTP_TRANSPORT_LOGGER_NAMES:
-      self._preserve_logger(name)
-      logger = gb.std_logging.getLogger(name)
-      logger.setLevel(gb.std_logging.DEBUG)
-      logger.disabled = False
-
-    mock_client = mock_client_cls.return_value
-    mock_client.vertexai = True
-
-    with (
-        mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit,
-        mock.patch.object(gb, "_poll_completion", autospec=True) as mock_poll,
+    job = create_mock_batch_job()
+    self.enter_context(
+        mock.patch.object(gb, "_submit_file", autospec=True, return_value=job)
+    )
+    self.enter_context(
+        mock.patch.object(
+            gb, "_poll_completion", autospec=True, return_value=job
+        )
+    )
+    self.enter_context(
         mock.patch.object(
             gb, "_extract_from_file", autospec=True, return_value=["{}"]
-        ),
-    ):
-      job = create_mock_batch_job()
-      mock_submit.return_value = job
-      mock_poll.return_value = job
+        )
+    )
 
-      gb.infer_batch(
-          mock_client,
-          "gemini-3.5-flash",
-          ["prompt"],
-          None,
-          {},
-          gb.BatchConfig(enable_caching=False),
-          project="p",
-          location="l",
-      )
+  def _get_clean_logger(self, logger_name: str) -> logging.Logger:
+    logger = logging.getLogger(logger_name)
+    orig_level = logger.level
+    orig_disabled = logger.disabled
+    self.addCleanup(setattr, logger, "disabled", orig_disabled)
+    self.addCleanup(logger.setLevel, orig_level)
+    logger.setLevel(logging.DEBUG)
+    logger.disabled = False
+    return logger
 
-    for name in gb._HTTP_TRANSPORT_LOGGER_NAMES:
-      self.assertEqual(
-          gb.std_logging.getLogger(name).level, gb.std_logging.WARNING
-      )
-    for name in gb._HTTPX_LOGGER_NAMES:
-      self.assertTrue(gb.std_logging.getLogger(name).disabled)
+  @parameterized.named_parameters(
+      dict(testcase_name="httpx", logger_name="httpx"),
+      dict(testcase_name="httpx2", logger_name="httpx2"),
+      dict(testcase_name="httpcore", logger_name="httpcore"),
+      dict(testcase_name="httpcore2", logger_name="httpcore2"),
+  )
+  def test_infer_batch_sets_transport_logger_to_warning(self, logger_name: str):
+    logger = self._get_clean_logger(logger_name)
+
+    gb.infer_batch(
+        self.mock_client,
+        "gemini-3.5-flash",
+        ["prompt"],
+        None,
+        {},
+        gb.BatchConfig(enable_caching=False),
+        project="p",
+        location="l",
+    )
+
+    self.assertEqual(logger.level, logging.WARNING)
+
+  @parameterized.named_parameters(
+      dict(testcase_name="httpx", logger_name="httpx"),
+      dict(testcase_name="httpx2", logger_name="httpx2"),
+  )
+  def test_infer_batch_disables_httpx_logger(self, logger_name: str):
+    logger = self._get_clean_logger(logger_name)
+
+    gb.infer_batch(
+        self.mock_client,
+        "gemini-3.5-flash",
+        ["prompt"],
+        None,
+        {},
+        gb.BatchConfig(enable_caching=False),
+        project="p",
+        location="l",
+    )
+
+    self.assertTrue(logger.disabled)
 
 
 if __name__ == "__main__":

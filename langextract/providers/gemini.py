@@ -398,9 +398,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     except ImportError:
       pass
 
-    # httpx / httpx2 transient subclasses only (google-genai 3.x moved to
-    # httpx2). LocalProtocolError / UnsupportedProtocol are client/config bugs
-    # and not included.
+    # Check both httpx and httpx2: google-genai 3.x uses httpx2 while other
+    # providers (e.g. openai) install httpx in the same environment.
+    # LocalProtocolError / UnsupportedProtocol are client/config bugs.
     for module_name in _HTTPX_MODULE_NAMES:
       try:
         http_mod = importlib.import_module(module_name)

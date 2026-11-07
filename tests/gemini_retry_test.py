@@ -29,65 +29,11 @@ from langextract.core import data
 from langextract.core import exceptions
 from langextract.providers import gemini
 
-
-def _load_httpx_modules():
-  """Return installed HTTPX transport modules (`httpx`, `httpx2`)."""
-  modules = []
-  for name in gemini._HTTPX_MODULE_NAMES:
-    try:
-      modules.append((name, importlib.import_module(name)))
-    except ImportError:
-      continue
-  return modules
-
-
-_HTTPX_MODULES = _load_httpx_modules()
-
-
-def _retryable_httpx_cases():
-  """Build retryable transport error cases for installed HTTPX modules."""
-  cases = []
-  for name, mod in _HTTPX_MODULES:
-    cases.extend([
-        dict(
-            testcase_name=f'{name}_connect_error',
-            error=mod.ConnectError('refused'),
-        ),
-        dict(
-            testcase_name=f'{name}_read_error',
-            error=mod.ReadError('read failed'),
-        ),
-        dict(
-            testcase_name=f'{name}_connect_timeout',
-            error=mod.ConnectTimeout('connect timeout'),
-        ),
-        dict(
-            testcase_name=f'{name}_remote_protocol',
-            error=mod.RemoteProtocolError('server disconnected'),
-        ),
-        dict(
-            testcase_name=f'{name}_proxy_error',
-            error=mod.ProxyError('proxy failed'),
-        ),
-    ])
-  return cases
-
-
-def _non_retryable_httpx_cases():
-  """Build client-bug transport error cases for installed HTTPX modules."""
-  cases = []
-  for name, mod in _HTTPX_MODULES:
-    cases.extend([
-        dict(
-            testcase_name=f'{name}_local_protocol',
-            error=mod.LocalProtocolError('bad header'),
-        ),
-        dict(
-            testcase_name=f'{name}_unsupported_protocol',
-            error=mod.UnsupportedProtocol('ftp unsupported'),
-        ),
-    ])
-  return cases
+# google-genai <3.0 depends on httpx; >=3.0 depends on httpx2.
+try:
+  import httpx2 as httpx_mod
+except ImportError:
+  import httpx as httpx_mod
 
 
 def _make_fake_httpx_module():
@@ -244,51 +190,105 @@ class TestGeminiRetryableErrors(_MockClientTest):
     error = genai_errors.APIError(code=code, response_json={})
     self.assertFalse(self.model._is_retryable_error(error))
 
-  @parameterized.named_parameters(*_retryable_httpx_cases())
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='connect_error',
+          error=httpx_mod.ConnectError('refused'),
+      ),
+      dict(
+          testcase_name='read_error',
+          error=httpx_mod.ReadError('read failed'),
+      ),
+      dict(
+          testcase_name='connect_timeout',
+          error=httpx_mod.ConnectTimeout('connect timeout'),
+      ),
+      dict(
+          testcase_name='remote_protocol',
+          error=httpx_mod.RemoteProtocolError('server disconnected'),
+      ),
+      dict(
+          testcase_name='proxy_error',
+          error=httpx_mod.ProxyError('proxy failed'),
+      ),
+  )
   def test_httpx_transport_errors_are_retryable(self, error):
     self.assertTrue(self.model._is_retryable_error(error))
 
-  @parameterized.named_parameters(*_non_retryable_httpx_cases())
+  @parameterized.named_parameters(
+      # Client/config bugs: retrying cannot fix them.
+      dict(
+          testcase_name='local_protocol',
+          error=httpx_mod.LocalProtocolError('bad header'),
+      ),
+      dict(
+          testcase_name='unsupported_protocol',
+          error=httpx_mod.UnsupportedProtocol('ftp unsupported'),
+      ),
+  )
   def test_httpx_client_bugs_are_not_retryable(self, error):
     self.assertFalse(self.model._is_retryable_error(error))
 
-  def test_httpx_transport_modules_discovered(self):
-    self.assertNotEmpty(_HTTPX_MODULES)
 
-  @parameterized.named_parameters(
-      dict(testcase_name='only_httpx_installed', available_module='httpx'),
-      dict(testcase_name='only_httpx2_installed', available_module='httpx2'),
-  )
-  def test_httpx_import_fallback_uses_available_module(self, available_module):
-    fake_mod = _make_fake_httpx_module()
+class TestGeminiHttpxTransportResolution(_MockClientTest):
+  """Resolution across httpx (google-genai <3.0) and httpx2 (>=3.0)."""
 
-    def fake_import(name, package=None):
-      del package  # Unused.
-      if name == available_module:
-        return fake_mod
-      raise ImportError(f'No module named {name!r}')
+  def setUp(self):
+    super().setUp()
+    self.model = _build_model()
+    self.mock_import = self.enter_context(
+        mock.patch.object(importlib, 'import_module', autospec=True)
+    )
 
-    with mock.patch.object(
-        importlib, 'import_module', autospec=True, side_effect=fake_import
-    ):
-      self.assertTrue(
-          self.model._is_retryable_error(fake_mod.NetworkError('transient'))
-      )
-      self.assertFalse(
-          self.model._is_retryable_error(
-              fake_mod.LocalProtocolError('bad header')
-          )
-      )
+  def test_uses_httpx_when_installed(self):
+    fake_httpx = _make_fake_httpx_module()
+    self.mock_import.return_value = fake_httpx
 
-  def test_missing_both_httpx_modules_falls_through(self):
-    with mock.patch.object(
-        importlib,
-        'import_module',
-        autospec=True,
-        side_effect=ImportError('no httpx transport'),
-    ):
-      self.assertFalse(self.model._is_retryable_error(ValueError('other')))
-      self.assertTrue(self.model._is_retryable_error(ConnectionError('reset')))
+    self.assertTrue(
+        self.model._is_retryable_error(fake_httpx.TimeoutException('timed out'))
+    )
+    self.mock_import.assert_called_once_with('httpx')
+
+  def test_falls_back_to_httpx2_when_httpx_missing(self):
+    fake_httpx2 = _make_fake_httpx_module()
+    self.mock_import.side_effect = [ImportError('no httpx'), fake_httpx2]
+
+    self.assertTrue(
+        self.model._is_retryable_error(fake_httpx2.NetworkError('reset'))
+    )
+    self.assertEqual(
+        self.mock_import.call_args_list,
+        [mock.call('httpx'), mock.call('httpx2')],
+    )
+
+  def test_httpx2_client_bug_is_not_retryable(self):
+    fake_httpx2 = _make_fake_httpx_module()
+    self.mock_import.side_effect = [ImportError('no httpx'), fake_httpx2]
+
+    self.assertFalse(
+        self.model._is_retryable_error(
+            fake_httpx2.LocalProtocolError('bad header')
+        )
+    )
+
+  def test_checks_httpx2_when_httpx_also_installed(self):
+    fake_httpx = _make_fake_httpx_module()
+    fake_httpx2 = _make_fake_httpx_module()
+    self.mock_import.side_effect = [fake_httpx, fake_httpx2]
+
+    self.assertTrue(
+        self.model._is_retryable_error(fake_httpx2.NetworkError('reset'))
+    )
+
+  def test_missing_httpx_modules_retries_stdlib_network_error(self):
+    self.mock_import.side_effect = ImportError('no httpx transport')
+
+    self.assertTrue(self.model._is_retryable_error(ConnectionError('reset')))
+
+  def test_missing_httpx_modules_rejects_non_retryable_error(self):
+    self.mock_import.side_effect = ImportError('no httpx transport')
+
+    self.assertFalse(self.model._is_retryable_error(ValueError('other')))
 
 
 class TestGeminiRetryLogic(_MockClientTest):

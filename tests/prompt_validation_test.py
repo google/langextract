@@ -38,14 +38,14 @@ class PromptAlignmentValidationTest(parameterized.TestCase):
           expected_alignment_status=None,
       ),
       dict(
-          testcase_name="fuzzy_match_lesser",
+          testcase_name="fuzzy_match",
           text="Type 2 diabetes.",
           extraction_class="Diagnosis",
           extraction_text="type-2 diabetes",
           expected_issues=1,
           expected_has_failed=False,
           expected_has_non_exact=True,
-          expected_alignment_status=data.AlignmentStatus.MATCH_LESSER,
+          expected_alignment_status=data.AlignmentStatus.MATCH_FUZZY,
       ),
       dict(
           testcase_name="extraction_not_found",

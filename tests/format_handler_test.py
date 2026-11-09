@@ -22,6 +22,7 @@ from absl.testing import parameterized
 from langextract import prompting
 from langextract import resolver
 from langextract.core import data
+from langextract.core import exceptions
 from langextract.core import format_handler
 
 
@@ -253,6 +254,27 @@ class FormatHandlerTest(parameterized.TestCase):
     self.assertEqual(parsed[0]["test"], "value")
     self.assertEqual(parsed[0]["test_attributes"]["key"], "data")
 
+  @parameterized.named_parameters(
+      dict(testcase_name="json", format_type=data.FormatType.JSON),
+      dict(testcase_name="yaml", format_type=data.FormatType.YAML),
+  )
+  def test_roundtrip_embedded_code_fences(self, format_type):
+    handler = format_handler.FormatHandler(
+        format_type=format_type,
+        use_wrapper=True,
+        use_fences=True,
+    )
+    code_snippet = "```python\nprint(1)\n```"
+    extractions = [
+        data.Extraction(extraction_class="code", extraction_text=code_snippet)
+    ]
+
+    formatted = handler.format_extraction_example(extractions)
+    parsed = handler.parse_output(formatted)
+
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["code"], code_snippet)
+
 
 class NonGeminiModelParsingTest(parameterized.TestCase):
   """Regression tests for non-Gemini model parsing edge cases."""
@@ -369,16 +391,112 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
     with self.assertRaises(TypeError):
       format_handler.FormatHandler(format_type=123)  # type: ignore[arg-type]
 
-  def test_parse_output_with_backticks_in_extraction(self):
-    value = "```python\nprint(1)\n```"
-    extractions = [
-        data.Extraction(extraction_class="code", extraction_text=value)
-    ]
-    handler = format_handler.FormatHandler()
-    output = handler.format_extraction_example(extractions)
-    result = handler.parse_output(output)
-    self.assertLen(result, 1)
-    self.assertEqual(result[0]["code"], value)
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="four_backtick_outer_fence",
+          format_type=data.FormatType.JSON,
+          raw_output=(
+              "````json\n"
+              '{"extractions": [{"code": "```python\\nprint(1)\\n```"}]}\n'
+              "````"
+          ),
+          expected_code="```python\nprint(1)\n```",
+      ),
+      dict(
+          testcase_name="yaml_indented_block_scalar",
+          format_type=data.FormatType.YAML,
+          raw_output=(
+              "```yaml\n"
+              "extractions:\n"
+              "  - code: |\n"
+              "      ```python\n"
+              "      print(1)\n"
+              "      ```\n"
+              "```"
+          ),
+          expected_code="```python\nprint(1)\n```",
+      ),
+      dict(
+          testcase_name="unfenced_json_with_embedded_backticks",
+          format_type=data.FormatType.JSON,
+          raw_output=(
+              '{"extractions": [{"code": "```python\\nprint(1)\\n```"}]}'
+          ),
+          expected_code="```python\nprint(1)\n```",
+      ),
+      dict(
+          testcase_name="single_line_fenced_json",
+          format_type=data.FormatType.JSON,
+          raw_output='```json {"extractions": [{"code": "x"}]}```',
+          expected_code="x",
+      ),
+      dict(
+          testcase_name="same_line_closing_fence",
+          format_type=data.FormatType.JSON,
+          raw_output='```json\n{"extractions": [{"code": "x"}]}```',
+          expected_code="x",
+      ),
+      dict(
+          testcase_name="same_line_closing_fence_with_trailing_newline",
+          format_type=data.FormatType.JSON,
+          raw_output='```json\n{"extractions": [{"code": "x"}]}```\n\n',
+          expected_code="x",
+      ),
+      dict(
+          testcase_name="longer_closing_fence_than_opening",
+          format_type=data.FormatType.JSON,
+          raw_output='```json\n{"extractions": [{"code": "x"}]}\n````',
+          expected_code="x",
+      ),
+  )
+  def test_parse_nested_and_compact_code_fences(
+      self, format_type, raw_output, expected_code
+  ):
+    handler = format_handler.FormatHandler(
+        format_type=format_type,
+        use_wrapper=True,
+        use_fences=True,
+    )
+
+    parsed = handler.parse_output(raw_output)
+
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["code"], expected_code)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="unclosed_repeated_backticks",
+          malformed_input="`" * 20_000 + "x",
+      ),
+      dict(
+          testcase_name="unclosed_single_line_tag",
+          malformed_input="```" + "a" * 50_000,
+      ),
+      dict(
+          testcase_name="repeated_unclosed_fence_lines",
+          malformed_input="```json\n" * 5_000,
+      ),
+      dict(
+          testcase_name="unclosed_outer_fence_ending_with_indented_inner_fence",
+          malformed_input=(
+              "```yaml\nextractions:\n  - code: |\n      ```python\n"
+              "      print(1)\n      ```"
+          ),
+          format_type=data.FormatType.YAML,
+      ),
+  )
+  def test_malformed_unclosed_fences_remain_linear_time(
+      self, malformed_input, format_type=data.FormatType.JSON
+  ):
+    handler = format_handler.FormatHandler(
+        format_type=format_type,
+        use_wrapper=True,
+        use_fences=True,
+        strict_fences=True,
+    )
+
+    with self.assertRaises(exceptions.FormatParseError):
+      handler.parse_output(malformed_input)
 
 
 if __name__ == "__main__":

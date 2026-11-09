@@ -32,18 +32,86 @@ _JSON_FORMAT = "json"
 _YAML_FORMAT = "yaml"
 _YML_FORMAT = "yml"
 
-_FENCE_START = r"^[ \t]{0,3}(?P<fence>`{3,})"
-_LANGUAGE_TAG = r"(?P<lang>[A-Za-z0-9_+-]+)?"
-_FENCE_NEWLINE = r"[ \t]*\r?\n"
-_FENCE_BODY = r"(?P<body>[\s\S]*?)"
-_FENCE_END = r"^[ \t]{0,3}(?P=fence)[ \t]*\r?$"
-
-_FENCE_RE = re.compile(
-    _FENCE_START + _LANGUAGE_TAG + _FENCE_NEWLINE + _FENCE_BODY + _FENCE_END,
-    re.MULTILINE,
-)
+_FENCE_OPEN_LINE_RE = re.compile(r"^[ \t]{0,3}(`{3,})([A-Za-z0-9_+-]+)?[ \t]*$")
+_FENCE_CLOSE_LINE_RE = re.compile(r"^[ \t]{0,3}(`{3,})[ \t]*$")
+_LANG_TAG_PREFIX_RE = re.compile(r"^[A-Za-z0-9_+-]+")
 
 _THINK_TAG_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
+
+
+def _parse_single_line_fence(line: str) -> tuple[str | None, str] | None:
+  """Parses a single-line fenced block in O(n) time."""
+  stripped_left = line.lstrip(" \t")
+  if len(line) - len(stripped_left) > 3:
+    return None
+  content = stripped_left.rstrip(" \t\r\n")
+  open_ticks = len(content) - len(content.lstrip("`"))
+  if open_ticks < 3:
+    return None
+  after_open = content[open_ticks:]
+  close_ticks = len(after_open) - len(after_open.rstrip("`"))
+  if close_ticks < open_ticks or len(after_open) == close_ticks:
+    return None
+  inner = after_open[:-close_ticks]
+  lang_match = _LANG_TAG_PREFIX_RE.match(inner)
+  if lang_match is not None:
+    remainder = inner[lang_match.end() :]
+    if not remainder or remainder[0] in " \t{[":
+      return lang_match.group(0), remainder
+  return None, inner
+
+
+def _extract_fenced_blocks(text: str) -> list[tuple[str | None, str]]:
+  """Extracts `(lang, body)` fenced code blocks in a single linear pass."""
+  lines = text.splitlines(keepends=True)
+  blocks: list[tuple[str | None, str]] = []
+  open_ticks: int | None = None
+  open_lang: str | None = None
+  body_lines: list[str] = []
+
+  for line in lines:
+    line_no_eol = line.rstrip("\r\n")
+    if open_ticks is None:
+      # Only treat multi-line fence headers (followed by another line) here;
+      # single-line fences are handled in the compact fallback below.
+      if line_no_eol != line:
+        open_match = _FENCE_OPEN_LINE_RE.match(line_no_eol)
+        if open_match is not None:
+          open_ticks = len(open_match.group(1))
+          open_lang = open_match.group(2)
+          body_lines = []
+    else:
+      close_match = _FENCE_CLOSE_LINE_RE.match(line_no_eol)
+      if close_match is not None and len(close_match.group(1)) >= open_ticks:
+        blocks.append((open_lang, "".join(body_lines)))
+        open_ticks = None
+      else:
+        body_lines.append(line)
+
+  if blocks:
+    return blocks
+
+  # Fallback 1: closing fence placed at the end of the final non-blank content
+  # line (requiring non-whitespace prefix so 4+-space indented fences inside an
+  # unclosed block are never treated as closing the outer fence).
+  if open_ticks is not None and body_lines:
+    last_idx = len(body_lines) - 1
+    while last_idx >= 0 and not body_lines[last_idx].strip():
+      last_idx -= 1
+    if last_idx >= 0:
+      last_trimmed = body_lines[last_idx].rstrip(" \t\r\n")
+      trailing_ticks = len(last_trimmed) - len(last_trimmed.rstrip("`"))
+      prefix = last_trimmed[:-trailing_ticks] if trailing_ticks else ""
+      if trailing_ticks >= open_ticks and prefix.strip():
+        trimmed_body = body_lines[:last_idx] + [prefix]
+        return [(open_lang, "".join(trimmed_body))]
+
+  # Fallback 2: compact single-line fenced blocks (```json {...}```).
+  for line in lines:
+    parsed = _parse_single_line_fence(line)
+    if parsed is not None:
+      blocks.append(parsed)
+  return blocks
 
 
 def _normalize_format_type(
@@ -309,7 +377,7 @@ class FormatHandler:
     if not self.use_fences:
       return text.strip()
 
-    matches = list(_FENCE_RE.finditer(text))
+    blocks = _extract_fenced_blocks(text)
 
     valid_tags = {
         data.FormatType.YAML: {_YAML_FORMAT, _YML_FORMAT},
@@ -317,9 +385,9 @@ class FormatHandler:
     }
 
     candidates = [
-        m
-        for m in matches
-        if self._is_valid_language_tag(m.group("lang"), valid_tags)
+        body
+        for lang, body in blocks
+        if self._is_valid_language_tag(lang, valid_tags)
     ]
 
     if self.strict_fences:
@@ -332,18 +400,18 @@ class FormatHandler:
           raise exceptions.FormatParseError(
               "Multiple fenced blocks found. Expected exactly one."
           )
-      return candidates[0].group("body").strip()
+      return candidates[0].strip()
 
     if len(candidates) == 1:
-      return candidates[0].group("body").strip()
+      return candidates[0].strip()
     elif len(candidates) > 1:
       raise exceptions.FormatParseError(
           "Multiple fenced blocks found. Expected exactly one."
       )
 
-    if matches:
-      if not self.strict_fences and len(matches) == 1:
-        return matches[0].group("body").strip()
+    if blocks:
+      if not self.strict_fences and len(blocks) == 1:
+        return blocks[0][1].strip()
       raise exceptions.FormatParseError(
           f"No {self.format_type.value} code block found."
       )

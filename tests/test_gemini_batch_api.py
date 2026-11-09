@@ -658,13 +658,28 @@ class BatchParseItemTest(parameterized.TestCase):
     self.assertIn("idx-1", logs.output[0])
     self.assertIn(expected, logs.output[0])
 
-  def test_truncated_item_is_kept_and_logged(self):
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="camel_case",
+          finish_fields={"finishReason": "MAX_TOKENS"},
+      ),
+      dict(
+          testcase_name="snake_case",
+          finish_fields={"finish_reason": "MAX_TOKENS"},
+      ),
+      dict(
+          testcase_name="numeric",
+          finish_fields={"finishReason": 2},
+      ),
+  )
+  def test_truncated_item_is_kept_and_logged(self, finish_fields):
+    truncated_json = '{"extractions": [{"a'
     line = {
         "key": "idx-3",
         "response": {
             "candidates": [{
-                "content": {"parts": [{"text": '{"extractions": [{"a'}]},
-                "finishReason": "MAX_TOKENS",
+                "content": {"parts": [{"text": truncated_json}]},
+                **finish_fields,
             }]
         },
     }
@@ -673,18 +688,23 @@ class BatchParseItemTest(parameterized.TestCase):
     with self.assertLogs(level="WARNING") as logs:
       gb._parse_batch_line(json.dumps(line), outputs, gb.BatchConfig())
 
-    self.assertDictEqual(outputs, {3: '{"extractions": [{"a'})
+    self.assertDictEqual(outputs, {3: truncated_json})
     self.assertLen(logs.output, 1)
     self.assertIn("idx-3", logs.output[0])
     self.assertIn("MAX_TOKENS", logs.output[0])
 
-  def test_complete_item_is_not_logged(self):
+  @parameterized.named_parameters(
+      dict(testcase_name="stop", finish_reason="STOP"),
+      dict(testcase_name="bool_rejected", finish_reason=True),
+  )
+  def test_complete_item_is_not_logged(self, finish_reason):
+    complete_json = '{"extractions": []}'
     line = {
         "key": "idx-3",
         "response": {
             "candidates": [{
-                "content": {"parts": [{"text": '{"extractions": []}'}]},
-                "finishReason": "STOP",
+                "content": {"parts": [{"text": complete_json}]},
+                "finishReason": finish_reason,
             }]
         },
     }
@@ -693,7 +713,14 @@ class BatchParseItemTest(parameterized.TestCase):
     with self.assertNoLogs(level="WARNING"):
       gb._parse_batch_line(json.dumps(line), outputs, gb.BatchConfig())
 
-    self.assertDictEqual(outputs, {3: '{"extractions": []}'})
+    self.assertDictEqual(outputs, {3: complete_json})
+
+  def test_is_max_tokens_finish_accepts_finish_reason_enum(self):
+    resp = {
+        "candidates": [{"finishReason": genai.types.FinishReason.MAX_TOKENS}]
+    }
+
+    self.assertTrue(gb._is_max_tokens_finish(resp))
 
   @parameterized.named_parameters(
       dict(

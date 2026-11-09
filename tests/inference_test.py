@@ -1010,29 +1010,46 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
     self.assertEqual(request[expected_param], 256)
     self.assertNotIn(omitted_param, request)
 
-  @parameterized.named_parameters(
-      dict(testcase_name="truncated", finish_reason="length", warns=True),
-      dict(testcase_name="complete", finish_reason="stop", warns=False),
-  )
-  def test_truncated_output_warns(self, finish_reason, warns):
-    response = mock.Mock()
-    response.choices = [
-        mock.Mock(
-            message=mock.Mock(content='{"extractions": [{"na', refusal=None),
-            finish_reason=finish_reason,
-        )
-    ]
+  def test_truncated_output_warns_on_length_finish_reason(self):
+    truncated_json = '{"extractions": [{"na'
+    response = chat.ChatCompletion(
+        id="test",
+        created=0,
+        model="gpt-4o-mini",
+        object="chat.completion",
+        choices=[{
+            "index": 0,
+            "finish_reason": "length",
+            "message": {"role": "assistant", "content": truncated_json},
+        }],
+    )
 
-    if warns:
-      with self.assertLogs(level="WARNING") as logs:
-        output = openai.OpenAILanguageModel._response_to_scored_output(response)
-      self.assertLen(logs.output, 1)
-      self.assertIn("finish_reason=length", logs.output[0])
-    else:
-      with self.assertNoLogs(level="WARNING"):
-        output = openai.OpenAILanguageModel._response_to_scored_output(response)
+    with self.assertLogs(level="WARNING") as logs:
+      output = openai.OpenAILanguageModel._response_to_scored_output(response)
 
-    self.assertEqual(output.output, '{"extractions": [{"na')
+    self.assertEqual(output.output, truncated_json)
+    self.assertLen(logs.output, 1)
+    self.assertIn("finish_reason=length", logs.output[0])
+    self.assertIn("max_output_tokens", logs.output[0])
+
+  def test_complete_output_does_not_warn_on_stop_finish_reason(self):
+    complete_json = '{"extractions": []}'
+    response = chat.ChatCompletion(
+        id="test",
+        created=0,
+        model="gpt-4o-mini",
+        object="chat.completion",
+        choices=[{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": complete_json},
+        }],
+    )
+
+    with self.assertNoLogs(level="WARNING"):
+      output = openai.OpenAILanguageModel._response_to_scored_output(response)
+
+    self.assertEqual(output.output, complete_json)
 
 
 class TestOpenAILanguageModel(absltest.TestCase):

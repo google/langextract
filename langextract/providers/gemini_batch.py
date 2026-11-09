@@ -746,7 +746,9 @@ def _is_max_tokens_finish(resp: Any) -> bool:
       candidate, "finishReason"
   ) or _safe_get_nested(candidate, "finish_reason")
   return (
-      type(finish_reason) in (str, int) and finish_reason in _MAX_TOKENS_REASONS
+      isinstance(finish_reason, (str, int))
+      and not isinstance(finish_reason, bool)
+      and finish_reason in _MAX_TOKENS_REASONS
   )
 
 

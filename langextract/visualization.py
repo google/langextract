@@ -432,13 +432,6 @@ def _to_script_safe_json(value: object) -> str:
   )
 
 
-# Each rendered viewer gets its own id suffix, so several visualize() results can
-# share one page without overwriting each other's elements or handlers. The
-# suffix is a fresh UUID per rendered viewer rather than a counter: a counter
-# lives in the process, so two viewers rendered by separate processes would
-# both be numbered one and collide again (issue #578).
-
-
 def _build_visualization_html(
     text: str,
     extractions: list[data.Extraction],
@@ -473,7 +466,8 @@ def _build_visualization_html(
 
   js_data = _to_script_safe_json(extraction_data)
 
-  # Keeps this viewer's element ids and event handlers instance-scoped.
+  # A fresh UUID per viewer prevents DOM id and handler collisions across
+  # multiple visualize() calls in the same page or across separate processes.
   viewer_suffix = uuid.uuid4().hex
 
   # Prepare pos_info_str safely for pytype for the f-string below

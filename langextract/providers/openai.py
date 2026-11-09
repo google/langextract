@@ -66,6 +66,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
   format_type: data.FormatType = data.FormatType.JSON
   temperature: float | None = None
   max_workers: int = 10
+  timeout: float | None = None
+  max_retries: int | None = None
   _client: Any = dataclasses.field(default=None, repr=False, compare=False)
   _batch_cfg: openai_batch.BatchConfig = dataclasses.field(
       default_factory=openai_batch.BatchConfig, repr=False, compare=False
@@ -172,6 +174,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.format_type = format_type
     self.temperature = temperature
     self.max_workers = max_workers
+    self.timeout = timeout
+    self.max_retries = max_retries
     batch_cfg_dict = kwargs.pop('batch', None)
     self._batch_cfg = openai_batch.BatchConfig.from_dict(batch_cfg_dict)
     self._extra_kwargs = kwargs or {}

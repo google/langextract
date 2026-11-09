@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import json
+import pathlib
+import tempfile
 from typing import Any
 
 from absl.testing import absltest
@@ -274,6 +276,60 @@ class DictToAnnotatedDocumentTest(parameterized.TestCase):
 
     self.assertEqual(payload, _serialized_document())
 
+  def test_missing_extractions_key_loads_as_empty_list(self):
+    restored = data_lib.dict_to_annotated_document(
+        {"document_id": "d1", "text": "hello"}
+    )
+
+    self.assertEqual(restored.extractions, [])
+
+
+class AnnotatedDocumentRoundTripTest(parameterized.TestCase):
+  """Tests that annotated documents survive serialization and reload."""
+
+  @parameterized.named_parameters(
+      dict(testcase_name="none", extractions=None),
+      dict(testcase_name="empty_list", extractions=[]),
+      dict(
+          testcase_name="one_extraction",
+          extractions=[
+              data.Extraction(
+                  extraction_class="person",
+                  extraction_text="Alice",
+                  char_interval=data.CharInterval(start_pos=0, end_pos=5),
+                  alignment_status=data.AlignmentStatus.MATCH_EXACT,
+              )
+          ],
+      ),
+  )
+  def test_extractions_survive_dict_round_trip(self, extractions):
+    doc = data.AnnotatedDocument(
+        document_id="d1", text="Alice met Bob.", extractions=extractions
+    )
+
+    adoc_dict = json.loads(json.dumps(data_lib.annotated_document_to_dict(doc)))
+    restored = data_lib.dict_to_annotated_document(adoc_dict)
+
+    self.assertEqual(restored.extractions, extractions)
+
+  def test_none_extractions_survive_jsonl_round_trip(self):
+    doc = data.AnnotatedDocument(
+        document_id="d1", text="Nothing to extract here."
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+      io.save_annotated_documents(
+          iter([doc]), output_dir=tmp, show_progress=False
+      )
+      restored = list(
+          io.load_annotated_documents_jsonl(
+              pathlib.Path(tmp) / "data.jsonl", show_progress=False
+          )
+      )
+
+    self.assertLen(restored, 1)
+    self.assertIsNone(restored[0].extractions)
+
 
 class IsUrlTest(absltest.TestCase):
   """Tests for io.is_url function validation."""
@@ -348,6 +404,41 @@ class DocumentWithAdditionalContextTest(absltest.TestCase):
     new_doc = doc.with_additional_context(None)
     self.assertIsNone(new_doc.additional_context)
     self.assertEqual(new_doc.text, "hello")
+
+
+class TokenizedTextCacheTest(parameterized.TestCase):
+  """The cached tokenization must follow the current `text`."""
+
+  @parameterized.named_parameters(
+      dict(testcase_name="document", document_cls=data.Document),
+      dict(
+          testcase_name="annotated_document",
+          document_cls=data.AnnotatedDocument,
+      ),
+  )
+  def test_retokenizes_after_text_changes(self, document_cls):
+    doc = document_cls(text="Alice lives here.")
+    _ = doc.tokenized_text
+
+    doc.text = "Bob moved away."
+
+    self.assertEqual(doc.tokenized_text, tokenizer.tokenize("Bob moved away."))
+
+  def test_annotated_document_clears_cache_when_text_becomes_none(self):
+    doc = data.AnnotatedDocument(text="Alice lives here.")
+    _ = doc.tokenized_text
+
+    doc.text = None
+
+    self.assertIsNone(doc.tokenized_text)
+
+  def test_keeps_tokenization_set_for_current_text(self):
+    doc = data.Document(text="hello world")
+    custom = tokenizer.TokenizedText(text="hello world", tokens=[])
+
+    doc.tokenized_text = custom
+
+    self.assertIs(doc.tokenized_text, custom)
 
 
 if __name__ == "__main__":

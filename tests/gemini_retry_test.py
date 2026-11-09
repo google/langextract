@@ -14,19 +14,49 @@
 
 """Tests for Gemini provider retry logic on transient errors."""
 
+import importlib
 import time
+import types
 from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
 from google import genai
 from google.genai import errors as genai_errors
-import httpx
 
 import langextract as lx
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.providers import gemini
+
+# google-genai <3.0 depends on httpx; >=3.0 depends on httpx2.
+try:
+  import httpx2 as httpx_mod
+except ImportError:
+  import httpx as httpx_mod
+
+
+def _make_fake_httpx_module():
+  """Build an isolated fake transport module with distinct exception types."""
+
+  class FakeTimeoutException(Exception):
+    pass
+
+  class FakeNetworkError(Exception):
+    pass
+
+  class FakeRemoteProtocolError(Exception):
+    pass
+
+  class FakeProxyError(Exception):
+    pass
+
+  return types.SimpleNamespace(
+      TimeoutException=FakeTimeoutException,
+      NetworkError=FakeNetworkError,
+      RemoteProtocolError=FakeRemoteProtocolError,
+      ProxyError=FakeProxyError,
+  )
 
 
 def _make_response(text: str):
@@ -159,15 +189,23 @@ class TestGeminiRetryableErrors(_MockClientTest):
   @parameterized.named_parameters(
       dict(
           testcase_name='connect_error',
-          error=httpx.ConnectError('refused'),
+          error=httpx_mod.ConnectError('refused'),
       ),
       dict(
           testcase_name='read_error',
-          error=httpx.ReadError('read failed'),
+          error=httpx_mod.ReadError('read failed'),
       ),
       dict(
           testcase_name='connect_timeout',
-          error=httpx.ConnectTimeout('connect timeout'),
+          error=httpx_mod.ConnectTimeout('connect timeout'),
+      ),
+      dict(
+          testcase_name='remote_protocol',
+          error=httpx_mod.RemoteProtocolError('server disconnected'),
+      ),
+      dict(
+          testcase_name='proxy_error',
+          error=httpx_mod.ProxyError('proxy failed'),
       ),
   )
   def test_httpx_transport_errors_are_retryable(self, error):
@@ -177,15 +215,48 @@ class TestGeminiRetryableErrors(_MockClientTest):
       # Client/config bugs: retrying cannot fix them.
       dict(
           testcase_name='local_protocol',
-          error=httpx.LocalProtocolError('bad header'),
+          error=httpx_mod.LocalProtocolError('bad header'),
       ),
       dict(
           testcase_name='unsupported_protocol',
-          error=httpx.UnsupportedProtocol('ftp unsupported'),
+          error=httpx_mod.UnsupportedProtocol('ftp unsupported'),
       ),
   )
   def test_httpx_client_bugs_are_not_retryable(self, error):
     self.assertFalse(self.model._is_retryable_error(error))
+
+
+class TestGeminiHttpxTransportResolution(_MockClientTest):
+  """Resolution across httpx (google-genai <3.0) and httpx2 (>=3.0)."""
+
+  def setUp(self):
+    super().setUp()
+    self.model = _build_model()
+    self.mock_import = self.enter_context(
+        mock.patch.object(importlib, 'import_module', autospec=True)
+    )
+
+  def test_falls_back_to_httpx2_when_httpx_missing(self):
+    fake_httpx2 = _make_fake_httpx_module()
+    self.mock_import.side_effect = [ImportError('no httpx'), fake_httpx2]
+
+    self.assertTrue(
+        self.model._is_retryable_error(fake_httpx2.NetworkError('reset'))
+    )
+
+  def test_checks_httpx2_when_httpx_also_installed(self):
+    fake_httpx = _make_fake_httpx_module()
+    fake_httpx2 = _make_fake_httpx_module()
+    self.mock_import.side_effect = [fake_httpx, fake_httpx2]
+
+    self.assertTrue(
+        self.model._is_retryable_error(fake_httpx2.NetworkError('reset'))
+    )
+
+  def test_missing_httpx_modules_still_retries_stdlib_errors(self):
+    self.mock_import.side_effect = ImportError('no httpx transport')
+
+    self.assertTrue(self.model._is_retryable_error(ConnectionError('reset')))
 
 
 class TestGeminiRetryLogic(_MockClientTest):

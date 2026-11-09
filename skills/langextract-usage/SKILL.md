@@ -31,8 +31,8 @@ export OPENAI_API_KEY="your_key"
 ```
 
 Auto-routing + env-default resolution is tuned for GPT-style model IDs
-(`gpt-4*`, `gpt-5*`). For OpenAI-compatible endpoints or non-GPT IDs,
-pass an explicit `ModelConfig` — see `references/providers.md`.
+(`gpt-4*`, `gpt-5*`, `gpt-6*`). For OpenAI-compatible endpoints or
+non-GPT IDs, pass an explicit `ModelConfig` — see `references/providers.md`.
 
 ## Basic extraction
 

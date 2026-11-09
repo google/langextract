@@ -1,9 +1,13 @@
 name: Validate PR template
 
+# Runs on pull_request, not pull_request_target: it only reads the pull request
+# and needs only a read-only token. Because pull_request runs the pull request's
+# own copy of this file, changes under .github/ are covered by CODEOWNERS review
+# and by check-infrastructure-changes.yml, which always runs main's copy.
 on:
-  pull_request_target:
-    types: [opened, edited, synchronize, reopened]
-  workflow_dispatch:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+    branches: [main]
 
 permissions:
   contents: read
@@ -16,8 +20,8 @@ jobs:
     steps:
       - name: Check PR author permissions
         id: check
-        if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
-        uses: actions/github-script@v9
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -74,7 +78,7 @@ jobs:
 
       - name: Validate PR template
         if: |
-          github.event_name == 'pull_request_target' &&
+          github.event_name == 'pull_request' &&
           github.event.pull_request.draft == false &&
           steps.check.outputs.skip_validation != 'true'
         env:
@@ -121,8 +125,11 @@ jobs:
 
       - name: Log skip reason
         if: |
-          github.event_name == 'pull_request_target' &&
+          github.event_name == 'pull_request' &&
           (github.event.pull_request.draft == true ||
            steps.check.outputs.skip_validation == 'true')
+        env:
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          SKIP_VALIDATION: ${{ steps.check.outputs.skip_validation || 'N/A' }}
         run: |
-          echo "Skipping PR template validation. Draft: ${{ github.event.pull_request.draft }}; skip_validation: ${{ steps.check.outputs.skip_validation || 'N/A' }}"
+          echo "Skipping PR template validation. Draft: ${IS_DRAFT}; skip_validation: ${SKIP_VALIDATION}"

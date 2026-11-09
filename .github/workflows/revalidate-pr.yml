@@ -8,45 +8,60 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
-  checks: write
-  statuses: write
+permissions: {}
 
 jobs:
   revalidate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
     steps:
       - name: Get PR data
         id: pr_data
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
         with:
           script: |
+            const fs = require('fs');
+            const path = require('path');
+            const rawPrNumber = (process.env.PR_NUMBER || '').trim();
+            if (!/^[1-9]\d*$/.test(rawPrNumber)) {
+              core.setFailed('Invalid PR number; expected a positive integer.');
+              return;
+            }
+            const prNumber = Number(rawPrNumber);
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: ${{ inputs.pr_number }}
+              pull_number: prNumber
             });
 
             core.info(`Validating PR #${pr.number}: ${pr.title}`);
             core.info(`Author: ${pr.user.login}`);
             core.info(`Changes: +${pr.additions} -${pr.deletions}`);
 
+            const prPath = path.join(process.env.RUNNER_TEMP, 'revalidate-pr.json');
+            fs.writeFileSync(prPath, JSON.stringify(pr), 'utf8');
+            core.setOutput('pr_path', prPath);
+            core.setOutput('pr_number', String(pr.number));
+
             // Store head SHA for creating status
             core.setOutput('head_sha', pr.head.sha);
 
-            return pr;
-
       - name: Create pending status
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          HEAD_SHA: ${{ steps.pr_data.outputs.head_sha }}
         with:
           script: |
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: '${{ steps.pr_data.outputs.head_sha }}',
+              sha: process.env.HEAD_SHA,
               state: 'pending',
               context: 'Manual Validation',
               description: 'Running validation checks...'
@@ -54,10 +69,13 @@ jobs:
 
       - name: Validate PR
         id: validate
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_PATH: ${{ steps.pr_data.outputs.pr_path }}
         with:
           script: |
-            const pr = ${{ steps.pr_data.outputs.result }};
+            const fs = require('fs');
+            const pr = JSON.parse(fs.readFileSync(process.env.PR_PATH, 'utf8'));
             const errors = [];
             let passed = true;
 
@@ -103,17 +121,21 @@ jobs:
             }
 
       - name: Update commit status
-        if: always()
-        uses: actions/github-script@v9
+        if: always() && steps.pr_data.outcome == 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PASSED: ${{ steps.validate.outputs.passed }}
+          ERRORS: ${{ steps.validate.outputs.errors }}
+          HEAD_SHA: ${{ steps.pr_data.outputs.head_sha }}
         with:
           script: |
-            const passed = ${{ steps.validate.outputs.passed }};
-            const errors = '${{ steps.validate.outputs.errors }}';
+            const passed = process.env.PASSED === 'true';
+            const errors = process.env.ERRORS || '';
 
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: '${{ steps.pr_data.outputs.head_sha }}',
+              sha: process.env.HEAD_SHA,
               state: passed ? 'success' : 'failure',
               context: 'Manual Validation',
               description: passed ? 'All validation checks passed' : errors.substring(0, 140),
@@ -121,16 +143,23 @@ jobs:
             });
 
       - name: Add validation comment
-        if: always()
-        uses: actions/github-script@v9
+        if: always() && steps.pr_data.outcome == 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ steps.pr_data.outputs.pr_number }}
+          PASSED: ${{ steps.validate.outputs.passed }}
+          TOTAL_CHANGES: ${{ steps.validate.outputs.totalChanges }}
+          HAS_TEMPLATE: ${{ steps.validate.outputs.hasTemplate }}
+          HAS_ISSUE: ${{ steps.validate.outputs.hasIssue }}
+          ERRORS: ${{ steps.validate.outputs.errors }}
         with:
           script: |
-            const pr = ${{ steps.pr_data.outputs.result }};
-            const passed = ${{ steps.validate.outputs.passed }};
-            const totalChanges = ${{ steps.validate.outputs.totalChanges }};
-            const hasTemplate = ${{ steps.validate.outputs.hasTemplate }};
-            const hasIssue = ${{ steps.validate.outputs.hasIssue }};
-            const errors = '${{ steps.validate.outputs.errors }}'.split('; ').filter(e => e);
+            const prNumber = Number(process.env.PR_NUMBER);
+            const passed = process.env.PASSED === 'true';
+            const totalChanges = Number(process.env.TOTAL_CHANGES || '0');
+            const hasTemplate = process.env.HAS_TEMPLATE === 'true';
+            const hasIssue = process.env.HAS_ISSUE === 'true';
+            const errors = (process.env.ERRORS || '').split('; ').filter(e => e);
 
             let body = `### Manual Validation Results\n\n`;
             body += `**Status**: ${passed ? '✅ Passed' : '❌ Failed'}\n\n`;
@@ -152,6 +181,6 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: pr.number,
+              issue_number: prNumber,
               body: body
             });

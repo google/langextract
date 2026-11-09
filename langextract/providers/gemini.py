@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
+import importlib
 import numbers
 import random
 import re
@@ -48,6 +49,7 @@ _DEFAULT_RETRY_DELAY = 1.0
 _DEFAULT_MAX_RETRY_DELAY = 16.0
 
 _RETRYABLE_API_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_HTTPX_MODULE_NAMES: Final[tuple[str, ...]] = ('httpx', 'httpx2')
 
 # Phrases are narrow on purpose: bare "quota" or "unavailable" can be permanent
 # (denied quota, region out of service); we only match the transient forms.
@@ -396,23 +398,24 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     except ImportError:
       pass
 
-    # httpx transient subclasses only. LocalProtocolError / UnsupportedProtocol
-    # are client/config bugs and not included.
-    try:
-      import httpx  # pylint: disable=import-outside-toplevel
-
+    # Check both httpx and httpx2: google-genai 3.x uses httpx2 while other
+    # providers (e.g. openai) install httpx in the same environment.
+    # LocalProtocolError / UnsupportedProtocol are client/config bugs.
+    for module_name in _HTTPX_MODULE_NAMES:
+      try:
+        http_mod = importlib.import_module(module_name)
+      except ImportError:
+        continue
       if isinstance(
           error,
           (
-              httpx.TimeoutException,
-              httpx.NetworkError,
-              httpx.RemoteProtocolError,
-              httpx.ProxyError,
+              http_mod.TimeoutException,
+              http_mod.NetworkError,
+              http_mod.RemoteProtocolError,
+              http_mod.ProxyError,
           ),
       ):
         return True
-    except ImportError:
-      pass
 
     # Specifically ConnectionError / TimeoutError. Bare OSError is excluded:
     # it also covers file/permission errors that won't resolve by retrying.

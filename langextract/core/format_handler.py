@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import re
-import string
 from typing import Mapping, Sequence
 import warnings
 
@@ -36,27 +35,16 @@ _YML_FORMAT = "yml"
 _FENCE_OPEN_LINE_RE = re.compile(r"^[ \t]{0,3}(`{3,})([A-Za-z0-9_+-]+)?[ \t]*$")
 _FENCE_CLOSE_LINE_RE = re.compile(r"^[ \t]{0,3}(`{3,})[ \t]*$")
 _LANG_TAG_PREFIX_RE = re.compile(r"^[A-Za-z0-9_+-]+")
-_FENCE_CLOSE_WITH_TEXT_RE = re.compile(r"^[ \t]{0,3}(`{3,})[ \t]+\S")
-_LANG_TAG_CHARS = string.ascii_letters + string.digits + "_+-"
-
-# Language tag, fence length, and body lines of a fence that was never closed.
-_UnclosedBlock = tuple[str | None, int, list[str]]
 
 _THINK_TAG_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
 
 
 def _parse_single_line_fence(line: str) -> tuple[str | None, str] | None:
-  """Parses a single-line fenced block in O(n) time.
-
-  The block may follow prose on the same line ('Result: ```json {...}```').
-  """
-  fence_start = line.find("```")
-  if fence_start < 0:
+  """Parses a single-line fenced block in O(n) time."""
+  stripped_left = line.lstrip(" \t")
+  if len(line) - len(stripped_left) > 3:
     return None
-  # A fence indented by 4+ spaces is nested content, not a block of its own.
-  if fence_start > 3 and not line[:fence_start].strip():
-    return None
-  content = line[fence_start:].rstrip(" \t\r\n")
+  content = stripped_left.rstrip(" \t\r\n")
   open_ticks = len(content) - len(content.lstrip("`"))
   if open_ticks < 3:
     return None
@@ -73,31 +61,9 @@ def _parse_single_line_fence(line: str) -> tuple[str | None, str] | None:
   return None, inner
 
 
-def _parse_inline_opener(line: str) -> tuple[int, str | None] | None:
-  """Parses an opening fence that follows prose on the same line.
-
-  Args:
-    line: A line without its line ending, such as 'Result: ```json'.
-
-  Returns:
-    The fence length and language tag, or None if the line does not end with
-    an opening fence preceded by other text.
-  """
-  content = line.rstrip(" \t")
-  without_lang = content.rstrip(_LANG_TAG_CHARS)
-  ticks = len(without_lang) - len(without_lang.rstrip("`"))
-  if ticks < 3:
-    return None
-  prose = without_lang[:-ticks]
-  if not prose.strip() or "```" in prose:
-    return None
-  return ticks, content[len(without_lang) :] or None
-
-
-def _scan_fenced_blocks(
-    lines: Sequence[str], *, allow_inline_opener: bool
-) -> tuple[list[tuple[str | None, str]], _UnclosedBlock | None]:
-  """Collects closed `(lang, body)` blocks and any block left unclosed."""
+def _extract_fenced_blocks(text: str) -> list[tuple[str | None, str]]:
+  """Extracts `(lang, body)` fenced code blocks in a single linear pass."""
+  lines = text.splitlines(keepends=True)
   blocks: list[tuple[str | None, str]] = []
   open_ticks: int | None = None
   open_lang: str | None = None
@@ -107,18 +73,12 @@ def _scan_fenced_blocks(
     line_no_eol = line.rstrip("\r\n")
     if open_ticks is None:
       # Only treat multi-line fence headers (followed by another line) here;
-      # single-line fences are handled by _parse_single_line_fence.
-      if line_no_eol == line:
-        continue
-      open_match = _FENCE_OPEN_LINE_RE.match(line_no_eol)
-      if open_match is not None:
-        open_ticks = len(open_match.group(1))
-        open_lang = open_match.group(2)
-        body_lines = []
-      elif allow_inline_opener:
-        inline_opener = _parse_inline_opener(line_no_eol)
-        if inline_opener is not None:
-          open_ticks, open_lang = inline_opener
+      # single-line fences are handled in the compact fallback below.
+      if line_no_eol != line:
+        open_match = _FENCE_OPEN_LINE_RE.match(line_no_eol)
+        if open_match is not None:
+          open_ticks = len(open_match.group(1))
+          open_lang = open_match.group(2)
           body_lines = []
     else:
       close_match = _FENCE_CLOSE_LINE_RE.match(line_no_eol)
@@ -128,65 +88,30 @@ def _scan_fenced_blocks(
       else:
         body_lines.append(line)
 
-  if open_ticks is None:
-    return blocks, None
-  return blocks, (open_lang, open_ticks, body_lines)
+  if blocks:
+    return blocks
 
+  # Fallback 1: closing fence placed at the end of the final non-blank content
+  # line (requiring non-whitespace prefix so 4+-space indented fences inside an
+  # unclosed block are never treated as closing the outer fence).
+  if open_ticks is not None and body_lines:
+    last_idx = len(body_lines) - 1
+    while last_idx >= 0 and not body_lines[last_idx].strip():
+      last_idx -= 1
+    if last_idx >= 0:
+      last_trimmed = body_lines[last_idx].rstrip(" \t\r\n")
+      trailing_ticks = len(last_trimmed) - len(last_trimmed.rstrip("`"))
+      prefix = last_trimmed[:-trailing_ticks] if trailing_ticks else ""
+      if trailing_ticks >= open_ticks and prefix.strip():
+        trimmed_body = body_lines[:last_idx] + [prefix]
+        return [(open_lang, "".join(trimmed_body))]
 
-def _recover_unclosed_block(
-    unclosed: _UnclosedBlock,
-) -> tuple[str | None, str] | None:
-  """Closes a block whose closing fence shares a line with other text."""
-  open_lang, open_ticks, body_lines = unclosed
-
-  # Closing fence at the end of the final non-blank content line (requiring a
-  # non-whitespace prefix so 4+-space indented fences inside an unclosed block
-  # are never treated as closing the outer fence).
-  last_idx = len(body_lines) - 1
-  while last_idx >= 0 and not body_lines[last_idx].strip():
-    last_idx -= 1
-  if last_idx >= 0:
-    last_trimmed = body_lines[last_idx].rstrip(" \t\r\n")
-    trailing_ticks = len(last_trimmed) - len(last_trimmed.rstrip("`"))
-    prefix = last_trimmed[:-trailing_ticks] if trailing_ticks else ""
-    if trailing_ticks >= open_ticks and prefix.strip():
-      return open_lang, "".join(body_lines[:last_idx] + [prefix])
-
-  # Closing fence followed by trailing text, such as '``` done'. Whitespace
-  # must separate the two so a nested '```python' is not taken as a close.
-  for idx, line in enumerate(body_lines):
-    close_match = _FENCE_CLOSE_WITH_TEXT_RE.match(line)
-    if close_match is not None and len(close_match.group(1)) >= open_ticks:
-      return open_lang, "".join(body_lines[:idx])
-  return None
-
-
-def _extract_fenced_blocks(text: str) -> list[tuple[str | None, str]]:
-  """Extracts `(lang, body)` fenced code blocks in linear time.
-
-  Fences on their own lines are preferred. Fences that share a line with other
-  text are only considered when no such block exists, so backticks inside
-  extraction values do not split a well-formed block.
-  """
-  lines = text.splitlines(keepends=True)
-  for allow_inline_opener in (False, True):
-    blocks, unclosed = _scan_fenced_blocks(
-        lines, allow_inline_opener=allow_inline_opener
-    )
-    if blocks:
-      return blocks
-    if unclosed is not None:
-      recovered = _recover_unclosed_block(unclosed)
-      if recovered is not None:
-        return [recovered]
-
-  # Compact single-line fenced blocks (```json {...}```).
-  single_line_blocks = []
+  # Fallback 2: compact single-line fenced blocks (```json {...}```).
   for line in lines:
     parsed = _parse_single_line_fence(line)
     if parsed is not None:
-      single_line_blocks.append(parsed)
-  return single_line_blocks
+      blocks.append(parsed)
+  return blocks
 
 
 def _normalize_format_type(

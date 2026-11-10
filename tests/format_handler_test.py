@@ -448,6 +448,40 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
           raw_output='```json\n{"extractions": [{"code": "x"}]}\n````',
           expected_code="x",
       ),
+      dict(
+          testcase_name="opening_fence_after_prose",
+          format_type=data.FormatType.JSON,
+          raw_output='Result: ```json\n{"extractions": [{"code": "x"}]}\n```',
+          expected_code="x",
+      ),
+      dict(
+          testcase_name="closing_fence_before_trailing_text",
+          format_type=data.FormatType.JSON,
+          raw_output='```json\n{"extractions": [{"code": "x"}]}\n``` Done.',
+          expected_code="x",
+      ),
+      dict(
+          testcase_name="prose_on_both_fence_lines",
+          format_type=data.FormatType.JSON,
+          raw_output=(
+              'Result: ```json\n{"extractions": [{"code": "x"}]}\n``` Done.'
+          ),
+          expected_code="x",
+      ),
+      dict(
+          testcase_name="single_line_fenced_json_after_prose",
+          format_type=data.FormatType.JSON,
+          raw_output='Result: ```json {"extractions": [{"code": "x"}]}```',
+          expected_code="x",
+      ),
+      dict(
+          testcase_name="unfenced_yaml_value_opening_with_backticks",
+          format_type=data.FormatType.YAML,
+          raw_output=(
+              "extractions:\n- code: '```python\n\n    print(1)\n\n    ```'\n"
+          ),
+          expected_code="```python\nprint(1)\n```",
+      ),
   )
   def test_parse_nested_and_compact_code_fences(
       self, format_type, raw_output, expected_code

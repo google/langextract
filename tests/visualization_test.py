@@ -15,6 +15,7 @@
 import json
 import re
 from unittest import mock
+import uuid
 
 from absl.testing import absltest
 
@@ -218,6 +219,109 @@ class VisualizationTest(absltest.TestCase):
     embedded_data = json.loads(match.group(1))
     self.assertEqual(embedded_data[0]["text"], _MARKUP_TEXT)
     self.assertEqual(embedded_data[0]["class"], _MARKUP_CLASS)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_two_viewers_on_one_page_have_disjoint_element_ids(self):
+    first_doc = data.AnnotatedDocument(
+        text="Alice Bob",
+        extractions=[
+            data.Extraction(
+                extraction_class="PERSON",
+                extraction_text="Alice",
+                char_interval=data.CharInterval(start_pos=0, end_pos=5),
+            ),
+            data.Extraction(
+                extraction_class="PERSON",
+                extraction_text="Bob",
+                char_interval=data.CharInterval(start_pos=6, end_pos=9),
+            ),
+        ],
+    )
+    second_doc = data.AnnotatedDocument(
+        text="Carol Dave",
+        extractions=[
+            data.Extraction(
+                extraction_class="PERSON",
+                extraction_text="Carol",
+                char_interval=data.CharInterval(start_pos=0, end_pos=5),
+            ),
+            data.Extraction(
+                extraction_class="PERSON",
+                extraction_text="Dave",
+                char_interval=data.CharInterval(start_pos=6, end_pos=10),
+            ),
+        ],
+    )
+
+    first_html = visualization.visualize(first_doc)
+    second_html = visualization.visualize(second_doc)
+    combined_html = first_html + second_html
+
+    all_ids = re.findall(r'\bid="([^"]+)"', combined_html)
+    self.assertNotEmpty(all_ids)
+    self.assertCountEqual(all_ids, set(all_ids))
+
+    first_suffix = re.search(r'id="lx-viewer-([0-9a-f]+)"', first_html).group(1)
+    second_suffix = re.search(r'id="lx-viewer-([0-9a-f]+)"', second_html).group(
+        1
+    )
+    self.assertNotIn(first_suffix, second_html)
+    self.assertNotIn(second_suffix, first_html)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_visualize_scopes_controls_without_window_globals(self):
+    doc = data.AnnotatedDocument(
+        text="Alice",
+        extractions=[
+            data.Extraction(
+                extraction_class="PERSON",
+                extraction_text="Alice",
+                char_interval=data.CharInterval(start_pos=0, end_pos=5),
+            )
+        ],
+    )
+
+    rendered_html = visualization.visualize(doc)
+
+    self.assertIn('data-lx-action="play"', rendered_html)
+    self.assertIn('data-lx-action="prev"', rendered_html)
+    self.assertIn('data-lx-action="next"', rendered_html)
+    self.assertNotRegex(
+        rendered_html,
+        r"window\.(playPause|nextExtraction|prevExtraction|jumpToExtraction)",
+    )
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  @mock.patch.object(
+      visualization.uuid,
+      "uuid4",
+      autospec=True,
+      return_value=uuid.UUID("12345678-1234-5678-1234-567812345678"),
+  )
+  def test_visualize_uses_uuid4_for_viewer_element_ids(self, mock_uuid4):
+    doc = data.AnnotatedDocument(
+        text="Alice",
+        extractions=[
+            data.Extraction(
+                extraction_class="PERSON",
+                extraction_text="Alice",
+                char_interval=data.CharInterval(start_pos=0, end_pos=5),
+            )
+        ],
+    )
+    expected_suffix = "12345678123456781234567812345678"
+
+    rendered_html = visualization.visualize(doc)
+
+    mock_uuid4.assert_called_once_with()
+    self.assertIn(f'id="lx-viewer-{expected_suffix}"', rendered_html)
+    self.assertIn(f'id="lx-attributes-{expected_suffix}"', rendered_html)
 
 
 if __name__ == "__main__":

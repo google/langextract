@@ -338,7 +338,7 @@ result = lx.extract(
     text_or_documents=input_text,
     prompt_description=prompt,
     examples=examples,
-    model_id="gpt-4o",  # Automatically selects OpenAI provider
+    model_id="gpt-6-luna",  # Automatically selects OpenAI provider
 )
 ```
 
@@ -347,6 +347,11 @@ fence behavior — leave `fence_output` and `use_schema_constraints` unset.
 `output_schema` is also supported for OpenAI models that support structured
 outputs; provide a LangExtract output-envelope JSON schema, preferably with the
 `lx.schema` helpers.
+
+`gpt-6-luna` is a reasoning model and accepts `temperature` only when
+reasoning is disabled. To set `temperature`, also pass
+`reasoning_effort="none"` in `language_model_params` (or in
+`provider_kwargs` when using `ModelConfig`).
 
 For large, non-latency-sensitive OpenAI workloads, enable the OpenAI Batch API
 with `language_model_params`. Batch mode is opt-in and falls back to realtime
@@ -357,7 +362,7 @@ result = lx.extract(
     text_or_documents=documents,
     prompt_description=prompt,
     examples=examples,
-    model_id="gpt-4o-mini",
+    model_id="gpt-6-luna",
     language_model_params={
         "batch": {
             "enabled": True,

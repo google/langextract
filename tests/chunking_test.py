@@ -204,6 +204,19 @@ class ChunkIteratorTest(absltest.TestCase):
     with self.assertRaises(StopIteration):
       next(chunk_iter)
 
+  def test_rejects_max_char_buffer_below_one(self):
+    """A buffer below 1 would turn every token into its own chunk."""
+    for max_char_buffer in (0, -1):
+      with self.subTest(max_char_buffer=max_char_buffer):
+        with self.assertRaisesRegex(
+            ValueError, "max_char_buffer must be at least 1"
+        ):
+          chunking.ChunkIterator(
+              "Hello world. Bye.",
+              max_char_buffer=max_char_buffer,
+              tokenizer_impl=tokenizer.RegexTokenizer(),
+          )
+
   def test_newline_at_chunk_boundary_does_not_create_empty_interval(self):
     """Test that newlines at chunk boundaries don't create empty token intervals.
 

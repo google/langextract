@@ -165,6 +165,7 @@ class _CreateProviderPluginTestBase(parameterized.TestCase):
         [sys.executable, str(pathlib.Path(base_dir) / "test_plugin.py")],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         cwd=cwd or self._make_tempdir(),
         env=self._subprocess_env(extra_path),

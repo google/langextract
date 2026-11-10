@@ -773,6 +773,57 @@ class OpenAIBatchHelperTest(parameterized.TestCase):
     with self.assertRaisesRegex(ValueError, 'completion_window'):
       openai_batch.BatchConfig(enabled=True, completion_window='1h')
 
+  def test_truncated_batch_item_is_kept_and_logged(self):
+    truncated_json = '{"extractions": [{"a'
+    line = json.dumps({
+        'custom_id': 'idx-000003',
+        'response': {
+            'status_code': 200,
+            'body': {
+                'choices': [{
+                    'finish_reason': 'length',
+                    'message': {'content': truncated_json},
+                }]
+            },
+        },
+        'error': None,
+    })
+    outputs: dict[int, str] = {}
+    errors: list[str] = []
+
+    with self.assertLogs(level='WARNING') as logs:
+      openai_batch._collect_outputs_from_jsonl(line, outputs, errors)
+
+    self.assertDictEqual(outputs, {3: truncated_json})
+    self.assertEmpty(errors)
+    self.assertLen(logs.output, 1)
+    self.assertIn('idx-000003', logs.output[0])
+    self.assertIn('finish_reason=length', logs.output[0])
+
+  def test_complete_batch_item_is_not_logged(self):
+    complete_json = '{"extractions": []}'
+    line = json.dumps({
+        'custom_id': 'idx-000003',
+        'response': {
+            'status_code': 200,
+            'body': {
+                'choices': [{
+                    'finish_reason': 'stop',
+                    'message': {'content': complete_json},
+                }]
+            },
+        },
+        'error': None,
+    })
+    outputs: dict[int, str] = {}
+    errors: list[str] = []
+
+    with self.assertNoLogs(level='WARNING'):
+      openai_batch._collect_outputs_from_jsonl(line, outputs, errors)
+
+    self.assertDictEqual(outputs, {3: complete_json})
+    self.assertEmpty(errors)
+
 
 if __name__ == '__main__':
   absltest.main()

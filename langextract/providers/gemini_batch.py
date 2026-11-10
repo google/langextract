@@ -70,6 +70,7 @@ _UNSPECIFIED_REASONS = (
     "BLOCK_REASON_UNSPECIFIED",
 )
 _STOP_REASONS = (1, "STOP")
+_MAX_TOKENS_REASONS = (2, "MAX_TOKENS")
 
 # Vertex AI batch imports its JSONL input with a loader that cannot store
 # empty JSON objects, so a default tool such as {"googleSearch": {}} fails the
@@ -738,6 +739,19 @@ def _item_failure(obj: dict[str, Any], resp: Any, text: str) -> str | None:
   return None
 
 
+def _is_max_tokens_finish(resp: Any) -> bool:
+  """Whether the first candidate stopped at the output token limit."""
+  candidate = _safe_get_nested(resp, "candidates", 0)
+  finish_reason = _safe_get_nested(
+      candidate, "finishReason"
+  ) or _safe_get_nested(candidate, "finish_reason")
+  return (
+      isinstance(finish_reason, (str, int))
+      and not isinstance(finish_reason, bool)
+      and finish_reason in _MAX_TOKENS_REASONS
+  )
+
+
 def _parse_batch_line(
     line: str, outputs: dict[int, str], cfg: BatchConfig
 ) -> None:
@@ -759,6 +773,14 @@ def _parse_batch_line(
     raise exceptions.InferenceRuntimeError(failure, provider="Gemini")
   if failure:
     logging.warning("Batch API: Ignoring failed item %r: %s", key, failure)
+  if text and _is_max_tokens_finish(resp):
+    logging.warning(
+        "Batch API: Item %r stopped at the output token limit"
+        " (finish_reason=MAX_TOKENS), so its response is likely incomplete and"
+        " may fail to parse. Consider raising max_output_tokens or lowering"
+        " max_char_buffer.",
+        key,
+    )
 
   try:
     # Extract the original index from the key (e.g., "idx-5" -> 5)

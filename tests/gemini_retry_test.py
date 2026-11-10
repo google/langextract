@@ -829,6 +829,33 @@ class TestGeminiNoTextResponse(_MockClientTest):
     ):
       self.model._process_single_prompt('prompt', {})
 
+  def test_truncated_text_is_returned_with_warning(self):
+    truncated_json = '{"extractions": [{"person": "Al'
+    response = _make_no_text_response(
+        text=truncated_json,
+        finish_reason=genai.types.FinishReason.MAX_TOKENS,
+    )
+
+    with self.assertLogs(level='WARNING') as logs:
+      output = self.model._response_to_scored_output(response)
+
+    self.assertEqual(output.output, truncated_json)
+    self.assertLen(logs.output, 1)
+    self.assertIn('MAX_TOKENS', logs.output[0])
+    self.assertIn('max_output_tokens', logs.output[0])
+
+  def test_complete_text_does_not_warn(self):
+    complete_json = '{"extractions": []}'
+    response = _make_no_text_response(
+        text=complete_json,
+        finish_reason=genai.types.FinishReason.STOP,
+    )
+
+    with self.assertNoLogs(level='WARNING'):
+      output = self.model._response_to_scored_output(response)
+
+    self.assertEqual(output.output, complete_json)
+
   def test_parallel_infer_preserves_no_text_error(self):
     self.mock_client.models.generate_content.return_value = (
         _make_no_text_response(block_reason=genai.types.BlockedReason.SAFETY)

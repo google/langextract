@@ -162,7 +162,9 @@ def _index_from_custom_id(custom_id: Any) -> int | None:
     return None
 
 
-def _extract_text_from_response_body(body: Mapping[str, Any]) -> str:
+def _extract_text_from_response_body(
+    body: Mapping[str, Any], custom_id: str | None = None
+) -> str:
   choices = body.get('choices')
   if not choices:
     raise exceptions.InferenceRuntimeError(
@@ -170,7 +172,9 @@ def _extract_text_from_response_body(body: Mapping[str, Any]) -> str:
     )
 
   try:
-    message = choices[0].get('message') or {}
+    choice = choices[0]
+    message = choice.get('message') or {}
+    finish_reason = choice.get('finish_reason')
   except (AttributeError, IndexError, TypeError) as e:
     raise exceptions.InferenceRuntimeError(
         "OpenAI batch response body has invalid 'choices'",
@@ -189,6 +193,14 @@ def _extract_text_from_response_body(body: Mapping[str, Any]) -> str:
     raise exceptions.InferenceRuntimeError(
         "OpenAI batch response body missing 'message.content'",
         provider='OpenAI',
+    )
+  if content and finish_reason == 'length':
+    logging.warning(
+        'OpenAI Batch API: Item %r stopped at the output token limit'
+        ' (finish_reason=length), so its response is likely incomplete and'
+        ' may fail to parse. Consider raising max_output_tokens or lowering'
+        ' max_char_buffer.',
+        custom_id or '',
     )
   return content
 
@@ -339,7 +351,9 @@ def _collect_outputs_from_jsonl(
       continue
 
     try:
-      outputs_by_idx[idx] = _extract_text_from_response_body(body)
+      outputs_by_idx[idx] = _extract_text_from_response_body(
+          body, custom_id=cid
+      )
     except exceptions.InferenceRuntimeError as e:
       errors.append(f'{cid}: {e}')
 

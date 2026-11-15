@@ -594,6 +594,32 @@ class AnnotatorTest(absltest.TestCase):
         batch_prompts=[f"\n\nQ: {text}\nA: "],
     )
 
+  def test_annotate_documents_rejects_mismatched_inference_batch(self):
+    scored_output = types.ScoredOutput(
+        score=1.0, output="```yaml\nextractions: []\n```"
+    )
+    for output_count in (1, 3):
+      with self.subTest(output_count=output_count):
+        self.mock_language_model.infer.return_value = [
+            [scored_output] for _ in range(output_count)
+        ]
+
+        with self.assertRaisesRegex(
+            exceptions.InferenceOutputError,
+            f"Expected 2 outputs .* received {output_count}",
+        ):
+          list(
+              self.annotator.annotate_documents(
+                  [
+                      data.Document(text="First document."),
+                      data.Document(text="Second document."),
+                  ],
+                  batch_length=2,
+                  debug=False,
+                  show_progress=False,
+              )
+          )
+
 
 class AnnotatorMultipleDocumentTest(parameterized.TestCase):
 

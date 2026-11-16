@@ -582,6 +582,33 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
               ),
           ],
       ),
+      dict(
+          testcase_name="null_values_skipped",
+          resolver=resolver_lib.Resolver(
+              extraction_index_suffix=None,
+              format_type=data.FormatType.JSON,
+          ),
+          test_input=[
+              {"medication": "Aspirin"},
+              {"allergy": None, "allergy_attributes": None},
+              {"dosage": None, "dosage_attributes": {"NOTE": "not stated"}},
+              {"refills": 0},
+          ],
+          expected_output=[
+              data.Extraction(
+                  extraction_class="medication",
+                  extraction_text="Aspirin",
+                  extraction_index=1,
+                  group_index=0,
+              ),
+              data.Extraction(
+                  extraction_class="refills",
+                  extraction_text="0",
+                  extraction_index=2,
+                  group_index=3,
+              ),
+          ],
+      ),
   )
   def test_extract_ordered_extractions_success(
       self,
@@ -1976,6 +2003,34 @@ class ResolverTest(parameterized.TestCase):
     )
 
     self.assertEmpty(aligned)
+
+  def test_resolve_and_align_skip_null_extraction_values(self):
+    resolver = resolver_lib.Resolver(format_type=data.FormatType.JSON)
+    model_output = textwrap.dedent(f"""\
+        {{
+          "{data.EXTRACTIONS_KEY}": [
+            {{"dosage": "10mg"}},
+            {{"medication": "Lisinopril"}},
+            {{"frequency": null, "frequency_attributes": null}}
+          ]
+        }}""")
+
+    # A null value used to raise ValueError, so the whole chunk was dropped
+    # (or raised ResolverParsingError without suppress_parse_errors).
+    aligned = list(
+        resolver.align(
+            resolver.resolve(model_output),
+            "Patient takes 10mg Lisinopril daily.",
+            token_offset=0,
+            char_offset=0,
+        )
+    )
+
+    self.assertEqual(
+        [e.extraction_text for e in aligned], ["10mg", "Lisinopril"]
+    )
+    for extraction in aligned:
+      self.assertIsNotNone(extraction.char_interval)
 
   def test_resolve_parse_error_suppressed_logs_opt_out(self):
     test_input = "```json\n```not valid at all"

@@ -48,6 +48,19 @@ def _is_openai_api(base_url: str | None) -> bool:
   return host == 'api.openai.com' or host.endswith('.api.openai.com')
 
 
+_JSON_SCHEMA_UNSUPPORTED_HINT = (
+    ' The request used a JSON Schema response_format built from the examples.'
+    ' If this OpenAI-compatible endpoint does not support JSON Schema'
+    ' structured outputs, pass use_schema_constraints=False to use JSON mode'
+    ' (response_format type json_object) instead.'
+)
+
+
+def _is_bad_request(error: Exception) -> bool:
+  """Returns whether error is an HTTP 400 from the OpenAI SDK."""
+  return getattr(error, 'status_code', None) == 400
+
+
 @router.register(
     *patterns.OPENAI_PATTERNS,
     priority=patterns.OPENAI_PRIORITY,
@@ -276,9 +289,20 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     except exceptions.InferenceRuntimeError:
       raise
     except Exception as e:
+      message = f'OpenAI API error: {str(e)}'
+      if self._sent_example_schema(config) and _is_bad_request(e):
+        message += _JSON_SCHEMA_UNSUPPORTED_HINT
       raise exceptions.InferenceRuntimeError(
-          f'OpenAI API error: {str(e)}', original=e, provider='OpenAI'
+          message, original=e, provider='OpenAI'
       ) from e
+
+  def _sent_example_schema(self, config: dict) -> bool:
+    """Returns whether a request used the schema derived from examples."""
+    return (
+        self.openai_schema is not None
+        and not self.openai_schema.from_output_schema
+        and config.get('response_format') is None
+    )
 
   @staticmethod
   def _response_to_scored_output(

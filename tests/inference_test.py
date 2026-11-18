@@ -36,6 +36,7 @@ from langextract.core import types
 from langextract.providers import gemini
 from langextract.providers import ollama
 from langextract.providers import openai
+from langextract.providers import schemas
 
 
 class TestBaseLanguageModel(absltest.TestCase):
@@ -1166,6 +1167,68 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(
         call_args.kwargs["response_format"], {"type": "json_object"}
     )
+
+  def _json_schema_rejected_error(self):
+    """Builds the HTTP 400 that DeepSeek returns for json_schema requests."""
+    response = mock.Mock(status_code=400, headers={})
+    return openai_sdk.BadRequestError(
+        "Error code: 400 - This response_format type is unavailable now",
+        response=response,
+        body=None,
+    )
+
+  def _example_schema(self):
+    return schemas.openai.OpenAISchema.from_examples([
+        data.ExampleData(
+            text="Bob is a person.",
+            extractions=[
+                data.Extraction(
+                    extraction_class="entity", extraction_text="Bob"
+                )
+            ],
+        )
+    ])
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_json_schema_400_suggests_json_mode(self, mock_openai_class):
+    """A rejected example-derived schema points to use_schema_constraints."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+    mock_client.chat.completions.create.side_effect = (
+        self._json_schema_rejected_error()
+    )
+
+    model = openai.OpenAILanguageModel(
+        model_id="deepseek-chat",
+        api_key="test-key",
+        base_url="https://api.deepseek.com/v1",
+        openai_schema=self._example_schema(),
+    )
+
+    with self.assertRaises(exceptions.InferenceRuntimeError) as cm:
+      list(model.infer(["test prompt"]))
+
+    call_args = mock_client.chat.completions.create.call_args
+    self.assertEqual(call_args.kwargs["response_format"]["type"], "json_schema")
+    self.assertIn("response_format type is unavailable", str(cm.exception))
+    self.assertIn("use_schema_constraints=False", str(cm.exception))
+    self.assertIsInstance(cm.exception.original, openai_sdk.BadRequestError)
+
+  @mock.patch("openai.OpenAI")
+  def test_openai_json_mode_400_has_no_schema_hint(self, mock_openai_class):
+    """Without a schema, a 400 is reported without the JSON mode hint."""
+    mock_client = mock.Mock()
+    mock_openai_class.return_value = mock_client
+    mock_client.chat.completions.create.side_effect = (
+        self._json_schema_rejected_error()
+    )
+
+    model = openai.OpenAILanguageModel(api_key="test-key")
+
+    with self.assertRaises(exceptions.InferenceRuntimeError) as cm:
+      list(model.infer(["test prompt"]))
+
+    self.assertNotIn("use_schema_constraints", str(cm.exception))
 
   @mock.patch("openai.OpenAI")
   def test_openai_temperature_zero(self, mock_openai_class):

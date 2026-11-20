@@ -21,7 +21,9 @@ from __future__ import annotations
 import concurrent.futures
 import dataclasses
 import logging
+import os
 from typing import Any, Iterator, Sequence, TYPE_CHECKING
+import urllib.parse
 import warnings
 
 from langextract.core import base_model
@@ -36,6 +38,15 @@ from langextract.providers import schemas
 
 if TYPE_CHECKING:
   from openai.types import chat
+
+
+def _is_openai_api(base_url: str | None) -> bool:
+  """Returns whether requests to base_url reach OpenAI's own API."""
+  if not base_url:
+    return True
+  host = urllib.parse.urlsplit(base_url).hostname or ''
+  # Regional endpoints such as eu.api.openai.com behave like the default.
+  return host == 'api.openai.com' or host.endswith('.api.openai.com')
 
 
 @router.register(
@@ -234,7 +245,14 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       api_params['response_format'] = {'type': 'json_object'}
 
     if (v := normalized_config.get('max_output_tokens')) is not None:
-      api_params['max_tokens'] = v
+      # OpenAI reasoning models reject the deprecated max_tokens, but some
+      # OpenAI-compatible servers only accept it. Check OPENAI_BASE_URL too
+      # because the SDK falls back to it when base_url is unset.
+      base_url = self.base_url or os.environ.get('OPENAI_BASE_URL')
+      if _is_openai_api(base_url):
+        api_params['max_completion_tokens'] = v
+      else:
+        api_params['max_tokens'] = v
     if (v := normalized_config.get('top_p')) is not None:
       api_params['top_p'] = v
     for key in [
@@ -308,6 +326,13 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       raise exceptions.InferenceRuntimeError(
           f'OpenAI response contained no message content{detail}.{hint}',
           provider='OpenAI',
+      )
+
+    if finish_reason == 'length':
+      logging.warning(
+          'OpenAI stopped at the output token limit (finish_reason=length),'
+          ' so the response is likely incomplete and may fail to parse.'
+          ' Consider raising max_output_tokens or lowering max_char_buffer.'
       )
 
     return core_types.ScoredOutput(score=1.0, output=output_text)

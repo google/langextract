@@ -62,6 +62,7 @@ class BaseSchemaTest(absltest.TestCase):
   def test_subclass_must_implement_all_methods(self):
     """Test that subclasses must implement all abstract methods."""
 
+    # pylint: disable-next=abstract-method
     class IncompleteSchema(schema.BaseSchema):  # pylint: disable=too-few-public-methods
 
       @classmethod

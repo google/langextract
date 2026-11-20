@@ -42,6 +42,7 @@ from absl import logging
 from google import genai
 from google.api_core import exceptions as google_exceptions
 from google.cloud import storage
+import pydantic
 
 from langextract.core import exceptions
 
@@ -52,6 +53,13 @@ _EXT_JSONL = ".jsonl"
 _KEY_IDX = "idx-"
 _CACHE_PREFIX = "cache"
 _UNSET = object()
+# google-genai <3.0 uses httpx/httpcore; >=3.0 uses httpx2/httpcore2.
+_HTTPX_LOGGER_NAMES = ("httpx", "httpx2")
+_HTTP_TRANSPORT_LOGGER_NAMES = (
+    *_HTTPX_LOGGER_NAMES,
+    "httpcore",
+    "httpcore2",
+)
 
 # Vertex JSON can encode protobuf enums by name or number.
 _UNSPECIFIED_REASONS = (
@@ -62,10 +70,21 @@ _UNSPECIFIED_REASONS = (
     "BLOCK_REASON_UNSPECIFIED",
 )
 _STOP_REASONS = (1, "STOP")
+_MAX_TOKENS_REASONS = (2, "MAX_TOKENS")
+
+# Vertex AI batch imports its JSONL input with a loader that cannot store
+# empty JSON objects, so a default tool such as {"googleSearch": {}} fails the
+# whole job. An empty domain exclusion list means the same thing and imports.
+_GOOGLE_SEARCH_EMPTY_FIELDS = {
+    "googleSearch": "excludeDomains",
+    "google_search": "exclude_domains",
+}
 
 
 def _json_default(obj: Any) -> Any:
   """Serialize non-JSON-native objects used in provider configurations."""
+  if isinstance(obj, pydantic.BaseModel):
+    return obj.model_dump(mode="json", by_alias=True, exclude_none=True)
   if dataclasses.is_dataclass(obj):
     return dataclasses.asdict(obj)
   if isinstance(obj, enum.Enum):
@@ -267,19 +286,56 @@ def _ensure_bucket_lifecycle(
     )
 
 
+def _encode_batch_tools(tools: Sequence[Any]) -> list[Any]:
+  """Encode tools in a form that Vertex AI batch can import.
+
+  Vertex AI batch rejects input files that contain empty JSON objects. A
+  default google_search tool is therefore sent with an empty domain exclusion
+  list, which has the same meaning. Other tools with an empty configuration
+  have no equivalent form, so they are rejected before anything is uploaded.
+
+  Args:
+    tools: Tools as dictionaries or google.genai types.
+
+  Returns:
+    JSON-compatible tool dictionaries. The input is not modified.
+
+  Raises:
+    InferenceConfigError: If a tool configuration is empty and has no
+      equivalent form that Vertex AI batch can import.
+  """
+  encoded = json.loads(json.dumps(list(tools), default=_json_default))
+  for index, tool in enumerate(encoded):
+    if not isinstance(tool, dict):
+      continue
+    for key, value in list(tool.items()):
+      if value != {}:
+        continue
+      if key in _GOOGLE_SEARCH_EMPTY_FIELDS:
+        tool[key] = {_GOOGLE_SEARCH_EMPTY_FIELDS[key]: []}
+      else:
+        raise exceptions.InferenceConfigError(
+            f"Tool configuration tools[{index}].{key} is empty, and Vertex AI"
+            " batch cannot import empty objects. Set an option on this tool"
+            " if it has one, or disable batch mode to use it."
+        )
+  return encoded
+
+
 def _build_request(
     prompt: str,
     schema_config: dict | None,
     gen_config: dict | None,
     system_instruction: str | None = None,
     safety_settings: Sequence[Any] | None = None,
+    tools: Sequence[Any] | None = None,
 ) -> dict:
   """Build a batch request in REST format for file-based submission.
 
   Constructs a properly formatted request dictionary for batch processing.
   Per the Gemini Batch API documentation, each request in the JSONL file
   can include its own generationConfig with schema and generation parameters,
-  as well as top-level systemInstruction and safetySettings.
+  as well as top-level systemInstruction, safetySettings, and tools.
 
   Args:
     prompt: The text prompt to send to the model.
@@ -290,15 +346,27 @@ def _build_request(
     gen_config: Optional generation configuration parameters.
     system_instruction: Optional system instruction text.
     safety_settings: Optional safety settings sequence.
+    tools: Optional tools sequence (e.g., google_search). Tools are encoded
+        so that Vertex AI batch can import them; see _encode_batch_tools.
 
   Returns:
     A dictionary formatted for REST API file-based submission, containing:
       * contents: The prompt content.
       * systemInstruction: Optional system instructions.
       * safetySettings: Optional safety settings.
+      * tools: Optional tools.
       * generationConfig: Optional generation configuration and schema.
+
+  Raises:
+    InferenceConfigError: If a tool cannot be sent through Vertex AI batch.
   """
-  request = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
+  request: dict[str, Any] = {
+      "contents": [{"role": "user", "parts": [{"text": prompt}]}]
+  }
+
+  effective_gen_config = dict(gen_config) if gen_config else {}
+  gen_config_tools = effective_gen_config.pop("tools", None)
+  effective_tools = tools if tools is not None else gen_config_tools
 
   if system_instruction:
     request["systemInstruction"] = {"parts": [{"text": system_instruction}]}
@@ -306,7 +374,10 @@ def _build_request(
   if safety_settings:
     request["safetySettings"] = safety_settings
 
-  if schema_config or gen_config:
+  if effective_tools:
+    request["tools"] = _encode_batch_tools(effective_tools)
+
+  if schema_config or effective_gen_config:
     generation_config = {}
     if schema_config:
       json_schema = schema_config.get("response_json_schema")
@@ -318,8 +389,8 @@ def _build_request(
       generation_config["responseMimeType"] = schema_config.get(
           "response_mime_type", _MIME_TYPE_JSON
       )
-    if gen_config:
-      for k, v in gen_config.items():
+    if effective_gen_config:
+      for k, v in effective_gen_config.items():
         generation_config[_snake_to_camel(k)] = v
     request["generationConfig"] = generation_config
 
@@ -372,7 +443,9 @@ def _submit_file(
         # We use a simple "idx-{N}" key format to track the original order
         # of prompts, as batch processing may return results out of order.
         line = {"key": f"{_KEY_IDX}{idx}", "request": req}
-        f.write(json.dumps(line, ensure_ascii=False) + "\n")
+        f.write(
+            json.dumps(line, ensure_ascii=False, default=_json_default) + "\n"
+        )
 
     project, location = _get_project_location(client, project, location)
     bucket_name = _get_bucket_name(project, location)
@@ -666,6 +739,19 @@ def _item_failure(obj: dict[str, Any], resp: Any, text: str) -> str | None:
   return None
 
 
+def _is_max_tokens_finish(resp: Any) -> bool:
+  """Whether the first candidate stopped at the output token limit."""
+  candidate = _safe_get_nested(resp, "candidates", 0)
+  finish_reason = _safe_get_nested(
+      candidate, "finishReason"
+  ) or _safe_get_nested(candidate, "finish_reason")
+  return (
+      isinstance(finish_reason, (str, int))
+      and not isinstance(finish_reason, bool)
+      and finish_reason in _MAX_TOKENS_REASONS
+  )
+
+
 def _parse_batch_line(
     line: str, outputs: dict[int, str], cfg: BatchConfig
 ) -> None:
@@ -687,6 +773,14 @@ def _parse_batch_line(
     raise exceptions.InferenceRuntimeError(failure, provider="Gemini")
   if failure:
     logging.warning("Batch API: Ignoring failed item %r: %s", key, failure)
+  if text and _is_max_tokens_finish(resp):
+    logging.warning(
+        "Batch API: Item %r stopped at the output token limit"
+        " (finish_reason=MAX_TOKENS), so its response is likely incomplete and"
+        " may fail to parse. Consider raising max_output_tokens or lowering"
+        " max_char_buffer.",
+        key,
+    )
 
   try:
     # Extract the original index from the key (e.g., "idx-5" -> 5)
@@ -781,6 +875,7 @@ def infer_batch(
     safety_settings: Sequence[Any] | None = None,
     project: str | None = None,
     location: str | None = None,
+    tools: Sequence[Any] | None = None,
 ) -> list[str]:
   """Execute batch inference on multiple prompts using the Vertex AI Batch API.
 
@@ -804,6 +899,7 @@ def infer_batch(
     safety_settings: Optional safety settings sequence.
     project: Google Cloud project ID (optional, overrides client/env).
     location: Vertex AI location (optional, overrides client/env).
+    tools: Optional tools sequence (e.g., google_search).
 
   Returns:
     List of text outputs corresponding 1:1 to input prompts. Missing results
@@ -813,6 +909,7 @@ def infer_batch(
     RuntimeError: If batch job fails or individual items have errors
         (when cfg.ignore_item_errors is False).
     TimeoutError: If batch job doesn't complete within cfg.timeout seconds.
+    InferenceConfigError: If a tool cannot be sent through Vertex AI batch.
   """
   if not prompts:
     return []
@@ -830,10 +927,11 @@ def infer_batch(
       std_logging.WARNING
   )
   std_logging.getLogger("urllib3.connectionpool").setLevel(std_logging.WARNING)
-  std_logging.getLogger("httpx").setLevel(std_logging.WARNING)
-  std_logging.getLogger("httpcore").setLevel(std_logging.WARNING)
-  # Force disable httpx propagation or handlers if level setting fails
-  std_logging.getLogger("httpx").disabled = True
+  for logger_name in _HTTP_TRANSPORT_LOGGER_NAMES:
+    std_logging.getLogger(logger_name).setLevel(std_logging.WARNING)
+  # Force disable httpx/httpx2 propagation or handlers if level setting fails
+  for logger_name in _HTTPX_LOGGER_NAMES:
+    std_logging.getLogger(logger_name).disabled = True
 
   logging.info("Batch API: Processing %d prompts", len(prompts))
 
@@ -863,6 +961,7 @@ def infer_batch(
           "system_instruction": system_instruction,
           "gen_config": gen_config,
           "safety_settings": safety_settings,
+          "tools": tools,
           "schema": schema_config,
       })
 
@@ -898,7 +997,12 @@ def infer_batch(
     batch_prompts = [p for _, p in batch_items]
     requests = [
         _build_request(
-            p, schema_config, gen_config, system_instruction, safety_settings
+            p,
+            schema_config,
+            gen_config,
+            system_instruction,
+            safety_settings,
+            tools,
         )
         for p in batch_prompts
     ]
@@ -957,6 +1061,7 @@ def infer_batch(
           "system_instruction": system_instruction,
           "gen_config": gen_config,
           "safety_settings": safety_settings,
+          "tools": tools,
           "schema": schema_config,
       }
       upload_list.append((key_data, text))

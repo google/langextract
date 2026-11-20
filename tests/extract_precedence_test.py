@@ -12,17 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for parameter precedence in extract()."""
-
 from unittest import mock
+import warnings
 
 from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import factory
 import langextract as lx
+from langextract.core import base_model
 from langextract.core import data
 from langextract.providers import openai
+
+
+def _mock_language_model(
+    requires_fence_output: bool = True,
+) -> mock.NonCallableMagicMock:
+  """Returns a mock that follows the BaseLanguageModel interface."""
+  model = mock.create_autospec(base_model.BaseLanguageModel, instance=True)
+  model.requires_fence_output = requires_fence_output
+  # Autospec makes `schema.from_output_schema` a truthy mock, so extract()
+  # would treat the model as having a preconfigured output schema.
+  model.schema = None
+  return model
 
 
 class ExtractParameterPrecedenceTest(absltest.TestCase):
@@ -43,13 +55,13 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     ]
     self.description = "description"
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_model_overrides_all_other_parameters(
       self, mock_create_model, mock_annotator_cls
   ):
     """Test that model parameter overrides all other model-related parameters."""
-    provided_model = mock.MagicMock()
+    provided_model = _mock_language_model()
     mock_annotator = mock_annotator_cls.return_value
     mock_annotator.annotate_text.return_value = "ok"
 
@@ -72,8 +84,8 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertIs(kwargs["language_model"], provided_model)
     self.assertEqual(result, "ok")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_config_overrides_model_id_and_language_model_type(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -81,14 +93,13 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     config = factory.ModelConfig(
         model_id="config-model", provider_kwargs={"api_key": "config-key"}
     )
-    mock_model = mock.MagicMock()
-    mock_model.requires_fence_output = True
+    mock_model = _mock_language_model()
     mock_create_model.return_value = mock_model
     mock_annotator = mock_annotator_cls.return_value
     mock_annotator.annotate_text.return_value = "ok"
 
     with mock.patch(
-        "langextract.extraction.factory.ModelConfig"
+        "langextract.extraction.factory.ModelConfig", autospec=True
     ) as mock_model_config:
       result = lx.extract(
           text_or_documents="text",
@@ -111,20 +122,21 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertIs(kwargs["language_model"], mock_model)
     self.assertEqual(result, "ok")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_model_id_and_base_kwargs_override_language_model_type(
       self, mock_create_model, mock_annotator_cls
   ):
     """Test that model_id and other kwargs are used when no model or config."""
-    mock_model = mock.MagicMock()
-    mock_model.requires_fence_output = True
+    mock_model = _mock_language_model()
     mock_create_model.return_value = mock_model
     mock_annotator_cls.return_value.annotate_text.return_value = "ok"
-    mock_config = mock.MagicMock()
+    mock_config = mock.create_autospec(factory.ModelConfig, instance=True)
 
     with mock.patch(
-        "langextract.extraction.factory.ModelConfig", return_value=mock_config
+        "langextract.extraction.factory.ModelConfig",
+        autospec=True,
+        return_value=mock_config,
     ) as mock_model_config:
       with self.assertWarns(FutureWarning):
         result = lx.extract(
@@ -150,20 +162,190 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     mock_create_model.assert_called_once()
     self.assertEqual(result, "ok")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_temperature_merges_into_config_provider_kwargs(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that an explicit temperature reaches config.provider_kwargs."""
+    config = factory.ModelConfig(
+        model_id="config-model", provider_kwargs={"api_key": "config-key"}
+    )
+    mock_model = _mock_language_model()
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        config=config,
+        temperature=0.0,
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(
+        called_config.provider_kwargs,
+        {"api_key": "config-key", "temperature": 0.0},
+    )
+    self.assertEqual(called_config.model_id, "config-model")
+    # The caller's config must not be mutated.
+    self.assertEqual(config.provider_kwargs, {"api_key": "config-key"})
+
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_explicit_temperature_overrides_config_provider_kwargs(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that an explicit temperature wins over config.provider_kwargs."""
+    config = factory.ModelConfig(
+        model_id="config-model", provider_kwargs={"temperature": 0.9}
+    )
+    mock_model = _mock_language_model()
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        config=config,
+        temperature=0.0,
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(called_config.provider_kwargs["temperature"], 0.0)
+    self.assertEqual(config.provider_kwargs["temperature"], 0.9)
+
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_config_temperature_preserved_without_explicit_temperature(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that config's temperature survives when extract() gets none."""
+    config = factory.ModelConfig(
+        model_id="config-model", provider_kwargs={"temperature": 0.9}
+    )
+    mock_model = _mock_language_model()
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        config=config,
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(called_config.provider_kwargs["temperature"], 0.9)
+
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_temperature_with_model_emits_warning(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that temperature is reported, not dropped, when model is given."""
+    provided_model = _mock_language_model()
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    with self.assertWarnsRegex(UserWarning, "'temperature' is ignored"):
+      lx.extract(
+          text_or_documents="text",
+          prompt_description=self.description,
+          examples=self.examples,
+          model=provided_model,
+          temperature=0.0,
+          use_schema_constraints=False,
+      )
+
+    mock_create_model.assert_not_called()
+
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  def test_model_without_temperature_emits_no_temperature_warning(
+      self, mock_annotator_cls
+  ):
+    """Test that the model temperature warning needs an explicit value."""
+    provided_model = _mock_language_model()
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    with warnings.catch_warnings(record=True) as caught:
+      warnings.simplefilter("always")
+      lx.extract(
+          text_or_documents="text",
+          prompt_description=self.description,
+          examples=self.examples,
+          model=provided_model,
+          use_schema_constraints=False,
+      )
+
+    self.assertEmpty(
+        [w for w in caught if "'temperature' is ignored" in str(w.message)]
+    )
+
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_explicit_temperature_overrides_language_model_params(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that an explicit temperature wins over language_model_params."""
+    mock_model = _mock_language_model()
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        model_id="gemini-3.5-flash",
+        temperature=0.0,
+        language_model_params={"temperature": 0.9},
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(called_config.provider_kwargs["temperature"], 0.0)
+
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
+  def test_language_model_params_temperature_used_without_explicit_temperature(
+      self, mock_create_model, mock_annotator_cls
+  ):
+    """Test that a temperature in language_model_params applies by default."""
+    mock_model = _mock_language_model()
+    mock_create_model.return_value = mock_model
+    mock_annotator_cls.return_value.annotate_text.return_value = "ok"
+
+    lx.extract(
+        text_or_documents="text",
+        prompt_description=self.description,
+        examples=self.examples,
+        model_id="gemini-3.5-flash",
+        language_model_params={"temperature": 0.9},
+        use_schema_constraints=False,
+    )
+
+    called_config = mock_create_model.call_args[1]["config"]
+    self.assertEqual(called_config.provider_kwargs["temperature"], 0.9)
+
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_language_model_type_only_emits_warning_and_works(
       self, mock_create_model, mock_annotator_cls
   ):
     """Test that language_model_type emits deprecation warning but still works."""
-    mock_model = mock.MagicMock()
-    mock_model.requires_fence_output = True
+    mock_model = _mock_language_model()
     mock_create_model.return_value = mock_model
     mock_annotator_cls.return_value.annotate_text.return_value = "ok"
-    mock_config = mock.MagicMock()
+    mock_config = mock.create_autospec(factory.ModelConfig, instance=True)
 
     with mock.patch(
-        "langextract.extraction.factory.ModelConfig", return_value=mock_config
+        "langextract.extraction.factory.ModelConfig",
+        autospec=True,
+        return_value=mock_config,
     ) as mock_model_config:
       with self.assertWarns(FutureWarning):
         result = lx.extract(
@@ -180,20 +362,21 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     mock_create_model.assert_called_once()
     self.assertEqual(result, "ok")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_language_model_params_forward_retry_knobs(
       self, mock_create_model, mock_annotator_cls
   ):
     """Test that provider-specific retry knobs flow through language_model_params."""
-    mock_model = mock.MagicMock()
-    mock_model.requires_fence_output = True
+    mock_model = _mock_language_model()
     mock_create_model.return_value = mock_model
     mock_annotator_cls.return_value.annotate_text.return_value = "ok"
-    mock_config = mock.MagicMock()
+    mock_config = mock.create_autospec(factory.ModelConfig, instance=True)
 
     with mock.patch(
-        "langextract.extraction.factory.ModelConfig", return_value=mock_config
+        "langextract.extraction.factory.ModelConfig",
+        autospec=True,
+        return_value=mock_config,
     ) as mock_model_config:
       result = lx.extract(
           text_or_documents="text",
@@ -219,8 +402,8 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     mock_create_model.assert_called_once()
     self.assertEqual(result, "ok")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_use_schema_constraints_warns_with_config(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -229,8 +412,7 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
         model_id="gemini-3.5-flash", provider_kwargs={"api_key": "test-key"}
     )
 
-    mock_model = mock.MagicMock()
-    mock_model.requires_fence_output = True
+    mock_model = _mock_language_model()
     mock_create_model.return_value = mock_model
     mock_annotator = mock_annotator_cls.return_value
     mock_annotator.annotate_text.return_value = "ok"
@@ -251,13 +433,13 @@ class ExtractParameterPrecedenceTest(absltest.TestCase):
     self.assertEqual(called_config.model_id, "gemini-3.5-flash")
     self.assertEqual(result, "ok")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_use_schema_constraints_warns_with_model(
       self, mock_create_model, mock_annotator_cls
   ):
     """Test that use_schema_constraints emits warning when used with model."""
-    provided_model = mock.MagicMock()
+    provided_model = _mock_language_model()
     mock_annotator = mock_annotator_cls.return_value
     mock_annotator.annotate_text.return_value = "ok"
 
@@ -296,8 +478,7 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
 
   def _setup_mocks(self, mock_create_model, mock_annotator_cls):
     """Wire the patched create_model and Annotator for a single test."""
-    mock_model = mock.MagicMock()
-    mock_model.requires_fence_output = False
+    mock_model = _mock_language_model(requires_fence_output=False)
     mock_create_model.return_value = mock_model
     mock_annotator = mock_annotator_cls.return_value
     mock_annotator.annotate_documents.return_value = iter([])
@@ -332,8 +513,8 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
           expected=[""],
       ),
   )
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_additional_context_propagated_to_passed_documents(
       self,
       mock_create_model,
@@ -365,8 +546,8 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
     actual = [doc.additional_context for doc in passed_docs]
     self.assertEqual(actual, expected)
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_no_additional_context_leaves_documents_unchanged(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -397,8 +578,8 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
       self.assertIs(passed, original)
       self.assertIsNone(passed.additional_context)
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_document_ids_preserved_when_applying_global_context(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -427,8 +608,8 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
     self.assertEqual(passed_docs[0].document_id, "custom-id-1")
     self.assertEqual(passed_docs[1].document_id, "custom-id-2")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_auto_generated_document_ids_preserved_with_global_context(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -457,8 +638,8 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
     self.assertEqual(passed_docs[0].document_id, docs[0].document_id)
     self.assertEqual(passed_docs[1].document_id, docs[1].document_id)
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_generator_input_works_with_additional_context(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -486,8 +667,8 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
     for doc in passed_docs:
       self.assertEqual(doc.additional_context, "global context")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_caller_documents_keep_context_and_token_cache(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -517,8 +698,8 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
       self.assertIsNone(original.additional_context)
       self.assertIsNone(original._tokenized_text)
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_pre_tokenized_text_preserved_when_applying_global_context(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -549,8 +730,8 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
     self.assertIs(passed_docs[0].tokenized_text, pre_tokenized)
     self.assertEqual(passed_docs[0].additional_context, "global ctx")
 
-  @mock.patch("langextract.annotation.Annotator")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_string_and_document_paths_apply_additional_context_identically(
       self, mock_create_model, mock_annotator_cls
   ):
@@ -566,7 +747,9 @@ class ExtractAdditionalContextTest(parameterized.TestCase):
     mock_model, mock_annotator = self._setup_mocks(
         mock_create_model, mock_annotator_cls
     )
-    mock_annotator.annotate_text.return_value = mock.MagicMock()
+    mock_annotator.annotate_text.return_value = mock.create_autospec(
+        data.AnnotatedDocument, instance=True
+    )
 
     lx.extract(
         text_or_documents=text,

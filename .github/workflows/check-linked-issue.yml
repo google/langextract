@@ -1,13 +1,21 @@
 name: Require linked issue with community support
 
+# Requires pull requests from non-maintainers to link an issue with community
+# support, and comments when the link is missing.
+#
+# Why pull_request_target: the check must run main's copy of this file, so a
+# pull request cannot edit the check that guards it, and it needs write access
+# to comment on pull requests from forks.
+#
+# How it stays safe: it never checks out, installs, or runs pull request code.
+# The title and description are read from the event payload inside the script,
+# never interpolated into shell commands or script source.
 on:
-  pull_request_target:
+  pull_request_target:  # zizmor: ignore[dangerous-triggers] see header.
     types: [opened, edited, synchronize, reopened, ready_for_review]
+    branches: [main]
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -17,10 +25,14 @@ jobs:
   enforce:
     if: github.event_name == 'pull_request_target' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
 
     steps:
       - name: Check linked issue and community support
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

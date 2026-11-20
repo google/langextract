@@ -30,18 +30,20 @@ import uuid
 import dotenv
 import google.auth
 import google.auth.exceptions
+from google.genai import types as genai_types
 import google.genai.errors
 import pytest
 
 import langextract as lx
 from langextract.core import tokenizer as tokenizer_lib
+from langextract.providers import gemini
 from langextract.providers import gemini_batch as gb
 from langextract.providers import openai_batch
 
 dotenv.load_dotenv(override=True)
 
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
-DEFAULT_OPENAI_MODEL = "gpt-4o"
+DEFAULT_OPENAI_MODEL = "gpt-6-luna"
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get(
     "LANGEXTRACT_API_KEY"
@@ -55,6 +57,7 @@ VERTEX_PROJECT = os.environ.get("VERTEX_PROJECT") or os.environ.get(
     "GOOGLE_CLOUD_PROJECT"
 )
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us")
+VERTEX_TEST_MODEL = os.environ.get("VERTEX_TEST_MODEL", DEFAULT_GEMINI_MODEL)
 
 
 def has_vertex_ai_credentials():
@@ -104,6 +107,8 @@ GEMINI_MODEL_PARAMS = {
 }
 
 OPENAI_MODEL_PARAMS = {
+    # Reasoning off: cheaper, faster, and gpt-6-luna then accepts temperature.
+    "reasoning_effort": "none",
     "temperature": 0.0,
 }
 
@@ -513,7 +518,9 @@ class TestLiveAPIGemini(unittest.TestCase):
   @skip_if_no_vertex
   @live_api
   @pytest.mark.vertex_ai
-  @mock.patch.object(gb, "infer_batch", wraps=gb.infer_batch, autospec=True)
+  @mock.patch.object(
+      gb, "infer_batch", side_effect=gb.infer_batch, autospec=True
+  )
   def test_batch_extraction_vertex_gcs(self, mock_infer_batch):
     """Extract grounded results through a real schema-constrained batch job."""
 
@@ -570,7 +577,7 @@ class TestLiveAPIGemini(unittest.TestCase):
         text_or_documents=documents,
         prompt_description=prompt,
         examples=examples,
-        model_id=DEFAULT_GEMINI_MODEL,
+        model_id=VERTEX_TEST_MODEL,
         language_model_params=language_model_params,
     )
 
@@ -622,7 +629,9 @@ class TestLiveAPIGemini(unittest.TestCase):
   @skip_if_no_vertex
   @live_api
   @pytest.mark.vertex_ai
-  @mock.patch.object(gb, "_submit_file", wraps=gb._submit_file, autospec=True)
+  @mock.patch.object(
+      gb, "_submit_file", side_effect=gb._submit_file, autospec=True
+  )
   def test_batch_caching_live(self, mock_submit):
     """A second extraction reuses GCS results without submitting another job."""
     prompt = "Extract the medication: Patient takes 10mg Lisinopril."
@@ -656,7 +665,7 @@ class TestLiveAPIGemini(unittest.TestCase):
             text_or_documents=documents,
             prompt_description=prompt,
             examples=examples,
-            model_id=DEFAULT_GEMINI_MODEL,
+            model_id=VERTEX_TEST_MODEL,
             language_model_params=language_model_params,
         )
     )
@@ -672,7 +681,7 @@ class TestLiveAPIGemini(unittest.TestCase):
             text_or_documents=documents,
             prompt_description=prompt,
             examples=examples,
-            model_id=DEFAULT_GEMINI_MODEL,
+            model_id=VERTEX_TEST_MODEL,
             language_model_params=language_model_params,
         )
     )
@@ -687,6 +696,49 @@ class TestLiveAPIGemini(unittest.TestCase):
       self.assertIn("10mg", extract_by_class(first_result, _CLASS_DOSAGE))
       self.assertEqual(first_result.extractions, cached_result.extractions)
       assert_valid_char_intervals(self, cached_result)
+
+  @skip_if_no_vertex
+  @live_api
+  @pytest.mark.vertex_ai
+  def test_batch_tools_thinking_and_cache_live(self):
+    """Submit typed tools/thinking config and replay without another job."""
+    prompt = (
+        "What is the capital of France? Reply with a short sentence. "
+        f"Request identifier: {uuid.uuid4().hex}."
+    )
+    model = gemini.GeminiLanguageModel(
+        model_id=VERTEX_TEST_MODEL,
+        vertexai=True,
+        project=VERTEX_PROJECT,
+        location=VERTEX_LOCATION,
+        thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+        tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+        max_output_tokens=128,
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "poll_interval": 10,
+            "timeout": 900,
+            "enable_caching": True,
+            "retention_days": None,
+        },
+    )
+    with mock.patch.object(
+        gb, "_submit_file", side_effect=gb._submit_file, autospec=True
+    ) as submit:
+      results = list(model.infer([prompt]))
+      submit.assert_called_once()
+    self.assertEqual(len(results), 1)
+    self.assertIn("Paris", results[0][0].output)
+    with mock.patch.object(
+        gb,
+        "_submit_file",
+        autospec=True,
+        side_effect=AssertionError("Cache replay must not submit another job"),
+    ) as submit:
+      cached = list(model.infer([prompt]))
+      submit.assert_not_called()
+    self.assertEqual(cached, results)
 
 
 class TestCrossChunkContext(unittest.TestCase):
@@ -806,7 +858,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         text_or_documents=documents,
         prompt_description=prompt,
         examples=examples,
-        model_id="gpt-4o-mini",
+        model_id=DEFAULT_OPENAI_MODEL,
         api_key=OPENAI_API_KEY,
         use_schema_constraints=False,
         language_model_params=language_model_params,
@@ -927,7 +979,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         text_or_documents=input_text,
         prompt_description=prompt,
         examples=examples,
-        model_id="gpt-4o-mini",
+        model_id=DEFAULT_OPENAI_MODEL,
         api_key=OPENAI_API_KEY,
         use_schema_constraints=True,
         fence_output=False,
@@ -980,6 +1032,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
         provider="OpenAILanguageModel",  # Explicit provider selection
         provider_kwargs={
             "api_key": OPENAI_API_KEY,
+            "reasoning_effort": "none",
             "temperature": 0.0,
         },
     )
@@ -1074,7 +1127,7 @@ class TestLiveAPIOpenAI(unittest.TestCase):
     input_text = "Patient took 400 mg PO Ibuprofen q4h for two days."
 
     config = lx.factory.ModelConfig(
-        model_id="o4-mini",
+        model_id="gpt-5.6-terra",
         provider="OpenAILanguageModel",
         provider_kwargs={
             "api_key": OPENAI_API_KEY,

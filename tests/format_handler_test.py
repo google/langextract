@@ -305,6 +305,70 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
     self.assertLen(parsed, 1)
     self.assertEqual(parsed[0]["person"], "John Smith")
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="yaml_string",
+          format_input="yaml",
+          expected_format=data.FormatType.YAML,
+          sample_output="```yaml\nextractions:\n  - person: Alice\n```",
+      ),
+      dict(
+          testcase_name="yaml_uppercase_string",
+          format_input="YAML",
+          expected_format=data.FormatType.YAML,
+          sample_output="```yaml\nextractions:\n  - person: Alice\n```",
+      ),
+      dict(
+          testcase_name="json_string",
+          format_input="json",
+          expected_format=data.FormatType.JSON,
+          sample_output='```json\n{"extractions": [{"person": "Alice"}]}\n```',
+      ),
+      dict(
+          testcase_name="yaml_enum",
+          format_input=data.FormatType.YAML,
+          expected_format=data.FormatType.YAML,
+          sample_output="```yaml\nextractions:\n  - person: Alice\n```",
+      ),
+      dict(
+          testcase_name="json_enum",
+          format_input=data.FormatType.JSON,
+          expected_format=data.FormatType.JSON,
+          sample_output='```json\n{"extractions": [{"person": "Alice"}]}\n```',
+      ),
+  )
+  def test_format_type_normalization_in_init_and_resolver_params(
+      self, format_input, expected_format, sample_output
+  ):
+    """Ensure string and enum format_type values normalize to FormatType."""
+    direct_handler = format_handler.FormatHandler(format_type=format_input)
+    self.assertEqual(direct_handler.format_type, expected_format)
+
+    handler, remaining = format_handler.FormatHandler.from_resolver_params(
+        resolver_params={"format_type": format_input},
+        base_format_type=data.FormatType.JSON,
+        base_use_fences=True,
+        warn_on_legacy=False,
+    )
+    self.assertEmpty(remaining)
+    self.assertEqual(handler.format_type, expected_format)
+
+    formatted = handler.format_extraction_example(
+        [data.Extraction(extraction_class="person", extraction_text="Alice")]
+    )
+    self.assertIn(f"```{expected_format.value}", formatted)
+
+    parsed = handler.parse_output(sample_output)
+    self.assertLen(parsed, 1)
+    self.assertEqual(parsed[0]["person"], "Alice")
+
+  def test_invalid_format_type_raises(self):
+    """Unknown format strings raise ValueError and non-strings raise TypeError."""
+    with self.assertRaises(ValueError):
+      format_handler.FormatHandler(format_type="xml")
+    with self.assertRaises(TypeError):
+      format_handler.FormatHandler(format_type=123)  # type: ignore[arg-type]
+
 
 if __name__ == "__main__":
   absltest.main()

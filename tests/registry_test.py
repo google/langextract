@@ -158,6 +158,14 @@ class RegistryTest(absltest.TestCase):
         resolved = router.resolve(model_id)
         self.assertIs(resolved, openai.OpenAILanguageModel)
 
+  def test_openai_patterns_cover_gpt6_models(self):
+    providers_module.load_builtins_once()
+
+    for model_id in ("gpt-6-luna", "gpt-6.1-sol"):
+      with self.subTest(model_id=model_id):
+        resolved = router.resolve(model_id)
+        self.assertIs(resolved, openai.OpenAILanguageModel)
+
   def test_openai_patterns_do_not_capture_unrelated_o_prefix(self):
     providers_module.load_builtins_once()
 

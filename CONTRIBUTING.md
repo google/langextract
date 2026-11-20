@@ -105,6 +105,51 @@ For full testing across Python versions:
 tox  # runs pylint + pytest on Python 3.10 and 3.11
 ```
 
+#### Maintainer live API tests for fork pull requests
+
+After ordinary PR checks pass, a maintainer can run live API tests for a
+reviewed fork commit by dispatching CI from `main`. The `ready-to-merge`
+label does not start these tests. Using `main` lets the run satisfy the
+`live-keys` environment's protected-branch policy.
+
+Find and review the current PR head:
+
+```bash
+gh pr view <PR_NUMBER> --repo google/langextract --json headRefOid --jq .headRefOid
+```
+
+Dispatch with that exact full SHA:
+
+```bash
+gh workflow run ci.yaml --repo google/langextract --ref main \
+  -f pr_number="<PR_NUMBER>" \
+  -f pr_head_sha="<REVIEWED_40_CHARACTER_SHA>"
+```
+
+Both inputs are required for fork tests. Use the PR number without padding and
+the full lowercase SHA. Invalid or incomplete requests fail before environment
+approval. Verify that the run is a `workflow_dispatch` from `main`, then confirm
+the PR and SHA in its title before approving `live-keys` in GitHub Actions.
+The title alone is not evidence of a trusted run. The protected job checks the `admin`
+or `maintain` role, validates the inputs again, and rejects a closed PR,
+a non-fork PR, a target other than `main`, or a head that has moved. It fetches
+and verifies the pinned commit before merging it into `main` for testing.
+
+Inspect the `test-fork-pr` job summary for the tested SHA and execution status,
+then check the logs for passed and skipped test counts. A run may skip live tests
+if API keys are unavailable; the summary reports that explicitly. The job uses a
+read-only GitHub token and does not post success comments on the PR. Results
+belong to the manual run and may not appear in the PR's checks list. Keep the run
+link as review evidence and merge only if the PR still has the tested head SHA.
+
+Approval trusts the entire selected commit, including build files, test
+configuration, and dependencies, to execute with the live API keys. Review that
+exact commit before dispatching; SHA verification prevents a later code swap,
+but does not sandbox the approved code.
+
+Fork dispatches do not rerun the unit-test matrix on unchanged `main` or cancel
+ordinary PR CI. Dispatching without either input still runs the unit matrix.
+
 ### 5. Adding Custom Model Providers
 
 If you want to add support for a new LLM provider, please refer to the [Provider System Documentation](langextract/providers/README.md). The recommended approach is to create an external plugin package rather than modifying the core library. This allows for:

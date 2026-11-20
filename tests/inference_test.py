@@ -21,10 +21,14 @@ pylint warnings are expected for test fixtures.
 
 # pylint: disable=attribute-defined-outside-init
 
+import os
 from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
+import openai as openai_sdk
+from openai.resources import chat as chat_resources
+from openai.types import chat
 
 from langextract import exceptions
 from langextract.core import base_model
@@ -608,6 +612,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
         tools=["tool1", "tool2"],
         stop_sequences=["\n\n"],
         system_instruction="Be helpful",
+        thinking_config={"thinking_level": "minimal"},
         # Unknown parameters to test filtering
         unknown_param="should_be_ignored",
         another_unknown="also_ignored",
@@ -617,6 +622,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
         "tools": ["tool1", "tool2"],
         "stop_sequences": ["\n\n"],
         "system_instruction": "Be helpful",
+        "thinking_config": {"thinking_level": "minimal"},
     }
     self.assertEqual(
         expected_extra_kwargs,
@@ -631,7 +637,12 @@ class TestGeminiLanguageModel(absltest.TestCase):
     call_args = mock_client.models.generate_content.call_args
     config = call_args.kwargs["config"]
 
-    for key in ["tools", "stop_sequences", "system_instruction"]:
+    for key in [
+        "tools",
+        "stop_sequences",
+        "system_instruction",
+        "thinking_config",
+    ]:
       self.assertIn(key, config, f"Expected {key} to be in API config")
       self.assertEqual(
           expected_extra_kwargs[key],
@@ -750,6 +761,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
             prompts,
             candidate_count=2,
             safety_settings={"HARM_CATEGORY_DANGEROUS": "BLOCK_NONE"},
+            thinking_config={"thinking_level": "minimal"},
             unknown_runtime_param="ignored",
         )
     )
@@ -766,6 +778,11 @@ class TestGeminiLanguageModel(absltest.TestCase):
         {"HARM_CATEGORY_DANGEROUS": "BLOCK_NONE"},
         config.get("safety_settings"),
         "safety_settings should be passed through to API",
+    )
+    self.assertEqual(
+        {"thinking_level": "minimal"},
+        config.get("thinking_config"),
+        "thinking_config should be passed through to API",
     )
     self.assertNotIn(
         "unknown_runtime_param", config, "Unknown kwargs should be filtered out"
@@ -904,6 +921,136 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
         [types.ScoredOutput(score=1.0, output='{"name": "John", "age": 30}')]
     ]
     self.assertEqual(results, expected_results)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="openai_api",
+          base_url=None,
+          env={},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="custom_base_url",
+          base_url="http://127.0.0.1:9001/v1",
+          env={},
+          expected_param="max_tokens",
+          omitted_param="max_completion_tokens",
+      ),
+      dict(
+          testcase_name="openai_base_url_env",
+          base_url=None,
+          env={"OPENAI_BASE_URL": "http://127.0.0.1:9001/v1"},
+          expected_param="max_tokens",
+          omitted_param="max_completion_tokens",
+      ),
+      dict(
+          testcase_name="explicit_base_url_overrides_env",
+          base_url="https://api.openai.com/v1",
+          env={"OPENAI_BASE_URL": "http://127.0.0.1:9001/v1"},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="explicit_openai_base_url",
+          base_url="https://api.openai.com/v1",
+          env={},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="regional_openai_base_url",
+          base_url="https://eu.api.openai.com/v1",
+          env={},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="uppercase_openai_host_with_port",
+          base_url="https://API.OpenAI.com:443/v1/",
+          env={},
+          expected_param="max_completion_tokens",
+          omitted_param="max_tokens",
+      ),
+      dict(
+          testcase_name="lookalike_openai_host",
+          base_url="https://api.openai.com.example.com/v1",
+          env={},
+          expected_param="max_tokens",
+          omitted_param="max_completion_tokens",
+      ),
+  )
+  @mock.patch.object(openai_sdk, "OpenAI", autospec=True)
+  def test_max_output_tokens_request_parameter(
+      self, mock_openai_class, base_url, env, expected_param, omitted_param
+  ):
+    self.enter_context(mock.patch.dict(os.environ, env, clear=True))
+    client = mock_openai_class.return_value
+    client.chat = chat_resources.Chat(client)
+    mock_create = self.enter_context(
+        mock.patch.object(chat_resources.Completions, "create", autospec=True)
+    )
+    mock_create.return_value = chat.ChatCompletion(
+        id="test",
+        created=0,
+        model="gpt-6-luna",
+        object="chat.completion",
+        choices=[{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": '{"result": "ok"}'},
+        }],
+    )
+    model = openai.OpenAILanguageModel(
+        model_id="gpt-6-luna", api_key="test-key", base_url=base_url
+    )
+
+    list(model.infer(["test prompt"], max_output_tokens=256))
+
+    request = mock_create.call_args.kwargs
+    self.assertEqual(request[expected_param], 256)
+    self.assertNotIn(omitted_param, request)
+
+  def test_truncated_output_warns_on_length_finish_reason(self):
+    truncated_json = '{"extractions": [{"na'
+    response = chat.ChatCompletion(
+        id="test",
+        created=0,
+        model="gpt-4o-mini",
+        object="chat.completion",
+        choices=[{
+            "index": 0,
+            "finish_reason": "length",
+            "message": {"role": "assistant", "content": truncated_json},
+        }],
+    )
+
+    with self.assertLogs(level="WARNING") as logs:
+      output = openai.OpenAILanguageModel._response_to_scored_output(response)
+
+    self.assertEqual(output.output, truncated_json)
+    self.assertLen(logs.output, 1)
+    self.assertIn("finish_reason=length", logs.output[0])
+    self.assertIn("max_output_tokens", logs.output[0])
+
+  def test_complete_output_does_not_warn_on_stop_finish_reason(self):
+    complete_json = '{"extractions": []}'
+    response = chat.ChatCompletion(
+        id="test",
+        created=0,
+        model="gpt-4o-mini",
+        object="chat.completion",
+        choices=[{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": complete_json},
+        }],
+    )
+
+    with self.assertNoLogs(level="WARNING"):
+      output = openai.OpenAILanguageModel._response_to_scored_output(response)
+
+    self.assertEqual(output.output, complete_json)
 
 
 class TestOpenAILanguageModel(absltest.TestCase):

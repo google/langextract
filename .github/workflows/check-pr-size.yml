@@ -1,8 +1,19 @@
 name: Check PR size
 
+# Labels pull requests by size and fails pull requests from non-maintainers
+# that change more than 1000 lines. Drafts and bot pull requests are skipped.
+#
+# Why pull_request_target: adding and removing labels on pull requests from
+# forks needs write access, which pull_request does not grant to forks. The
+# workflow_dispatch trigger lets a maintainer re-label and re-check one pull
+# request.
+#
+# How it stays safe: it never checks out, installs, or runs pull request code.
+# It reads pull request metadata through the API only.
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
+  pull_request_target:  # zizmor: ignore[dangerous-triggers] see header.
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -10,10 +21,7 @@ on:
         required: false
         type: string
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -22,24 +30,34 @@ concurrency:
 jobs:
   size:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     steps:
       - name: Get PR data for manual trigger
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number
         id: get_pr
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           result-encoding: string
           script: |
+            const prNumberInput = context.payload.inputs.pr_number;
+            const prNumber = Number(prNumberInput);
+            if (!/^[1-9]\d*$/.test(prNumberInput) ||
+                !Number.isSafeInteger(prNumber)) {
+              throw new Error('pr_number must be a positive integer.');
+            }
             const { data } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: ${{ github.event.inputs.pr_number }}
+              pull_number: prNumber
             });
             return JSON.stringify(data);
 
       - name: Evaluate PR size
         if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number)
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           PR_JSON: ${{ steps.get_pr.outputs.result }}
         with:

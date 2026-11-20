@@ -1,23 +1,32 @@
 name: Protect Infrastructure Files
 
+# Fails, with an explanatory comment, when a pull request from a non-maintainer
+# changes .github/, build configuration, or repository documentation.
+#
+# Why pull_request_target: the check must run main's copy of this file, so a
+# pull request cannot edit the check that guards it, and it needs write access
+# to comment on pull requests from forks.
+#
+# How it stays safe: it never checks out, installs, or runs pull request code.
+# It reads pull request metadata and the changed-file list through the API.
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-  workflow_dispatch:
+  pull_request_target:  # zizmor: ignore[dangerous-triggers] see header.
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
 
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {}
 
 jobs:
   protect-infrastructure:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Check for infrastructure file changes
-        if: github.event_name == 'pull_request_target'
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -31,11 +40,12 @@ jobs:
 
             const isMaintainer = ['admin', 'maintain'].includes(authorPermission.permission);
 
-            // Get list of files changed in the PR
-            const { data: files } = await github.rest.pulls.listFiles({
+            // Get every file changed in the PR (all pages, not just the first 30)
+            const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number
+              pull_number: context.payload.pull_request.number,
+              per_page: 100
             });
 
             // Check for infrastructure file changes

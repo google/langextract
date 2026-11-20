@@ -337,14 +337,14 @@ class BenchmarkRunner:
 
           html_content = visualize(str(jsonl_path))
           html_path = viz_dir / f"{viz_name}.html"
-          with open(html_path, "w") as f:
+          with open(html_path, "w", encoding="utf-8") as f:
             f.write(getattr(html_content, "data", html_content))
 
     # Remove extraction result objects before saving JSON
     for result in results.get(config.RESULTS_KEY, []):
       result.pop(config.EXTRACTION_RESULT_KEY, None)
 
-    with open(json_path, "w") as f:
+    with open(json_path, "w", encoding="utf-8") as f:
       json.dump(results, f, indent=2, default=str)
     print(f"\nResults saved to: {json_path}")
 

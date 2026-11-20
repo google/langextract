@@ -18,6 +18,7 @@ import dataclasses
 import enum
 import io
 import json
+import logging
 from unittest import mock
 
 from absl.testing import absltest
@@ -659,6 +660,70 @@ class BatchParseItemTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
       dict(
+          testcase_name="camel_case",
+          finish_fields={"finishReason": "MAX_TOKENS"},
+      ),
+      dict(
+          testcase_name="snake_case",
+          finish_fields={"finish_reason": "MAX_TOKENS"},
+      ),
+      dict(
+          testcase_name="numeric",
+          finish_fields={"finishReason": 2},
+      ),
+  )
+  def test_truncated_item_is_kept_and_logged(self, finish_fields):
+    truncated_json = '{"extractions": [{"a'
+    line = {
+        "key": "idx-3",
+        "response": {
+            "candidates": [{
+                "content": {"parts": [{"text": truncated_json}]},
+                **finish_fields,
+            }]
+        },
+    }
+    outputs = {}
+
+    with self.assertLogs(level="WARNING") as logs:
+      gb._parse_batch_line(json.dumps(line), outputs, gb.BatchConfig())
+
+    self.assertDictEqual(outputs, {3: truncated_json})
+    self.assertLen(logs.output, 1)
+    self.assertIn("idx-3", logs.output[0])
+    self.assertIn("MAX_TOKENS", logs.output[0])
+
+  @parameterized.named_parameters(
+      dict(testcase_name="stop", finish_reason="STOP"),
+      dict(testcase_name="bool_rejected", finish_reason=True),
+  )
+  def test_complete_item_is_not_logged(self, finish_reason):
+    complete_json = '{"extractions": []}'
+    line = {
+        "key": "idx-3",
+        "response": {
+            "candidates": [{
+                "content": {"parts": [{"text": complete_json}]},
+                "finishReason": finish_reason,
+            }]
+        },
+    }
+    outputs = {}
+
+    with self.assertNoLogs(level="WARNING"):
+      gb._parse_batch_line(json.dumps(line), outputs, gb.BatchConfig())
+
+    self.assertDictEqual(outputs, {3: complete_json})
+
+  def test_is_max_tokens_finish_accepts_finish_reason_enum(self):
+    resp = {
+        "candidates": [{"finishReason": genai.types.FinishReason.MAX_TOKENS}]
+    }
+
+    self.assertTrue(gb._is_max_tokens_finish(resp))
+
+  @parameterized.named_parameters(
+      dict(
           testcase_name="prompt_camel",
           response={"promptFeedback": {"blockReason": "SAFETY"}},
           diagnostic="block_reason=SAFETY",
@@ -918,6 +983,104 @@ class GCSBatchCachingTest(parameterized.TestCase):
     self.mock_storage_client = self.mock_storage_cls.return_value
     self.mock_bucket = self.mock_storage_client.bucket.return_value
     self.mock_blob = self.mock_bucket.blob.return_value
+
+  @parameterized.named_parameters(
+      dict(testcase_name="cached", enable_caching=True),
+      dict(testcase_name="uncached", enable_caching=False),
+  )
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_typed_config_serializes_to_uploaded_jsonl(
+      self, mock_client_cls, enable_caching
+  ):
+    client = mock_client_cls.return_value
+    client.vertexai = True
+    client.batches.create.return_value = create_mock_batch_job()
+    client.batches.get.return_value = create_mock_batch_job()
+    self.mock_storage_client.create_bucket.return_value = self.mock_bucket
+    self.mock_blob.download_as_text.side_effect = exceptions.NotFound("miss")
+    output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+    output_blob.name = "output.jsonl"
+    output_blob.open.return_value.__enter__.return_value = io.StringIO(
+        _create_batch_response(0, {"extractions": []})
+    )
+    self.mock_bucket.list_blobs.return_value = [output_blob]
+    uploaded = []
+
+    def capture_upload(filename):
+      with open(filename, encoding="utf-8") as stream:
+        uploaded.extend(json.loads(line) for line in stream)
+
+    self.mock_blob.upload_from_filename.side_effect = capture_upload
+    model = gemini.GeminiLanguageModel(
+        vertexai=True,
+        project="test-project",
+        location="us-central1",
+        thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
+        tools=[genai.types.Tool(google_search=genai.types.GoogleSearch())],
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": enable_caching,
+            "retention_days": None,
+        },
+    )
+
+    results = list(model.infer(["prompt"]))
+
+    self.assertLen(results, 1)
+    self.assertLen(uploaded, 1)
+    request = uploaded[0]["request"]
+    self.assertEqual(
+        request["tools"], [{"googleSearch": {"excludeDomains": []}}]
+    )
+    self.assertNotIn("tools", request["generationConfig"])
+    self.assertEqual(
+        request["generationConfig"]["thinkingConfig"], {"thinkingBudget": 0}
+    )
+
+  def test_cache_hashing_serializes_typed_thinking_config(self):
+    cache = gb.GCSBatchCache("b")
+    typed = {"thinking_config": genai.types.ThinkingConfig(thinking_budget=0)}
+    normalized = {"thinking_config": {"thinkingBudget": 0}}
+
+    self.assertEqual(
+        cache._compute_hash(typed), cache._compute_hash(normalized)
+    )
+    self.assertNotEqual(
+        cache._compute_hash(typed),
+        cache._compute_hash({"thinking_config": {"thinkingBudget": 128}}),
+    )
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_infer_batch_preserves_positional_project_location(self, client_cls):
+    client = client_cls.return_value
+    client.vertexai = True
+    submit = self.enter_context(
+        mock.patch.object(gb, "_submit_file", autospec=True)
+    )
+    self.enter_context(mock.patch.object(gb, "_poll_completion", autospec=True))
+    self.enter_context(
+        mock.patch.object(
+            gb, "_extract_from_file", autospec=True, return_value=["result"]
+        )
+    )
+
+    results = gb.infer_batch(
+        client,
+        "gemini-3.5-flash",
+        ["prompt"],
+        None,
+        {},
+        gb.BatchConfig(enable_caching=False),
+        None,
+        None,
+        "test-project",
+        "us-central1",
+    )
+
+    self.assertEqual(results, ["result"])
+    self.assertEqual(submit.call_args.args[5:], ("test-project", "us-central1"))
+    self.assertNotIn("tools", submit.call_args.args[2][0])
 
   @parameterized.named_parameters(
       dict(
@@ -1308,6 +1471,245 @@ class BatchOutputSchemaRequestTest(absltest.TestCase):
         self.assertEqual(
             generation_config["responseMimeType"], "application/json"
         )
+
+  def test_build_request_places_tools_at_top_level(self):
+    tools = [{"google_search": {}}]
+    request = gb._build_request(
+        "prompt",
+        None,
+        {"temperature": 0.0, "candidate_count": 1},
+        tools=tools,
+    )
+
+    self.assertEqual(
+        request["tools"], [{"google_search": {"exclude_domains": []}}]
+    )
+    self.assertNotIn("tools", request["generationConfig"])
+    self.assertEqual(
+        request["generationConfig"],
+        {"temperature": 0.0, "candidateCount": 1},
+    )
+
+  def test_build_request_lifts_tools_out_of_gen_config(self):
+    tools = [{"google_search": {}}]
+    gen_config = {"tools": tools}
+    request = gb._build_request("prompt", None, gen_config)
+
+    self.assertEqual(
+        request["tools"], [{"google_search": {"exclude_domains": []}}]
+    )
+    self.assertNotIn("generationConfig", request)
+    self.assertEqual(gen_config, {"tools": [{"google_search": {}}]})
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_batch_places_tools_at_top_level_and_forwards_thinking_config(
+      self, mock_client_cls
+  ):
+    """Batch requests place tools at top level and forward thinkingConfig."""
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+
+    with mock.patch.object(gb.storage, "Client", autospec=True) as storage_cls:
+      bucket = storage_cls.return_value.bucket.return_value
+      output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+      output_blob.name = f"output{gb._EXT_JSONL}"
+      output_blob.open.return_value.__enter__.return_value = io.StringIO(
+          _create_batch_response(0, {"extractions": []})
+      )
+      bucket.list_blobs.return_value = [output_blob]
+
+      mock_client.batches.create.return_value = create_mock_batch_job()
+      mock_client.batches.get.return_value = create_mock_batch_job()
+
+      tools = [{"google_search": {}}]
+      thinking_config = {"thinking_level": "minimal"}
+      model = gemini.GeminiLanguageModel(
+          model_id="gemini-3.5-flash",
+          vertexai=True,
+          project="p",
+          location="l",
+          tools=tools,
+          thinking_config=thinking_config,
+          batch={
+              "enabled": True,
+              "threshold": 1,
+              "enable_caching": False,
+              "retention_days": None,
+          },
+      )
+
+      with mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit:
+        mock_submit.return_value = create_mock_batch_job()
+
+        list(model.infer(["test prompt"]))
+
+        request = mock_submit.call_args[0][2][0]
+        self.assertEqual(
+            request["tools"], [{"google_search": {"exclude_domains": []}}]
+        )
+        generation_config = request["generationConfig"]
+        self.assertNotIn("tools", generation_config)
+        self.assertEqual(generation_config["thinkingConfig"], thinking_config)
+
+
+class BatchToolEncodingTest(parameterized.TestCase):
+  """Tests for encoding tools so that Vertex AI batch can import them."""
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="typed",
+          tool=genai.types.Tool(google_search=genai.types.GoogleSearch()),
+          expected={"googleSearch": {"excludeDomains": []}},
+      ),
+      dict(
+          testcase_name="camel_case_dict",
+          tool={"googleSearch": {}},
+          expected={"googleSearch": {"excludeDomains": []}},
+      ),
+      dict(
+          testcase_name="snake_case_dict",
+          tool={"google_search": {}},
+          expected={"google_search": {"exclude_domains": []}},
+      ),
+  )
+  def test_default_google_search_gets_empty_exclusion_list(
+      self, tool, expected
+  ):
+    request = gb._build_request("prompt", None, None, tools=[tool])
+
+    self.assertEqual(request["tools"], [expected])
+
+  def test_configured_google_search_is_unchanged(self):
+    tools = [{"googleSearch": {"excludeDomains": ["example.com"]}}]
+
+    request = gb._build_request("prompt", None, None, tools=tools)
+
+    self.assertEqual(request["tools"], tools)
+
+  def test_caller_tools_are_not_modified(self):
+    tools = [{"google_search": {}}]
+
+    gb._build_request("prompt", None, None, tools=tools)
+
+    self.assertEqual(tools, [{"google_search": {}}])
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="typed_code_execution",
+          tool=genai.types.Tool(code_execution=genai.types.ToolCodeExecution()),
+          path="tools[0].codeExecution",
+      ),
+      dict(
+          testcase_name="url_context_dict",
+          tool={"url_context": {}},
+          path="tools[0].url_context",
+      ),
+  )
+  def test_other_empty_tool_config_is_rejected(self, tool, path):
+    with self.assertRaises(core_exceptions.InferenceConfigError) as raised:
+      gb._build_request("prompt", None, None, tools=[tool])
+
+    self.assertIn(path, str(raised.exception))
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_rejected_tool_fails_before_upload(self, mock_client_cls):
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+
+    with mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit:
+      with self.assertRaises(core_exceptions.InferenceConfigError):
+        gb.infer_batch(
+            mock_client,
+            "gemini-3.5-flash",
+            ["prompt"],
+            None,
+            {},
+            gb.BatchConfig(enable_caching=False),
+            project="p",
+            location="l",
+            tools=[{"code_execution": {}}],
+        )
+
+    mock_submit.assert_not_called()
+
+
+class BatchHttpLoggerSuppressionTest(parameterized.TestCase):
+  """Tests for suppressing verbose HTTP transport loggers during batch runs."""
+
+  def setUp(self):
+    super().setUp()
+    mock_client_cls = self.enter_context(
+        mock.patch.object(genai, "Client", autospec=True)
+    )
+    self.mock_client = mock_client_cls.return_value
+    self.mock_client.vertexai = True
+
+    job = create_mock_batch_job()
+    self.enter_context(
+        mock.patch.object(gb, "_submit_file", autospec=True, return_value=job)
+    )
+    self.enter_context(
+        mock.patch.object(
+            gb, "_poll_completion", autospec=True, return_value=job
+        )
+    )
+    self.enter_context(
+        mock.patch.object(
+            gb, "_extract_from_file", autospec=True, return_value=["{}"]
+        )
+    )
+
+  def _get_clean_logger(self, logger_name: str) -> logging.Logger:
+    logger = logging.getLogger(logger_name)
+    orig_level = logger.level
+    orig_disabled = logger.disabled
+    self.addCleanup(setattr, logger, "disabled", orig_disabled)
+    self.addCleanup(logger.setLevel, orig_level)
+    logger.setLevel(logging.DEBUG)
+    logger.disabled = False
+    return logger
+
+  @parameterized.named_parameters(
+      dict(testcase_name="httpx", logger_name="httpx"),
+      dict(testcase_name="httpx2", logger_name="httpx2"),
+      dict(testcase_name="httpcore", logger_name="httpcore"),
+      dict(testcase_name="httpcore2", logger_name="httpcore2"),
+  )
+  def test_infer_batch_sets_transport_logger_to_warning(self, logger_name: str):
+    logger = self._get_clean_logger(logger_name)
+
+    gb.infer_batch(
+        self.mock_client,
+        "gemini-3.5-flash",
+        ["prompt"],
+        None,
+        {},
+        gb.BatchConfig(enable_caching=False),
+        project="p",
+        location="l",
+    )
+
+    self.assertEqual(logger.level, logging.WARNING)
+
+  @parameterized.named_parameters(
+      dict(testcase_name="httpx", logger_name="httpx"),
+      dict(testcase_name="httpx2", logger_name="httpx2"),
+  )
+  def test_infer_batch_disables_httpx_logger(self, logger_name: str):
+    logger = self._get_clean_logger(logger_name)
+
+    gb.infer_batch(
+        self.mock_client,
+        "gemini-3.5-flash",
+        ["prompt"],
+        None,
+        {},
+        gb.BatchConfig(enable_caching=False),
+        project="p",
+        location="l",
+    )
+
+    self.assertTrue(logger.disabled)
 
 
 if __name__ == "__main__":

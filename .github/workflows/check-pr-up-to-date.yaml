@@ -18,23 +18,25 @@ on:
   pull_request:
     types: [opened, synchronize]
 
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {}
 
 jobs:
   check-up-to-date:
     runs-on: ubuntu-latest
     # Skip for bot PRs
     if: ${{ !contains(github.actor, '[bot]') }}
+    permissions:
+      contents: read
+      pull-requests: write
     concurrency:
       group: check-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 2  # Sufficient for rev-list comparison
+          persist-credentials: false
 
       - name: Check if PR is up-to-date with main
         id: check
@@ -45,7 +47,7 @@ jobs:
           # Check how many commits behind main
           BEHIND=$(git rev-list --count HEAD..origin/main)
 
-          echo "commits_behind=$BEHIND" >> $GITHUB_OUTPUT
+          echo "commits_behind=$BEHIND" >> "$GITHUB_OUTPUT"
 
           if [ "$BEHIND" -gt 0 ]; then
             echo "::warning::PR is $BEHIND commits behind main"
@@ -56,10 +58,12 @@ jobs:
 
       - name: Comment if PR needs update
         if: ${{ steps.check.outputs.commits_behind != '0' }}
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          BEHIND: ${{ steps.check.outputs.commits_behind }}
         with:
           script: |
-            const behind = ${{ steps.check.outputs.commits_behind }};
+            const behind = Number(process.env.BEHIND);
             const COMMENT_COOLDOWN_HOURS = 24;
             const COOLDOWN_MS = COMMENT_COOLDOWN_HOURS * 60 * 60 * 1000;
 

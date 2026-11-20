@@ -85,6 +85,7 @@ class OpenAIRoutingExtractionTest(parameterized.TestCase):
       dict(testcase_name="o3_mini", model_id="o3-mini"),
       dict(testcase_name="o4_mini", model_id="o4-mini"),
       dict(testcase_name="gpt35", model_id="gpt-3.5-turbo"),
+      dict(testcase_name="gpt6_luna", model_id="gpt-6-luna"),
   )
   @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True)
   @mock.patch.object(openai_sdk, "OpenAI", autospec=True)

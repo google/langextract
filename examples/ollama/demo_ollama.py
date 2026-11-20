@@ -442,7 +442,7 @@ def save_results(
 
     try:
       html_content = lx.visualize(str(jsonl_path))
-      with open(html_path, "w") as f:
+      with open(html_path, "w", encoding="utf-8") as f:
         if hasattr(html_content, "data"):
           f.write(html_content.data)
         else:

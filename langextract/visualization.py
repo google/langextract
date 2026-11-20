@@ -175,6 +175,10 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
     .lx-gif-optimized .lx-current-highlight { text-decoration-thickness: 4px; }
     </style>""")
 
+# The output starts with this tag because HTML requires a charset declaration
+# within the first 1024 bytes, and the CSS alone is longer than that.
+_HTML_CHARSET_META = '<meta charset="UTF-8">\n'
+
 
 def _assign_colors(extractions: list[data.Extraction]) -> dict[str, str]:
   """Assigns a background colour to each extraction class.
@@ -414,6 +418,19 @@ def _prepare_extraction_data(
   return extraction_data
 
 
+def _to_script_safe_json(value: object) -> str:
+  """Returns `value` as JSON that is safe to embed in an inline <script>."""
+  # Without these escapes, a string containing '</script>' or '<!--' could end
+  # the script element early or change how the rest of the page is parsed.
+  # The escapes decode back to the original characters.
+  return (
+      json.dumps(value)
+      .replace('<', '\\u003c')
+      .replace('>', '\\u003e')
+      .replace('&', '\\u0026')
+  )
+
+
 def _build_visualization_html(
     text: str,
     extractions: list[data.Extraction],
@@ -446,7 +463,7 @@ def _build_visualization_html(
   )
   legend_html = _build_legend_html(color_map) if show_legend else ''
 
-  js_data = json.dumps(extraction_data)
+  js_data = _to_script_safe_json(extraction_data)
 
   # Prepare pos_info_str safely for pytype for the f-string below
   first_extraction = extractions[0]
@@ -600,7 +617,7 @@ def visualize(
         '<div class="lx-animated-wrapper"><p>No valid extractions to'
         ' animate.</p></div>'
     )
-    full_html = _VISUALIZATION_CSS + empty_html
+    full_html = f'{_HTML_CHARSET_META}{_VISUALIZATION_CSS}{empty_html}'
     if HTML is not None and _is_jupyter():
       return HTML(full_html)
     return full_html
@@ -615,7 +632,7 @@ def visualize(
       show_legend,
   )
 
-  full_html = _VISUALIZATION_CSS + visualization_html
+  full_html = f'{_HTML_CHARSET_META}{_VISUALIZATION_CSS}{visualization_html}'
 
   # Apply GIF optimizations if requested
   if gif_optimized:

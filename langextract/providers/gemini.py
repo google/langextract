@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
+import importlib
 import numbers
 import random
 import re
@@ -48,6 +49,7 @@ _DEFAULT_RETRY_DELAY = 1.0
 _DEFAULT_MAX_RETRY_DELAY = 16.0
 
 _RETRYABLE_API_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_HTTPX_MODULE_NAMES: Final[tuple[str, ...]] = ('httpx', 'httpx2')
 
 # Phrases are narrow on purpose: bare "quota" or "unavailable" can be permanent
 # (denied quota, region out of service); we only match the transient forms.
@@ -101,6 +103,12 @@ _MAX_TOKENS_HINT: Final[str] = (
     ' The output token budget was exhausted before any text was emitted;'
     ' consider raising max_output_tokens (thinking models may consume the'
     ' budget on reasoning before any text is produced).'
+)
+
+_TRUNCATED_OUTPUT_WARNING: Final[str] = (
+    'Gemini stopped at the output token limit (finish_reason=MAX_TOKENS), so'
+    ' the response is likely incomplete and may fail to parse. Consider'
+    ' raising max_output_tokens or lowering max_char_buffer.'
 )
 
 
@@ -175,6 +183,7 @@ _API_CONFIG_KEYS: Final[set[str]] = {
     'tools',
     'stop_sequences',
     'candidate_count',
+    'thinking_config',
 }
 
 
@@ -277,8 +286,9 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       **kwargs: Additional Gemini API parameters. Only allowlisted keys are
         forwarded to the API, including generation settings
         (max_output_tokens, top_p, top_k), response schemas, tools, safety
-        settings, stop sequences, candidate count, and system instructions.
-        See https://ai.google.dev/api/generate-content for details.
+        settings, stop sequences, candidate count, system instructions, and
+        thinking_config. See https://ai.google.dev/api/generate-content for
+        details.
     """
     try:
       # pylint: disable=import-outside-toplevel
@@ -394,23 +404,24 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     except ImportError:
       pass
 
-    # httpx transient subclasses only. LocalProtocolError / UnsupportedProtocol
-    # are client/config bugs and not included.
-    try:
-      import httpx  # pylint: disable=import-outside-toplevel
-
+    # Check both httpx and httpx2: google-genai 3.x uses httpx2 while other
+    # providers (e.g. openai) install httpx in the same environment.
+    # LocalProtocolError / UnsupportedProtocol are client/config bugs.
+    for module_name in _HTTPX_MODULE_NAMES:
+      try:
+        http_mod = importlib.import_module(module_name)
+      except ImportError:
+        continue
       if isinstance(
           error,
           (
-              httpx.TimeoutException,
-              httpx.NetworkError,
-              httpx.RemoteProtocolError,
-              httpx.ProxyError,
+              http_mod.TimeoutException,
+              http_mod.NetworkError,
+              http_mod.RemoteProtocolError,
+              http_mod.ProxyError,
           ),
       ):
         return True
-    except ImportError:
-      pass
 
     # Specifically ConnectionError / TimeoutError. Bare OSError is excluded:
     # it also covers file/permission errors that won't resolve by retrying.
@@ -483,6 +494,14 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     diagnostic = _no_text_diagnostic(response, output_text)
     if diagnostic is not None:
       raise exceptions.InferenceRuntimeError(diagnostic, provider='Gemini')
+    candidates = getattr(response, 'candidates', None)
+    if (
+        output_text
+        and isinstance(candidates, (list, tuple))
+        and candidates
+        and candidates[0].finish_reason == genai_types.FinishReason.MAX_TOKENS
+    ):
+      logging.warning(_TRUNCATED_OUTPUT_WARNING)
     return core_types.ScoredOutput(score=1.0, output=output_text)
 
   def infer(
@@ -538,6 +557,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           # Extract top-level fields that don't belong in generationConfig
           system_instruction = batch_config.pop('system_instruction', None)
           safety_settings = batch_config.pop('safety_settings', None)
+          tools = batch_config.pop('tools', None)
           outputs = gemini_batch.infer_batch(
               client=self._client,
               model_id=self.model_id,
@@ -547,6 +567,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
               cfg=self._batch_cfg,
               system_instruction=system_instruction,
               safety_settings=safety_settings,
+              tools=tools,
               project=self.project,
               location=self.location,
           )

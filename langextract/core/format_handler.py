@@ -46,6 +46,24 @@ _FENCE_RE = re.compile(
 _THINK_TAG_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
 
 
+def _normalize_format_type(
+    format_type: data.FormatType | str | None,
+) -> data.FormatType:
+  """Normalize a FormatType enum, string, or None into a FormatType enum."""
+  if format_type is None:
+    return data.FormatType.JSON
+  if isinstance(format_type, data.FormatType):
+    return format_type
+  if isinstance(format_type, str):
+    return data.FormatType(format_type.strip().lower())
+  if hasattr(format_type, "value") and isinstance(format_type.value, str):
+    return data.FormatType(format_type.value.strip().lower())
+  raise TypeError(
+      "format_type must be a FormatType enum or string ('json', 'yaml'), "
+      f"got {type(format_type).__name__}"
+  )
+
+
 class FormatHandler:
   """Handles all format-specific logic for prompts and parsing.
 
@@ -65,7 +83,7 @@ class FormatHandler:
 
   def __init__(
       self,
-      format_type: data.FormatType = data.FormatType.JSON,
+      format_type: data.FormatType | str | None = data.FormatType.JSON,
       use_wrapper: bool = True,
       wrapper_key: str | None = None,
       use_fences: bool = True,
@@ -76,7 +94,7 @@ class FormatHandler:
     """Initialize format handler.
 
     Args:
-      format_type: Output format type enum.
+      format_type: Output format type enum or string ('json', 'yaml').
       use_wrapper: Whether to wrap extractions in a container dictionary.
         True: {"extractions": [...]}, False: [...]
       wrapper_key: Key name for the container dictionary. When use_wrapper=True:
@@ -90,7 +108,7 @@ class FormatHandler:
       allow_top_level_list: Allow top-level list when not strict and
         wrapper not required.
     """
-    self.format_type = format_type
+    self.format_type = _normalize_format_type(format_type)
     self.use_wrapper = use_wrapper
     if use_wrapper:
       self.wrapper_key = (
@@ -403,8 +421,8 @@ class FormatHandler:
     for legacy_key, fh_key in mapping.items():
       if legacy_key in rp and rp[legacy_key] is not None:
         val = rp.pop(legacy_key)
-        if fh_key == "format_type" and hasattr(val, "value"):
-          val = val.value
+        if fh_key == "format_type":
+          val = _normalize_format_type(val)
         kwargs[fh_key] = val
         used_legacy.append(legacy_key)
 

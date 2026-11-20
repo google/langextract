@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """OpenAI provider for LangExtract."""
+
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
@@ -60,6 +61,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
   api_key: str | None = None
   base_url: str | None = None
   organization: str | None = None
+  default_headers: dict[str, str] | None = None
   openai_schema: schemas.openai.OpenAISchema | None = dataclasses.field(
       default=None, repr=False, compare=False
   )
@@ -123,6 +125,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       api_key: str | None = None,
       base_url: str | None = None,
       organization: str | None = None,
+      default_headers: dict[str, str] | None = None,
       openai_schema: schemas.openai.OpenAISchema | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
       temperature: float | None = None,
@@ -136,6 +139,8 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
       api_key: API key for OpenAI service.
       base_url: Base URL for OpenAI service.
       organization: Optional OpenAI organization ID.
+      default_headers: Optional HTTP headers sent with every request, e.g. for
+        an OpenAI-compatible proxy or gateway.
       openai_schema: Optional schema for structured output.
       format_type: Output format (JSON or YAML).
       temperature: Sampling temperature.
@@ -162,6 +167,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
     self.api_key = api_key
     self.base_url = base_url
     self.organization = organization
+    self.default_headers = dict(default_headers) if default_headers else None
     self.openai_schema = None
     self.format_type = format_type
     self.temperature = temperature
@@ -182,6 +188,7 @@ class OpenAILanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         api_key=self.api_key,
         base_url=self.base_url,
         organization=self.organization,
+        default_headers=self.default_headers,
     )
 
   def _validate_schema_config(self) -> None:

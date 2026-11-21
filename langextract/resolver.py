@@ -1282,6 +1282,40 @@ def _apply_monotonic_exact_matches(
   return matched
 
 
+_ARABIC_NORM_RE = None
+_ARABIC_DIGITS_TRANS = str.maketrans(
+    "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹",
+    "01234567890123456789",
+)
+
+
+def _fold_arabic_token(token: str) -> str:
+  """Fold Arabic diacritics (Tashkeel), Tatweel (Kashida), Alef/Teh-Marbuta/Alef-Maksura, and Eastern Arabic digits."""
+  if token.isascii():
+    return token
+  # Strip Tashkeel (\u064B-\u065F, \u0670, \u06D6-\u06ED) and Tatweel (\u0640)
+  out_chars = []
+  for ch in token.translate(_ARABIC_DIGITS_TRANS):
+    cp = ord(ch)
+    if (
+        0x064B <= cp <= 0x065F
+        or cp == 0x0670
+        or 0x06D6 <= cp <= 0x06ED
+        or 0x0610 <= cp <= 0x061A
+        or cp == 0x0640
+    ):
+      continue
+    if ch in ("أ", "إ", "آ", "ٱ"):
+      ch = "ا"
+    elif ch == "ى":
+      ch = "ي"
+    elif ch == "ة":
+      ch = "ه"
+    out_chars.append(ch)
+  folded = "".join(out_chars)
+  return folded if folded else token
+
+
 def _tokenize_with_lowercase(
     text: str,
     tokenizer_inst: tokenizer_lib.Tokenizer | None = None,
@@ -1289,7 +1323,9 @@ def _tokenize_with_lowercase(
   """Extract and lowercase tokens from the input text into words.
 
   This function utilizes the tokenizer module to tokenize text and yields
-  lowercased words.
+  lowercased words (with Arabic diacritics/Kashida folded so vocalized OCR
+  source text aligns cleanly with unvocalized LLM extractions while keeping
+  1-to-1 token indices).
 
   Args:
     text (str): The text to be tokenized.
@@ -1307,14 +1343,14 @@ def _tokenize_with_lowercase(
     start = token.char_interval.start_pos
     end = token.char_interval.end_pos
     token_str = original_text[start:end]
-    token_str = token_str.lower()
+    token_str = _fold_arabic_token(token_str.lower())
     yield token_str
 
 
 @functools.lru_cache(maxsize=10000)
 def _normalize_token(token: str) -> str:
-  """Lowercases and applies light pluralisation stemming."""
-  token = token.lower()
+  """Lowercases, folds Arabic diacritics/orthography, and applies light pluralisation stemming."""
+  token = _fold_arabic_token(token.lower())
   if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
     token = token[:-1]
   return token

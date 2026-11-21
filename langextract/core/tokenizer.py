@@ -149,7 +149,9 @@ _LETTERS_PATTERN = r"[^\W\d_]+"
 _DIGITS_PATTERN = r"\d+"
 # Group identical symbols (e.g. "!!") but split mixed ones.
 _SYMBOLS_PATTERN = r"([^\w\s]|_)\1*"
-_END_OF_SENTENCE_PATTERN = regex.compile(r"[.?!。！？\u0964\u061F\u06D4][\"'”’»)\]}]*$")
+_END_OF_SENTENCE_PATTERN = regex.compile(
+    r"[.?!。！？\u0964\u061F\u06D4][\"'”’»)\]}]*$"
+)
 
 _TOKEN_PATTERN = regex.compile(
     rf"{_LETTERS_PATTERN}|{_DIGITS_PATTERN}|{_SYMBOLS_PATTERN}"
@@ -159,8 +161,21 @@ _WORD_PATTERN = regex.compile(rf"(?:{_LETTERS_PATTERN}|{_DIGITS_PATTERN})\Z")
 # Abbreviations that do not end sentences.
 # TODO: Evaluate removal for large-context use cases.
 _KNOWN_ABBREVIATIONS = frozenset({
-    "Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "St.",
-    "د.", "أ.", "م.", "أ.د.", "ش.ذ.م.م.", "ش.م.م.", "ص.ب.", "ت.", "س.ت.",
+    "Mr.",
+    "Mrs.",
+    "Ms.",
+    "Dr.",
+    "Prof.",
+    "St.",
+    "د.",
+    "أ.",
+    "م.",
+    "أ.د.",
+    "ش.ذ.م.م.",
+    "ش.م.م.",
+    "ص.ب.",
+    "ت.",
+    "س.ت.",
 })
 _CLOSING_PUNCTUATION = frozenset({'"', "'", "”", "’", "»", ")", "]", "}"})
 

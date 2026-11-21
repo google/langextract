@@ -82,7 +82,7 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
       transition: opacity 0.2s ease-in-out;
       background: #333;
       color: #fff;
-      text-align: left;
+      text-align: start;
       border-radius: 4px;
       padding: 6px 8px;
       position: absolute;
@@ -155,18 +155,18 @@ _VISUALIZATION_CSS = textwrap.dedent("""\
       display: inline-block;
       padding: 2px 4px;
       border-radius: 3px;
-      margin-right: 4px;
+      margin-inline-end: 4px;
       color: #000;
     }
     .lx-attr-key {
       font-weight: 600;
       color: #1565c0;
-      letter-spacing: 0.3px;
+      letter-spacing: normal;
     }
     .lx-attr-value {
       font-weight: 400;
       opacity: 0.85;
-      letter-spacing: 0.2px;
+      letter-spacing: normal;
     }
 
     /* Add optimizations with larger fonts and better readability for GIFs */
@@ -424,10 +424,12 @@ def _to_script_safe_json(value: object) -> str:
   # the script element early or change how the rest of the page is parsed.
   # The escapes decode back to the original characters.
   return (
-      json.dumps(value)
+      json.dumps(value, ensure_ascii=False)
       .replace('<', '\\u003c')
       .replace('>', '\\u003e')
       .replace('&', '\\u0026')
+      .replace('\u2028', '\\u2028')
+      .replace('\u2029', '\\u2029')
   )
 
 
@@ -475,12 +477,12 @@ def _build_visualization_html(
   pos_info_str = f'[{first_extraction.char_interval.start_pos}-{first_extraction.char_interval.end_pos}]'
 
   html_content = textwrap.dedent(f"""
-    <div class="lx-animated-wrapper">
-      <div class="lx-attributes-panel">
+    <div class="lx-animated-wrapper" dir="auto">
+      <div class="lx-attributes-panel" dir="auto">
         {legend_html}
         <div id="attributesContainer"></div>
       </div>
-      <div class="lx-text-window" id="textWindow">
+      <div class="lx-text-window" id="textWindow" dir="auto">
         {highlighted_text}
       </div>
       <div class="lx-controls">

@@ -100,25 +100,14 @@ def available_providers(
     Dictionary mapping provider names to import specifications.
   """
 
-  providers = dict(_discovered())
+  built_in = dict(_OPTIONAL_BUILTINS) if include_optional else {}
+  built_in.update(_BUILTINS)
+  third_party = _discovered()
 
-  if include_optional:
-    if allow_override:
-      # Third-party can override optional built-ins
-      providers.update(_OPTIONAL_BUILTINS)
-    else:
-      # Optional built-ins override third-party
-      providers = {**providers, **_OPTIONAL_BUILTINS}
-
-  # Always add core built-ins with highest precedence (unless allow_override)
+  # Later entries win, so the side that takes precedence is merged last.
   if allow_override:
-    # Third-party and optional can override core built-ins
-    providers.update(_BUILTINS)
-  else:
-    # Core built-ins take precedence over everything
-    providers = {**providers, **_BUILTINS}
-
-  return providers
+    return {**built_in, **third_party}
+  return {**third_party, **built_in}
 
 
 def _load_class(spec: str) -> type[base_model.BaseLanguageModel]:

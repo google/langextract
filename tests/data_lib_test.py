@@ -346,6 +346,24 @@ class AnnotatedDocumentRoundTripTest(parameterized.TestCase):
 
     mock_create_bar.return_value.close.assert_called_once_with()
 
+  def test_load_closes_progress_bar_when_caller_stops_early(self):
+    mock_create_bar = self.enter_context(
+        mock.patch.object(progress, "create_load_progress_bar", autospec=True)
+    )
+    doc = data.AnnotatedDocument(document_id="d1", text="Some text.")
+
+    with tempfile.TemporaryDirectory() as tmp:
+      io.save_annotated_documents(
+          iter([doc, doc]), output_dir=tmp, show_progress=False
+      )
+      documents = io.load_annotated_documents_jsonl(
+          pathlib.Path(tmp) / "data.jsonl", show_progress=False
+      )
+      next(documents)
+      documents.close()
+
+    mock_create_bar.return_value.close.assert_called_once_with()
+
 
 class IsUrlTest(absltest.TestCase):
   """Tests for io.is_url function validation."""

@@ -93,6 +93,12 @@ class TestBaseLanguageModel(absltest.TestCase):
 
 class TestOllamaLanguageModel(absltest.TestCase):
 
+  def test_default_constraint_is_not_shared_between_instances(self):
+    first = ollama.OllamaLanguageModel(model_id="gemma2:2b")
+    second = ollama.OllamaLanguageModel(model_id="gemma2:2b")
+
+    self.assertIsNot(first._constraint, second._constraint)
+
   @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
   def test_ollama_infer(self, mock_ollama_query):
 

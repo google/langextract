@@ -24,6 +24,7 @@ import pathlib
 from typing import Any, Iterator
 from urllib import parse as urlparse
 
+from absl import logging
 import pandas as pd
 import requests
 
@@ -306,7 +307,7 @@ def download_text_from_url(
           for ct in ['text/', 'application/json', 'application/xml']
       ):
         # Try to proceed anyway, but warn
-        print(f"Warning: Content-Type '{content_type}' may not be text-based")
+        logging.warning("Content-Type '%s' may not be text-based", content_type)
 
       # Get content length for progress bar
       total_size = int(response.headers.get('Content-Length', 0))

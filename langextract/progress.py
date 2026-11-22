@@ -31,6 +31,18 @@ RESET = "\033[0m"
 GOOGLE_BLUE = "#4285F4"
 
 
+def _emit(message: str) -> None:
+  """Writes user-facing progress output to stdout.
+
+  This is the only place library code may call print; the bad-builtin lint
+  check rejects it everywhere else.
+
+  Args:
+    message: The line to show to the user.
+  """
+  print(message, flush=True)  # pylint: disable=bad-builtin
+
+
 def create_download_progress_bar(
     total_size: int, url: str, ncols: int = 100, max_url_length: int = 50
 ) -> tqdm.tqdm:
@@ -112,16 +124,15 @@ def print_download_complete(
     word_count: Number of words downloaded.
     filename: Name of the downloaded file.
   """
-  print(
+  _emit(
       f"{GREEN}✓{RESET} Downloaded {BOLD}{char_count:,}{RESET} characters "
-      f"({BOLD}{word_count:,}{RESET} words) from {BLUE}{filename}{RESET}",
-      flush=True,
+      f"({BOLD}{word_count:,}{RESET} words) from {BLUE}{filename}{RESET}"
   )
 
 
 def print_extraction_complete() -> None:
   """Print a generic extraction completion message."""
-  print(f"{GREEN}✓{RESET} Extraction processing complete", flush=True)
+  _emit(f"{GREEN}✓{RESET} Extraction processing complete")
 
 
 def print_extraction_summary(
@@ -140,10 +151,9 @@ def print_extraction_summary(
     chars_processed: Optional number of characters processed.
     num_chunks: Optional number of chunks processed.
   """
-  print(
+  _emit(
       f"{GREEN}✓{RESET} Extracted {BOLD}{num_extractions}{RESET} entities "
-      f"({BOLD}{unique_classes}{RESET} unique types)",
-      flush=True,
+      f"({BOLD}{unique_classes}{RESET} unique types)"
   )
 
   if elapsed_time is not None:
@@ -161,7 +171,7 @@ def print_extraction_summary(
       metrics.append(f"Chunks: {BOLD}{num_chunks}{RESET}")
 
     for metric in metrics:
-      print(f"  {CYAN}•{RESET} {metric}", flush=True)
+      _emit(f"  {CYAN}•{RESET} {metric}")
 
 
 def create_save_progress_bar(
@@ -228,10 +238,9 @@ def print_save_complete(num_docs: int, file_path: str) -> None:
     file_path: Path to the saved file.
   """
   filename = file_path.split("/")[-1]
-  print(
+  _emit(
       f"{GREEN}✓{RESET} Saved {BOLD}{num_docs}{RESET} documents to"
-      f" {GREEN}{filename}{RESET}",
-      flush=True,
+      f" {GREEN}{filename}{RESET}"
   )
 
 
@@ -243,10 +252,9 @@ def print_load_complete(num_docs: int, file_path: str) -> None:
     file_path: Path to the loaded file.
   """
   filename = file_path.split("/")[-1]
-  print(
+  _emit(
       f"{GREEN}✓{RESET} Loaded {BOLD}{num_docs}{RESET} documents from"
-      f" {GREEN}{filename}{RESET}",
-      flush=True,
+      f" {GREEN}{filename}{RESET}"
   )
 
 

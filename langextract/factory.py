@@ -33,6 +33,7 @@ from langextract.core import exceptions
 from langextract.core import output_schema as output_schema_lib
 from langextract.core import schema as core_schema
 from langextract.core import types as core_types
+from langextract.providers import ollama
 from langextract.providers import patterns
 from langextract.providers import router
 
@@ -56,20 +57,32 @@ class ModelConfig:
 
 
 def _kwargs_with_environment_defaults(
-    model_id: str, kwargs: dict[str, typing.Any]
+    model_id: str,
+    kwargs: dict[str, typing.Any],
+    provider_class: type[base_model.BaseLanguageModel] | None = None,
 ) -> dict[str, typing.Any]:
   """Add environment-based defaults to provider kwargs.
 
   Args:
     model_id: The model identifier.
     kwargs: Existing keyword arguments.
+    provider_class: The resolved provider class, when known. Ollama needs no
+      API key, so cloud provider keys are never applied to it.
 
   Returns:
     Updated kwargs with environment defaults.
   """
   resolved = dict(kwargs)
+  targets_ollama = "ollama" in model_id.lower() or (
+      provider_class is not None
+      and issubclass(provider_class, ollama.OllamaLanguageModel)
+  )
 
-  if "api_key" not in resolved and not resolved.get("vertexai", False):
+  if (
+      "api_key" not in resolved
+      and not resolved.get("vertexai", False)
+      and not targets_ollama
+  ):
     model_lower = model_id.lower()
     env_vars_by_model_pattern = {
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
@@ -101,7 +114,11 @@ def _kwargs_with_environment_defaults(
             )
         break
 
-  if "ollama" in model_id.lower() and "base_url" not in resolved:
+  if (
+      targets_ollama
+      and "base_url" not in resolved
+      and "model_url" not in resolved
+  ):
     resolved["base_url"] = os.getenv(
         "OLLAMA_BASE_URL", "http://localhost:11434"
     )
@@ -176,7 +193,9 @@ def create_model(
   model_id = config.model_id
 
   kwargs = _kwargs_with_environment_defaults(
-      model_id or config.provider or "", config.provider_kwargs
+      model_id or config.provider or "",
+      config.provider_kwargs,
+      provider_class=provider_class,
   )
 
   if model_id:
@@ -313,7 +332,7 @@ def _create_model_with_schema(
   # Add environment defaults
   model_id = config.model_id
   kwargs = _kwargs_with_environment_defaults(
-      model_id or config.provider or "", kwargs
+      model_id or config.provider or "", kwargs, provider_class=provider_class
   )
 
   if model_id:

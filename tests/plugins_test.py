@@ -14,6 +14,7 @@
 
 """Tests for provider discovery precedence in langextract.plugins."""
 
+from importlib import metadata
 from unittest import mock
 
 from absl.testing import absltest
@@ -70,6 +71,55 @@ class AvailableProvidersTest(absltest.TestCase):
 
     self.assertEqual(providers["openai"], _THIRD_PARTY_OPENAI_SPEC)
     self.assertEqual(providers["gemini"], _BUILTIN_GEMINI_SPEC)
+
+
+class DiscoveredTest(absltest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    plugins._discovered.cache_clear()
+    self.addCleanup(plugins._discovered.cache_clear)
+    # LangExtract's own entry point is listed first, as it is when its
+    # distribution is scanned before the third-party plugin's.
+    self.enter_context(
+        mock.patch.object(
+            plugins,
+            "_safe_entry_points",
+            autospec=True,
+            return_value=[
+                metadata.EntryPoint(
+                    name="gemini",
+                    value=_BUILTIN_GEMINI_SPEC,
+                    group="langextract.providers",
+                ),
+                metadata.EntryPoint(
+                    name="gemini",
+                    value=_THIRD_PARTY_GEMINI_SPEC,
+                    group="langextract.providers",
+                ),
+                metadata.EntryPoint(
+                    name="openai",
+                    value=_BUILTIN_OPENAI_SPEC,
+                    group="langextract.providers",
+                ),
+            ],
+        )
+    )
+
+  def test_own_entry_points_are_not_reported_as_third_party(self):
+    self.assertEqual(
+        plugins._discovered(), {"gemini": _THIRD_PARTY_GEMINI_SPEC}
+    )
+
+  def test_override_reaches_third_party_listed_after_builtin(self):
+    providers = plugins.available_providers(allow_override=True)
+
+    self.assertEqual(providers["gemini"], _THIRD_PARTY_GEMINI_SPEC)
+
+  def test_excluding_optional_omits_own_optional_entry_point(self):
+    providers = plugins.available_providers(include_optional=False)
+
+    self.assertNotIn("openai", providers)
 
 
 if __name__ == "__main__":

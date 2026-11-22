@@ -66,16 +66,21 @@ def _discovered() -> dict[str, str]:
   Returns:
     Dictionary mapping provider names to import specs.
   """
+  # LangExtract registers its own providers as entry points too. Counting them
+  # as third-party would let them shadow a real third-party entry of the same
+  # name, because the first entry found for a name is the one kept.
+  own_specs = {*_BUILTINS.values(), *_OPTIONAL_BUILTINS.values()}
   discovered: dict[str, str] = {}
   for ep in _safe_entry_points("langextract.providers"):
     # Handle both old and new entry_points API
     if hasattr(ep, "value"):
-
-      discovered.setdefault(ep.name, ep.value)
+      value = ep.value
     else:
       # Legacy API - construct from module and attr
       value = f"{ep.module}:{ep.attr}" if ep.attr else ep.module
-      discovered.setdefault(ep.name, value)
+    if value in own_specs:
+      continue
+    discovered.setdefault(ep.name, value)
 
   if discovered:
     logging.debug(

@@ -16,6 +16,7 @@ import json
 import pathlib
 import tempfile
 from typing import Any
+from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -23,6 +24,7 @@ import numpy as np
 
 from langextract import data_lib
 from langextract import io
+from langextract import progress
 from langextract.core import data
 from langextract.core import tokenizer
 
@@ -329,6 +331,20 @@ class AnnotatedDocumentRoundTripTest(parameterized.TestCase):
 
     self.assertLen(restored, 1)
     self.assertIsNone(restored[0].extractions)
+
+  def test_load_closes_progress_bar_when_a_line_is_malformed(self):
+    mock_create_bar = self.enter_context(
+        mock.patch.object(progress, "create_load_progress_bar", autospec=True)
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+      jsonl_path = pathlib.Path(tmp) / "data.jsonl"
+      jsonl_path.write_text("not json\n", encoding="utf-8")
+
+      with self.assertRaises(json.JSONDecodeError):
+        list(io.load_annotated_documents_jsonl(jsonl_path, show_progress=False))
+
+    mock_create_bar.return_value.close.assert_called_once_with()
 
 
 class IsUrlTest(absltest.TestCase):

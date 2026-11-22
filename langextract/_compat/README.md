@@ -22,7 +22,7 @@ The following imports are deprecated and should be updated:
 - `from langextract.schema import BaseSchema` → `from langextract.core.schema import BaseSchema`
 - `from langextract.schema import Constraint` → `from langextract.core.schema import Constraint`
 - `from langextract.schema import ConstraintType` → `from langextract.core.schema import ConstraintType`
-- `from langextract.schema import EXTRACTIONS_KEY` → `from langextract.core.schema import EXTRACTIONS_KEY`
+- `from langextract.schema import EXTRACTIONS_KEY` → `from langextract.core.data import EXTRACTIONS_KEY`
 - `from langextract.schema import GeminiSchema` → `from langextract.providers.schemas.gemini import GeminiSchema`
 
 ### Exceptions Module

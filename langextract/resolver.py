@@ -112,7 +112,7 @@ class AbstractResolver(abc.ABC):
   def __init__(
       self,
       fence_output: bool = True,
-      constraint: schema.Constraint = schema.Constraint(),
+      constraint: schema.Constraint | None = None,
       format_type: data.FormatType = data.FormatType.JSON,
   ):
     """Initializes the BaseResolver.
@@ -131,7 +131,7 @@ class AbstractResolver(abc.ABC):
       format_type: The format type for the output (JSON or YAML).
     """
     self._fence_output = fence_output
-    self._constraint = constraint
+    self._constraint = constraint or schema.Constraint()
     self._format_type = format_type
 
   @property

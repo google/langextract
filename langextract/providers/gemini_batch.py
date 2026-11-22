@@ -127,7 +127,6 @@ class BatchConfig:
         (self.threshold >= 1, "batch.threshold must be >= 1"),
         (self.poll_interval > 0, "batch.poll_interval must be > 0"),
         (self.timeout > 0, "batch.timeout must be > 0"),
-        (self.timeout > 0, "batch.timeout must be > 0"),
         (self.max_prompts_per_job > 0, "batch.max_prompts_per_job must be > 0"),
     ]
     for is_valid, error_msg in validations:

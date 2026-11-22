@@ -195,7 +195,7 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       base_url: str | None = None,  # Alias for model_url
       format_type: core_types.FormatType | None = None,
       structured_output_format: str | None = None,  # Deprecated
-      constraint: schema.Constraint = schema.Constraint(),
+      constraint: schema.Constraint | None = None,
       timeout: int | None = None,
       **kwargs,
   ) -> None:
@@ -242,7 +242,6 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
     self._model = model_id
     self._model_url = base_url or model_url or _OLLAMA_DEFAULT_MODEL_URL
     self.format_type = format_type
-    self._constraint = constraint
 
     self._api_key = kwargs.pop('api_key', None)
     self._auth_scheme = kwargs.pop('auth_scheme', 'Bearer')

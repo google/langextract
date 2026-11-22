@@ -102,7 +102,7 @@ never-returning-functions=sys.exit
 [BASIC]
 
 # Library code must not write to stdout directly: use absl logging for
-# diagnostics, or progress._emit for user-facing progress output.
+# diagnostics, or the print_* helpers in progress.py for user-facing output.
 bad-functions=print
 
 # Naming style matching correct argument names.

@@ -98,6 +98,27 @@ class IoTest(unittest.TestCase):
     self.assertTrue(tracker.closed)
     self.assertEqual(tracker.updates, [5])
 
+  def test_download_text_from_url_logs_warning_for_non_text_content_type(self):
+    response = mock.MagicMock()
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
+    response.headers = {'Content-Type': 'application/pdf'}
+    response.raise_for_status.return_value = None
+    response.iter_content.return_value = [b'hello']
+
+    with mock.patch.object(
+        requests, 'get', autospec=True, return_value=response
+    ):
+      with self.assertLogs(level='WARNING') as logs:
+        text = io.download_text_from_url(
+            'https://example.com/file.pdf', show_progress=False
+        )
+
+    self.assertEqual(text, 'hello')
+    self.assertIn(
+        "Content-Type 'application/pdf' may not be text-based", logs.output[0]
+    )
+
 
 def _load_csv(csv_text: str, delimiter: str = ',') -> list[data.Document]:
   with tempfile.TemporaryDirectory() as tmpdir:

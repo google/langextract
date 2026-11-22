@@ -383,8 +383,9 @@ helper such as `_response_to_scored_output()` translates usable text into
 `ScoredOutput` and raises a provider-tagged `InferenceRuntimeError` for blocked,
 refused, truncated, or otherwise unusable responses. `infer()` remains the
 public plugin contract; the helper is a convention, not a required base method.
-Providers using this pattern should re-raise `InferenceRuntimeError` before any
-retry or blanket exception handler so the diagnostic is preserved.
+Providers using this pattern should re-raise `InferenceError` (the base of
+`InferenceRuntimeError` and `InferenceConfigError`) before any retry or blanket
+exception handler so the diagnostic keeps its type.
 
 **Pattern Registration Explained:**
 - The `@router.register` decorator patterns (e.g., `r'^mymodel'`, `r'^custom'`) define which model IDs your provider supports

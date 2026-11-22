@@ -921,36 +921,66 @@ class TestGeminiNoTextResponse(_MockClientTest):
     )
 
 
+_BATCH_SETTINGS = {
+    'enabled': True,
+    'threshold': 1,
+    'enable_caching': False,
+    'retention_days': None,
+}
+
+
 class TestGeminiConfigErrorPropagation(_MockClientTest):
   """Config errors raised during inference keep their type."""
 
-  def setUp(self):
-    super().setUp()
-    self.model = _build_model(format_type=data.FormatType.YAML, max_workers=2)
+  def _build_yaml_model_with_schema(self, **overrides):
     # A schema combined with a non-JSON format is rejected at inference time.
-    self.model.gemini_schema = mock.create_autospec(
-        gemini_schemas.GeminiSchema, instance=True
+    return _build_model(
+        format_type=data.FormatType.YAML,
+        gemini_schema=gemini_schemas.GeminiSchema.from_examples([]),
+        **overrides,
     )
 
   def test_single_prompt_raises_config_error(self):
+    model = self._build_yaml_model_with_schema()
+
     with self.assertRaises(exceptions.InferenceConfigError):
-      list(self.model.infer(['prompt']))
+      list(model.infer(['prompt']))
 
     self.mock_client.models.generate_content.assert_not_called()
 
   def test_parallel_prompts_raise_config_error(self):
+    model = self._build_yaml_model_with_schema(max_workers=2)
+
     with self.assertRaises(exceptions.InferenceConfigError):
-      list(self.model.infer(['first prompt', 'second prompt']))
+      list(model.infer(['first prompt', 'second prompt']))
 
     self.mock_client.models.generate_content.assert_not_called()
 
-  def test_batch_mode_raises_config_error(self):
-    self.model._batch_cfg = gemini_batch.BatchConfig(
-        enabled=True, threshold=1, enable_caching=False, retention_days=None
+  def test_batch_mode_raises_config_error_before_submitting(self):
+    model = self._build_yaml_model_with_schema(batch=_BATCH_SETTINGS)
+    mock_infer_batch = self.enter_context(
+        mock.patch.object(gemini_batch, 'infer_batch', autospec=True)
     )
 
     with self.assertRaises(exceptions.InferenceConfigError):
-      list(self.model.infer(['prompt']))
+      list(model.infer(['prompt']))
+
+    mock_infer_batch.assert_not_called()
+
+  def test_batch_mode_keeps_config_error_for_rejected_tool(self):
+    self.mock_client.vertexai = True
+    model = _build_model(
+        api_key=None,
+        vertexai=True,
+        project='test-project',
+        location='us-central1',
+        batch=_BATCH_SETTINGS,
+    )
+
+    with self.assertRaises(exceptions.InferenceConfigError):
+      list(model.infer(['prompt'], tools=[{'code_execution': {}}]))
+
+    self.mock_client.batches.create.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -69,7 +69,7 @@ def _discovered() -> dict[str, str]:
   # LangExtract registers its own providers as entry points too. Counting them
   # as third-party would let them shadow a real third-party entry of the same
   # name, because the first entry found for a name is the one kept.
-  own_specs = {*_BUILTINS.values(), *_OPTIONAL_BUILTINS.values()}
+  own_entries = {*_BUILTINS.items(), *_OPTIONAL_BUILTINS.items()}
   discovered: dict[str, str] = {}
   for ep in _safe_entry_points("langextract.providers"):
     # Handle both old and new entry_points API
@@ -78,7 +78,7 @@ def _discovered() -> dict[str, str]:
     else:
       # Legacy API - construct from module and attr
       value = f"{ep.module}:{ep.attr}" if ep.attr else ep.module
-    if value in own_specs:
+    if (ep.name, value) in own_entries:
       continue
     discovered.setdefault(ep.name, value)
 
@@ -99,7 +99,9 @@ def available_providers(
     allow_override: If True, third-party providers can override built-ins.
                    If False (default), built-ins take precedence.
     include_optional: If True (default), include optional built-in providers
-                     that may require extra dependencies.
+                     that may require extra dependencies. If False, a
+                     third-party provider registered under the same name is
+                     still returned.
 
   Returns:
     Dictionary mapping provider names to import specifications.

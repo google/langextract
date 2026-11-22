@@ -111,6 +111,17 @@ class DiscoveredTest(absltest.TestCase):
         plugins._discovered(), {"gemini": _THIRD_PARTY_GEMINI_SPEC}
     )
 
+  def test_third_party_alias_for_builtin_class_is_kept(self):
+    plugins._safe_entry_points.return_value = [
+        metadata.EntryPoint(
+            name="my_gemini",
+            value=_BUILTIN_GEMINI_SPEC,
+            group="langextract.providers",
+        )
+    ]
+
+    self.assertEqual(plugins._discovered(), {"my_gemini": _BUILTIN_GEMINI_SPEC})
+
   def test_override_reaches_third_party_listed_after_builtin(self):
     providers = plugins.available_providers(allow_override=True)
 

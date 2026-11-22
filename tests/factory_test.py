@@ -20,6 +20,8 @@ for router. The no-name-in-module warning for providers.registry is expected.
 # pylint: disable=no-name-in-module
 
 import os
+import sys
+import types as py_types
 from unittest import mock
 
 from absl.testing import absltest
@@ -700,6 +702,26 @@ class OllamaEnvironmentDefaultsTest(absltest.TestCase):
 
     self.assertNotIn("api_key", result)
     self.assertEqual(result["base_url"], "http://custom:11434")
+
+  def test_ollama_detection_is_false_while_module_is_still_importing(self):
+    module_name = "langextract.providers.ollama"
+    partially_imported = py_types.ModuleType(module_name)
+
+    with mock.patch.dict(sys.modules, {module_name: partially_imported}):
+      detected = factory._is_ollama_provider(openai.OpenAILanguageModel)
+
+    self.assertFalse(detected)
+
+  def test_ollama_detection_is_false_for_non_class_provider(self):
+    self.assertFalse(factory._is_ollama_provider(lambda **kwargs: None))
+
+  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "openai-key"}, clear=True)
+  def test_other_provider_with_ollama_in_model_id_still_receives_key(self):
+    result = factory._kwargs_with_environment_defaults(
+        "ollama/gpt-4", {}, provider_class=openai.OpenAILanguageModel
+    )
+
+    self.assertEqual(result["api_key"], "openai-key")
 
   @mock.patch.dict(os.environ, {}, clear=True)
   def test_ollama_subclass_keeps_its_own_default_url_without_environment(self):

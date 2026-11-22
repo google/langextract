@@ -60,12 +60,15 @@ class ModelConfig:
 
 def _is_ollama_provider(provider_class: typing.Any) -> bool:
   """Returns True if the provider class is the Ollama provider or a subclass."""
-  # A class can only derive from the Ollama provider once that module has been
-  # imported, so looking it up avoids loading Ollama for other providers.
-  ollama_module = sys.modules.get(_OLLAMA_PROVIDER_MODULE)
-  if ollama_module is None or not isinstance(provider_class, type):
+  # Looked up rather than imported so that other providers do not load Ollama.
+  # The module may be absent or still importing (another thread); in both
+  # cases no class can derive from the Ollama provider yet.
+  ollama_class = getattr(
+      sys.modules.get(_OLLAMA_PROVIDER_MODULE), "OllamaLanguageModel", None
+  )
+  if ollama_class is None or not isinstance(provider_class, type):
     return False
-  return issubclass(provider_class, ollama_module.OllamaLanguageModel)
+  return issubclass(provider_class, ollama_class)
 
 
 def _kwargs_with_environment_defaults(
@@ -86,13 +89,13 @@ def _kwargs_with_environment_defaults(
     Updated kwargs with environment defaults.
   """
   resolved = dict(kwargs)
+  is_ollama_provider = _is_ollama_provider(provider_class)
   ollama_in_model_id = "ollama" in model_id.lower()
-  targets_ollama = ollama_in_model_id or _is_ollama_provider(provider_class)
 
   if (
       "api_key" not in resolved
       and not resolved.get("vertexai", False)
-      and not targets_ollama
+      and not is_ollama_provider
   ):
     model_lower = model_id.lower()
     env_vars_by_model_pattern = {
@@ -126,7 +129,7 @@ def _kwargs_with_environment_defaults(
         break
 
   if (
-      targets_ollama
+      (is_ollama_provider or ollama_in_model_id)
       and resolved.get("base_url") is None
       and resolved.get("model_url") is None
   ):

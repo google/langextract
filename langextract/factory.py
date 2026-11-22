@@ -33,7 +33,6 @@ from langextract.core import exceptions
 from langextract.core import output_schema as output_schema_lib
 from langextract.core import schema as core_schema
 from langextract.core import types as core_types
-from langextract.providers import ollama
 from langextract.providers import patterns
 from langextract.providers import router
 
@@ -56,6 +55,19 @@ class ModelConfig:
   )
 
 
+def _is_ollama_provider(
+    provider_class: type[base_model.BaseLanguageModel] | None,
+) -> bool:
+  """Returns True if the provider class is the Ollama provider or a subclass."""
+  if provider_class is None:
+    return False
+  # Imported here so that importing the factory does not load a provider.
+  # pylint: disable-next=import-outside-toplevel
+  from langextract.providers import ollama
+
+  return issubclass(provider_class, ollama.OllamaLanguageModel)
+
+
 def _kwargs_with_environment_defaults(
     model_id: str,
     kwargs: dict[str, typing.Any],
@@ -67,16 +79,15 @@ def _kwargs_with_environment_defaults(
     model_id: The model identifier.
     kwargs: Existing keyword arguments.
     provider_class: The resolved provider class, when known. Ollama needs no
-      API key, so cloud provider keys are never applied to it.
+      API key, so cloud provider keys are never applied to it, and
+      OLLAMA_BASE_URL is applied to it whatever the model is called.
 
   Returns:
     Updated kwargs with environment defaults.
   """
   resolved = dict(kwargs)
-  targets_ollama = "ollama" in model_id.lower() or (
-      provider_class is not None
-      and issubclass(provider_class, ollama.OllamaLanguageModel)
-  )
+  ollama_in_model_id = "ollama" in model_id.lower()
+  targets_ollama = ollama_in_model_id or _is_ollama_provider(provider_class)
 
   if (
       "api_key" not in resolved
@@ -116,12 +127,14 @@ def _kwargs_with_environment_defaults(
 
   if (
       targets_ollama
-      and "base_url" not in resolved
-      and "model_url" not in resolved
+      and resolved.get("base_url") is None
+      and resolved.get("model_url") is None
   ):
-    resolved["base_url"] = os.getenv(
-        "OLLAMA_BASE_URL", "http://localhost:11434"
-    )
+    env_base_url = os.getenv("OLLAMA_BASE_URL")
+    if env_base_url:
+      resolved["base_url"] = env_base_url
+    elif ollama_in_model_id:
+      resolved["base_url"] = "http://localhost:11434"
 
   return resolved
 

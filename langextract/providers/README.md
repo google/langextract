@@ -567,6 +567,10 @@ The factory automatically resolves API keys from environment:
 | OpenAI   | `OPENAI_API_KEY`, `LANGEXTRACT_API_KEY` |
 | Ollama   | `OLLAMA_BASE_URL` (default: http://localhost:11434) |
 
+Ollama needs no API key, so the key variables above are never applied to
+Ollama models (including `gpt-oss`). A proxied Ollama instance that requires
+a key must receive `api_key` explicitly.
+
 ## Design Principles
 
 1. **Zero Configuration**: Providers auto-register when imported

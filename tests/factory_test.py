@@ -663,6 +663,44 @@ class OllamaEnvironmentDefaultsTest(absltest.TestCase):
     self.assertIsInstance(model, ollama.OllamaLanguageModel)
     self.assertIsNone(model._api_key)
 
+  @mock.patch.dict(
+      os.environ, {"OLLAMA_BASE_URL": "http://custom:11434"}, clear=True
+  )
+  def test_explicit_base_url_is_not_overridden_by_environment(self):
+    result = factory._kwargs_with_environment_defaults(
+        "gemma2:2b",
+        {"base_url": "http://explicit:11434"},
+        provider_class=ollama.OllamaLanguageModel,
+    )
+
+    self.assertEqual(result["base_url"], "http://explicit:11434")
+
+  @mock.patch.dict(os.environ, {}, clear=True)
+  def test_model_id_naming_ollama_falls_back_to_localhost(self):
+    result = factory._kwargs_with_environment_defaults("ollama/llama2", {})
+
+    self.assertEqual(result["base_url"], "http://localhost:11434")
+
+  @mock.patch.dict(
+      os.environ,
+      {
+          "OPENAI_API_KEY": "openai-key",
+          "OLLAMA_BASE_URL": "http://custom:11434",
+      },
+      clear=True,
+  )
+  def test_ollama_subclass_is_treated_as_ollama(self):
+
+    class GatewayOllamaModel(ollama.OllamaLanguageModel):
+      pass
+
+    result = factory._kwargs_with_environment_defaults(
+        "gpt-oss:20b", {}, provider_class=GatewayOllamaModel
+    )
+
+    self.assertNotIn("api_key", result)
+    self.assertEqual(result["base_url"], "http://custom:11434")
+
   @mock.patch.dict(os.environ, {}, clear=True)
   def test_ollama_subclass_keeps_its_own_default_url_without_environment(self):
 

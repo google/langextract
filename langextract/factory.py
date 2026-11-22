@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
+import sys
 import typing
 import warnings
 
@@ -35,6 +36,8 @@ from langextract.core import schema as core_schema
 from langextract.core import types as core_types
 from langextract.providers import patterns
 from langextract.providers import router
+
+_OLLAMA_PROVIDER_MODULE = "langextract.providers.ollama"
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
@@ -55,17 +58,14 @@ class ModelConfig:
   )
 
 
-def _is_ollama_provider(
-    provider_class: type[base_model.BaseLanguageModel] | None,
-) -> bool:
+def _is_ollama_provider(provider_class: typing.Any) -> bool:
   """Returns True if the provider class is the Ollama provider or a subclass."""
-  if provider_class is None:
+  # A class can only derive from the Ollama provider once that module has been
+  # imported, so looking it up avoids loading Ollama for other providers.
+  ollama_module = sys.modules.get(_OLLAMA_PROVIDER_MODULE)
+  if ollama_module is None or not isinstance(provider_class, type):
     return False
-  # Imported here so that importing the factory does not load a provider.
-  # pylint: disable-next=import-outside-toplevel
-  from langextract.providers import ollama
-
-  return issubclass(provider_class, ollama.OllamaLanguageModel)
+  return issubclass(provider_class, ollama_module.OllamaLanguageModel)
 
 
 def _kwargs_with_environment_defaults(

@@ -26,7 +26,9 @@ persistent=yes
 # usually to register additional checkers.
 # Note: These plugins require Pylint >= 3.0
 load-plugins=
+    pylint.extensions.bad_builtin,
     pylint.extensions.docparams,
+    pylint.extensions.overlapping_exceptions,
     pylint.extensions.typing
 
 # Allow loading of arbitrary C extensions. Extensions are imported into the
@@ -98,6 +100,10 @@ never-returning-functions=sys.exit
 
 
 [BASIC]
+
+# Library code must not write to stdout directly: use absl logging for
+# diagnostics, or the print_* helpers in progress.py for user-facing output.
+bad-functions=print
 
 # Naming style matching correct argument names.
 argument-naming-style=snake_case

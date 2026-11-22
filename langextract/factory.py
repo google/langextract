@@ -166,7 +166,7 @@ def create_model(
       provider_class = router.resolve_provider(config.provider)
     else:
       provider_class = router.resolve(config.model_id)
-  except (ModuleNotFoundError, ImportError) as e:
+  except ImportError as e:
     raise exceptions.InferenceConfigError(
         "Failed to load provider. "
         "This may be due to missing dependencies. "

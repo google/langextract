@@ -581,7 +581,7 @@ class GCSBatchCache:
         text = data.get("text")
         if text is not None:
           yield key_hash, text
-      except (json.JSONDecodeError, Exception) as e:
+      except Exception as e:
         logging.warning("Failed to read cache item %s: %s", blob.name, e)
 
 

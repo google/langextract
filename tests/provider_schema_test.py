@@ -501,7 +501,7 @@ class GeminiSchemaProviderIntegrationTest(absltest.TestCase):
 
       prompt = "Test prompt"
       config = {"temperature": 0.5}
-      with self.assertRaises(exceptions.InferenceRuntimeError) as cm:
+      with self.assertRaises(exceptions.InferenceConfigError) as cm:
         _ = model._process_single_prompt(prompt, config)
 
       self.assertIn(

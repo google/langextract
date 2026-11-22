@@ -28,6 +28,8 @@ import langextract as lx
 from langextract.core import data
 from langextract.core import exceptions
 from langextract.providers import gemini
+from langextract.providers import gemini_batch
+from langextract.providers.schemas import gemini as gemini_schemas
 
 # google-genai <3.0 depends on httpx; >=3.0 depends on httpx2.
 try:
@@ -917,6 +919,38 @@ class TestGeminiNoTextResponse(_MockClientTest):
     self.assertEqual(
         self.mock_client.models.generate_content.call_count, max_workers
     )
+
+
+class TestGeminiConfigErrorPropagation(_MockClientTest):
+  """Config errors raised during inference keep their type."""
+
+  def setUp(self):
+    super().setUp()
+    self.model = _build_model(format_type=data.FormatType.YAML, max_workers=2)
+    # A schema combined with a non-JSON format is rejected at inference time.
+    self.model.gemini_schema = mock.create_autospec(
+        gemini_schemas.GeminiSchema, instance=True
+    )
+
+  def test_single_prompt_raises_config_error(self):
+    with self.assertRaises(exceptions.InferenceConfigError):
+      list(self.model.infer(['prompt']))
+
+    self.mock_client.models.generate_content.assert_not_called()
+
+  def test_parallel_prompts_raise_config_error(self):
+    with self.assertRaises(exceptions.InferenceConfigError):
+      list(self.model.infer(['first prompt', 'second prompt']))
+
+    self.mock_client.models.generate_content.assert_not_called()
+
+  def test_batch_mode_raises_config_error(self):
+    self.model._batch_cfg = gemini_batch.BatchConfig(
+        enabled=True, threshold=1, enable_caching=False, retention_days=None
+    )
+
+    with self.assertRaises(exceptions.InferenceConfigError):
+      list(self.model.infer(['prompt']))
 
 
 if __name__ == '__main__':

@@ -459,7 +459,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
         )
         return self._response_to_scored_output(response)
 
-      except exceptions.InferenceRuntimeError:
+      except exceptions.InferenceError:
         raise
       except Exception as e:
         if attempt < self.max_retries and self._is_retryable_error(e):
@@ -571,7 +571,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
               project=self.project,
               location=self.location,
           )
-        except exceptions.InferenceRuntimeError:
+        except exceptions.InferenceError:
           raise
         except Exception as e:
           raise exceptions.InferenceRuntimeError(
@@ -610,7 +610,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           index = future_to_index[future]
           try:
             results[index] = future.result()
-          except exceptions.InferenceRuntimeError:
+          except exceptions.InferenceError:
             raise
           except Exception as e:
             raise exceptions.InferenceRuntimeError(

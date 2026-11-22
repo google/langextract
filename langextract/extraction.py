@@ -267,7 +267,7 @@ def extract(
     text_or_documents = io.download_text_from_url(text_or_documents)
 
   prompt_template = prompting.PromptTemplateStructured(
-      description=prompt_description
+      description=prompt_description or ""
   )
   prompt_template.examples.extend(examples)
 

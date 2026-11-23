@@ -26,7 +26,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 
 from langextract import schema as lx_schema
-from langextract._compat import schema as compat_schema
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
@@ -1010,42 +1009,6 @@ class FromSchemaDictTest(absltest.TestCase):
       schemas.openai.OpenAISchema.from_schema_dict(
           self.envelope, schema_name="bad name!"
       )
-
-
-class CompatSchemaShimTest(parameterized.TestCase):
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name="base_schema",
-          name="BaseSchema",
-          expected=schema.BaseSchema,
-      ),
-      dict(
-          testcase_name="constraint",
-          name="Constraint",
-          expected=schema.Constraint,
-      ),
-      dict(
-          testcase_name="constraint_type",
-          name="ConstraintType",
-          expected=schema.ConstraintType,
-      ),
-      dict(
-          testcase_name="extractions_key",
-          name="EXTRACTIONS_KEY",
-          expected=data.EXTRACTIONS_KEY,
-      ),
-      dict(
-          testcase_name="gemini_schema",
-          name="GeminiSchema",
-          expected=schemas.gemini.GeminiSchema,
-      ),
-  )
-  def test_deprecated_name_resolves_to_current_object(self, name, expected):
-    with self.assertWarns(FutureWarning):
-      resolved = getattr(compat_schema, name)
-
-    self.assertIs(resolved, expected)
 
 
 if __name__ == "__main__":

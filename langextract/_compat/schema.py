@@ -25,7 +25,7 @@ def __getattr__(name: str):
       "BaseSchema": ("langextract.core.schema", "BaseSchema"),
       "Constraint": ("langextract.core.schema", "Constraint"),
       "ConstraintType": ("langextract.core.schema", "ConstraintType"),
-      "EXTRACTIONS_KEY": ("langextract.core.data", "EXTRACTIONS_KEY"),
+      "EXTRACTIONS_KEY": ("langextract.core.schema", "EXTRACTIONS_KEY"),
       "GeminiSchema": ("langextract.providers.schemas.gemini", "GeminiSchema"),
   }
   if name in moved:

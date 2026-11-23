@@ -14,6 +14,7 @@
 
 """Tests for langextract.io module."""
 
+import json
 import pathlib
 import tempfile
 import unittest
@@ -97,6 +98,54 @@ class IoTest(unittest.TestCase):
 
     self.assertTrue(tracker.closed)
     self.assertEqual(tracker.updates, [5])
+
+  def test_load_annotated_documents_closes_progress_bar_on_malformed_line(self):
+    tracker = _ClosingTracker()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      jsonl_path = pathlib.Path(tmpdir) / 'data.jsonl'
+      jsonl_path.write_text('not json\n', encoding='utf-8')
+
+      with mock.patch.object(
+          io.progress,
+          'create_load_progress_bar',
+          autospec=True,
+          return_value=tracker,
+      ):
+        with self.assertRaises(json.JSONDecodeError):
+          list(
+              io.load_annotated_documents_jsonl(jsonl_path, show_progress=False)
+          )
+
+    self.assertTrue(tracker.closed)
+
+  def test_load_annotated_documents_closes_progress_bar_on_generator_close(
+      self,
+  ):
+    tracker = _ClosingTracker()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      jsonl_path = pathlib.Path(tmpdir) / 'data.jsonl'
+      jsonl_path.write_text(
+          '{"document_id": "doc-1", "text": "first"}\n'
+          '{"document_id": "doc-2", "text": "second"}\n',
+          encoding='utf-8',
+      )
+
+      with mock.patch.object(
+          io.progress,
+          'create_load_progress_bar',
+          autospec=True,
+          return_value=tracker,
+      ):
+        documents = io.load_annotated_documents_jsonl(
+            jsonl_path, show_progress=False
+        )
+        first = next(documents)
+        documents.close()
+
+    self.assertEqual(first.document_id, 'doc-1')
+    self.assertTrue(tracker.closed)
 
 
 def _load_csv(csv_text: str, delimiter: str = ',') -> list[data.Document]:

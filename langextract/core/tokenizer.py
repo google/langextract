@@ -349,7 +349,7 @@ class UnicodeTokenizer(Tokenizer):
     current_script = None
     previous_end = 0
 
-    for match in _GRAPHEME_CLUSTER_PATTERN.finditer(text):
+    for match in regex.finditer(r"\X", text):
       grapheme = match.group()
       start, _ = match.span()
 

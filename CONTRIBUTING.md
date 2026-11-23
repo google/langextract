@@ -90,6 +90,9 @@ All contributions must pass linting checks and unit tests. Please run these loca
 # Run linting with Pylint 3.x
 pylint --rcfile=.pylintrc langextract tests
 
+# Check that mock.patch calls in tests pass autospec, spec or new
+python scripts/check_mock_patch_spec.py tests
+
 # Run tests
 pytest tests
 ```
@@ -99,10 +102,6 @@ pytest tests
 - Keeps critical error detection enabled
 - Uses plugins for enhanced docstring and type checking
 - Aligns with our pyink formatter (80-char lines, 2-space indents)
-
-`tox -e lint-tests` also runs `scripts/check_mock_patch_spec.py`, which requires
-every `mock.patch` and `mock.patch.object` call in `tests/` to pass `autospec`,
-`spec`, `spec_set`, `new` or `new_callable`.
 
 For full testing across Python versions:
 ```bash

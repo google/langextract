@@ -114,33 +114,53 @@ class CheckPathsTest(absltest.TestCase):
     super().setUp()
     tmp_dir = tempfile.mkdtemp()
     self.addCleanup(shutil.rmtree, tmp_dir)
-    self.test_file = pathlib.Path(tmp_dir) / "sample_test.py"
+    self.tests_dir = pathlib.Path(tmp_dir) / "tests"
+    self.tests_dir.mkdir()
+    self.test_file = self.tests_dir / "sample_test.py"
     self.test_file.write_text(
         'mock.patch("pkg.one")\nmock.patch("pkg.two")\n', encoding="utf-8"
     )
 
   def test_new_file_with_unspecced_call_fails_with_fix_and_lines(self):
-    errors = checker.check_paths([self.test_file], legacy={})
+    errors = checker.check_paths([self.tests_dir], legacy={})
 
     self.assertLen(errors, 1)
     self.assertIn("Add autospec=True", errors[0])
     self.assertIn("lines: 1, 2", errors[0])
 
   def test_legacy_file_at_its_recorded_count_passes(self):
-    errors = checker.check_paths([self.test_file], legacy={"sample_test.py": 2})
+    errors = checker.check_paths(
+        [self.tests_dir], legacy={"tests/sample_test.py": 2}
+    )
 
     self.assertEmpty(errors)
 
   def test_legacy_file_above_its_recorded_count_fails(self):
-    errors = checker.check_paths([self.test_file], legacy={"sample_test.py": 1})
+    errors = checker.check_paths(
+        [self.tests_dir], legacy={"tests/sample_test.py": 1}
+    )
 
     self.assertLen(errors, 1)
     self.assertIn("1 of these predate the check", errors[0])
 
-  def test_directory_is_searched_for_python_files(self):
-    errors = checker.check_paths([self.test_file.parent], legacy={})
+  def test_single_file_uses_the_same_legacy_key_as_its_directory(self):
+    errors = checker.check_paths(
+        [self.test_file], legacy={"tests/sample_test.py": 2}
+    )
+
+    self.assertEmpty(errors)
+
+  def test_same_file_name_in_subdirectory_gets_no_legacy_allowance(self):
+    nested = self.tests_dir / "nested" / "sample_test.py"
+    nested.parent.mkdir()
+    nested.write_text('mock.patch("pkg.three")\n', encoding="utf-8")
+
+    errors = checker.check_paths(
+        [self.tests_dir], legacy={"tests/sample_test.py": 2}
+    )
 
     self.assertLen(errors, 1)
+    self.assertIn("nested", errors[0])
 
 
 if __name__ == "__main__":

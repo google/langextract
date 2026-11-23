@@ -49,34 +49,37 @@ _NEW_POSITION: Mapping[str, int] = {
     "unittest.mock.patch.object": 2,
 }
 
-# Unspecced calls that predate this check, by file name. Do not raise a
-# number. Lower it when you fix calls in that file.
+# Unspecced calls that predate this check, by path from the directory that
+# was checked. Do not raise a number. Lower it when you fix calls in that file.
 _LEGACY_UNSPECCED: Mapping[str, int] = {
-    "extract_schema_integration_test.py": 17,
-    "factory_schema_test.py": 11,
-    "gemini_retry_test.py": 8,
-    "inference_test.py": 27,
-    "init_test.py": 22,
-    "io_test.py": 3,
-    "openai_batch_test.py": 6,
-    "provider_plugin_test.py": 9,
-    "provider_schema_test.py": 4,
-    "test_gemini_batch_api.py": 1,
-    "test_kwargs_passthrough.py": 9,
+    "tests/extract_schema_integration_test.py": 17,
+    "tests/factory_schema_test.py": 11,
+    "tests/gemini_retry_test.py": 8,
+    "tests/inference_test.py": 27,
+    "tests/init_test.py": 22,
+    "tests/io_test.py": 3,
+    "tests/openai_batch_test.py": 6,
+    "tests/provider_plugin_test.py": 9,
+    "tests/provider_schema_test.py": 4,
+    "tests/test_gemini_batch_api.py": 1,
+    "tests/test_kwargs_passthrough.py": 9,
 }
 
 
-def find_unspecced_patches(source: str) -> list[int]:
+def find_unspecced_patches(
+    source: str | bytes, filename: str = "<unknown>"
+) -> list[int]:
   """Finds patch calls that do not declare a replacement.
 
   Args:
     source: Python source code to inspect.
+    filename: Name reported if the source does not parse.
 
   Returns:
     Line numbers of the offending calls, in ascending order.
   """
   lines = []
-  for node in ast.walk(ast.parse(source)):
+  for node in ast.walk(ast.parse(source, filename=filename)):
     if not isinstance(node, ast.Call):
       continue
     new_position = _NEW_POSITION.get(ast.unparse(node.func))
@@ -96,19 +99,23 @@ def check_paths(
 
   Args:
     paths: Files or directories to check.
-    legacy: Allowed number of unspecced calls per file name.
+    legacy: Allowed number of unspecced calls per file, keyed by its path
+      from the checked directory, such as "tests/io_test.py".
 
   Returns:
     One message per failing file. Empty when everything passes.
   """
   files = []
   for path in paths:
-    files.extend(sorted(path.rglob("*.py")) if path.is_dir() else [path])
+    root = path if path.is_dir() else path.parent
+    for file in sorted(path.rglob("*.py")) if path.is_dir() else [path]:
+      key = (root.name / file.relative_to(root)).as_posix()
+      files.append((file, key))
 
   errors = []
-  for file in files:
-    lines = find_unspecced_patches(file.read_text(encoding="utf-8"))
-    allowed = legacy.get(file.name, 0)
+  for file, key in files:
+    lines = find_unspecced_patches(file.read_bytes(), filename=str(file))
+    allowed = legacy.get(key, 0)
     if len(lines) <= allowed:
       continue
     locations = ", ".join(str(line) for line in lines)

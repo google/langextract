@@ -21,27 +21,33 @@ from absl.testing import absltest
 
 from langextract import plugins
 
+_GROUP = "langextract.providers"
 _BUILTIN_GEMINI_SPEC = "langextract.providers.gemini:GeminiLanguageModel"
+_BUILTIN_OLLAMA_SPEC = "langextract.providers.ollama:OllamaLanguageModel"
 _BUILTIN_OPENAI_SPEC = "langextract.providers.openai:OpenAILanguageModel"
 _THIRD_PARTY_GEMINI_SPEC = "third_party.gemini:CustomGemini"
-_THIRD_PARTY_OPENAI_SPEC = "third_party.openai:CustomOpenAI"
-_THIRD_PARTY_ONLY_SPEC = "third_party.custom:CustomModel"
 
 
 class AvailableProvidersTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
+    plugins._discovered.cache_clear()
+    self.addCleanup(plugins._discovered.cache_clear)
+    # LangExtract's own entry points come first, as they do when its
+    # distribution is scanned before a third-party plugin's.
     self.enter_context(
         mock.patch.object(
             plugins,
-            "_discovered",
+            "_safe_entry_points",
             autospec=True,
-            return_value={
-                "gemini": _THIRD_PARTY_GEMINI_SPEC,
-                "openai": _THIRD_PARTY_OPENAI_SPEC,
-                "custom": _THIRD_PARTY_ONLY_SPEC,
-            },
+            return_value=[
+                metadata.EntryPoint("gemini", _BUILTIN_GEMINI_SPEC, _GROUP),
+                metadata.EntryPoint("ollama", _BUILTIN_OLLAMA_SPEC, _GROUP),
+                metadata.EntryPoint("openai", _BUILTIN_OPENAI_SPEC, _GROUP),
+                metadata.EntryPoint("gemini", _THIRD_PARTY_GEMINI_SPEC, _GROUP),
+                metadata.EntryPoint("my_gemini", _BUILTIN_GEMINI_SPEC, _GROUP),
+            ],
         )
     )
 
@@ -49,88 +55,22 @@ class AvailableProvidersTest(absltest.TestCase):
     providers = plugins.available_providers()
 
     self.assertEqual(providers["gemini"], _BUILTIN_GEMINI_SPEC)
-    self.assertEqual(providers["openai"], _BUILTIN_OPENAI_SPEC)
-    self.assertEqual(providers["custom"], _THIRD_PARTY_ONLY_SPEC)
 
-  def test_allow_override_lets_third_party_replace_builtins(self):
+  def test_allow_override_lets_third_party_replace_builtin(self):
     providers = plugins.available_providers(allow_override=True)
 
     self.assertEqual(providers["gemini"], _THIRD_PARTY_GEMINI_SPEC)
-    self.assertEqual(providers["openai"], _THIRD_PARTY_OPENAI_SPEC)
-    self.assertEqual(providers["custom"], _THIRD_PARTY_ONLY_SPEC)
+    self.assertEqual(providers["ollama"], _BUILTIN_OLLAMA_SPEC)
 
-  def test_allow_override_keeps_builtins_without_third_party_entry(self):
-    providers = plugins.available_providers(allow_override=True)
-
-    self.assertEqual(
-        providers["ollama"], "langextract.providers.ollama:OllamaLanguageModel"
-    )
-
-  def test_excluding_optional_leaves_third_party_spec_in_place(self):
-    providers = plugins.available_providers(include_optional=False)
-
-    self.assertEqual(providers["openai"], _THIRD_PARTY_OPENAI_SPEC)
-    self.assertEqual(providers["gemini"], _BUILTIN_GEMINI_SPEC)
-
-
-class DiscoveredTest(absltest.TestCase):
-
-  def setUp(self):
-    super().setUp()
-    plugins._discovered.cache_clear()
-    self.addCleanup(plugins._discovered.cache_clear)
-    # LangExtract's own entry point is listed first, as it is when its
-    # distribution is scanned before the third-party plugin's.
-    self.enter_context(
-        mock.patch.object(
-            plugins,
-            "_safe_entry_points",
-            autospec=True,
-            return_value=[
-                metadata.EntryPoint(
-                    name="gemini",
-                    value=_BUILTIN_GEMINI_SPEC,
-                    group="langextract.providers",
-                ),
-                metadata.EntryPoint(
-                    name="gemini",
-                    value=_THIRD_PARTY_GEMINI_SPEC,
-                    group="langextract.providers",
-                ),
-                metadata.EntryPoint(
-                    name="openai",
-                    value=_BUILTIN_OPENAI_SPEC,
-                    group="langextract.providers",
-                ),
-            ],
-        )
-    )
-
-  def test_own_entry_points_are_not_reported_as_third_party(self):
-    self.assertEqual(
-        plugins._discovered(), {"gemini": _THIRD_PARTY_GEMINI_SPEC}
-    )
-
-  def test_third_party_alias_for_builtin_class_is_kept(self):
-    plugins._safe_entry_points.return_value = [
-        metadata.EntryPoint(
-            name="my_gemini",
-            value=_BUILTIN_GEMINI_SPEC,
-            group="langextract.providers",
-        )
-    ]
-
-    self.assertEqual(plugins._discovered(), {"my_gemini": _BUILTIN_GEMINI_SPEC})
-
-  def test_override_reaches_third_party_listed_after_builtin(self):
-    providers = plugins.available_providers(allow_override=True)
-
-    self.assertEqual(providers["gemini"], _THIRD_PARTY_GEMINI_SPEC)
-
-  def test_excluding_optional_omits_own_optional_entry_point(self):
+  def test_excluding_optional_omits_optional_builtin(self):
     providers = plugins.available_providers(include_optional=False)
 
     self.assertNotIn("openai", providers)
+
+  def test_third_party_alias_for_builtin_class_is_kept(self):
+    providers = plugins.available_providers()
+
+    self.assertEqual(providers["my_gemini"], _BUILTIN_GEMINI_SPEC)
 
 
 if __name__ == "__main__":

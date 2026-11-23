@@ -90,9 +90,6 @@ All contributions must pass linting checks and unit tests. Please run these loca
 # Run linting with Pylint 3.x
 pylint --rcfile=.pylintrc langextract tests
 
-# Check that mock.patch calls in tests pass autospec, spec or new
-python scripts/check_mock_patch_spec.py tests
-
 # Run tests
 pytest tests
 ```

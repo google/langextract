@@ -21,16 +21,13 @@ when an attribute name is misspelled. Every `mock.patch(...)` and
 `mock.patch.object(...)` call must therefore pass one of `autospec`, `spec`,
 `spec_set`, `new` (keyword or positional) or `new_callable`.
 
-Files that predate this check are listed in `_LEGACY_UNSPECCED` with their
-current number of unspecced calls. A file fails when its count differs from
-the recorded one: above means a new unspecced call, below means the entry
-should be lowered so the improvement cannot regress.
+Files that predate this check are listed in `_LEGACY_UNSPECCED` with the
+number of unspecced calls they had when it was added. A file fails when it has
+more than that.
 
 Usage:
   python scripts/check_mock_patch_spec.py tests
 """
-
-from __future__ import annotations
 
 import ast
 from collections.abc import Mapping, Sequence
@@ -41,13 +38,19 @@ _SPEC_KEYWORDS = frozenset(
     {"autospec", "spec", "spec_set", "new", "new_callable"}
 )
 
-# Positional index of `new` in patch(target, new) and
-# patch.object(target, attribute, new).
-_NEW_POSITION_IN_PATCH = 1
-_NEW_POSITION_IN_PATCH_OBJECT = 2
+# Positional index of `new`, by the name the call is spelled with. Matching
+# the full name keeps unrelated calls such as `requests.patch(url)` out.
+_NEW_POSITION: Mapping[str, int] = {
+    "patch": 1,
+    "mock.patch": 1,
+    "unittest.mock.patch": 1,
+    "patch.object": 2,
+    "mock.patch.object": 2,
+    "unittest.mock.patch.object": 2,
+}
 
-# Unspecced calls that predate this check, by file name. Lower a number when
-# you fix calls in that file, and remove the entry when it reaches zero.
+# Unspecced calls that predate this check, by file name. Do not raise a
+# number. Lower it when you fix calls in that file.
 _LEGACY_UNSPECCED: Mapping[str, int] = {
     "extract_schema_integration_test.py": 17,
     "factory_schema_test.py": 11,
@@ -61,49 +64,6 @@ _LEGACY_UNSPECCED: Mapping[str, int] = {
     "test_gemini_batch_api.py": 1,
     "test_kwargs_passthrough.py": 9,
 }
-
-_FIX_HINT = (
-    "Pass autospec=True (preferred), or spec=, spec_set=, new= or"
-    " new_callable= when autospec does not apply."
-)
-
-
-def _is_patch(node: ast.expr) -> bool:
-  """Returns True for `patch`, `mock.patch` and `unittest.mock.patch`."""
-  if isinstance(node, ast.Name):
-    return node.id == "patch"
-  return isinstance(node, ast.Attribute) and node.attr == "patch"
-
-
-def _new_position(call: ast.Call) -> int | None:
-  """Returns where `new` sits positionally, or None if not a patch call."""
-  func = call.func
-  if _is_patch(func):
-    return _NEW_POSITION_IN_PATCH
-  if (
-      isinstance(func, ast.Attribute)
-      and func.attr == "object"
-      and _is_patch(func.value)
-  ):
-    return _NEW_POSITION_IN_PATCH_OBJECT
-  return None
-
-
-def _is_off(value: ast.expr) -> bool:
-  """Returns True for a literal False or None, as in `autospec=False`."""
-  return isinstance(value, ast.Constant) and value.value in (False, None)
-
-
-def _declares_replacement(call: ast.Call, new_position: int) -> bool:
-  """Returns True if the call says what the target is replaced with."""
-  if len(call.args) > new_position:
-    return True
-  for keyword in call.keywords:
-    if keyword.arg == "new":
-      return True
-    if keyword.arg in _SPEC_KEYWORDS and not _is_off(keyword.value):
-      return True
-  return False
 
 
 def find_unspecced_patches(source: str) -> list[int]:
@@ -119,10 +79,12 @@ def find_unspecced_patches(source: str) -> list[int]:
   for node in ast.walk(ast.parse(source)):
     if not isinstance(node, ast.Call):
       continue
-    new_position = _new_position(node)
+    new_position = _NEW_POSITION.get(ast.unparse(node.func))
     if new_position is None:
       continue
-    if not _declares_replacement(node, new_position):
+    has_positional_new = len(node.args) > new_position
+    has_spec_keyword = any(k.arg in _SPEC_KEYWORDS for k in node.keywords)
+    if not has_positional_new and not has_spec_keyword:
       lines.append(node.lineno)
   return sorted(lines)
 
@@ -147,18 +109,21 @@ def check_paths(
   for file in files:
     lines = find_unspecced_patches(file.read_text(encoding="utf-8"))
     allowed = legacy.get(file.name, 0)
-    if len(lines) > allowed:
-      locations = ", ".join(str(line) for line in lines)
-      errors.append(
-          f"{file}: {len(lines)} mock.patch call(s) without a spec, {allowed}"
-          f" allowed. {_FIX_HINT} Calls are on lines: {locations}."
+    if len(lines) <= allowed:
+      continue
+    locations = ", ".join(str(line) for line in lines)
+    message = (
+        f"{file}: {len(lines)} mock.patch or mock.patch.object call(s) pass"
+        " none of autospec, spec, spec_set, new or new_callable. Add"
+        " autospec=True to the call you added, or spec=/new= when autospec"
+        f" does not apply. Unspecced calls are on lines: {locations}."
+    )
+    if allowed:
+      message += (
+          f" {allowed} of these predate the check and are tolerated; do not"
+          " raise that number."
       )
-    elif len(lines) < allowed:
-      errors.append(
-          f"{file}: {len(lines)} mock.patch call(s) without a spec, but"
-          f" {allowed} recorded. Lower its entry in _LEGACY_UNSPECCED in"
-          f" {pathlib.Path(__file__).name} to {len(lines)}."
-      )
+    errors.append(message)
   return errors
 
 

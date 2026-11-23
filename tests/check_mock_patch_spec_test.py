@@ -63,6 +63,14 @@ class FindUnspeccedPatchesTest(parameterized.TestCase):
           testcase_name="unittest_mock_patch_object",
           source='unittest.mock.patch.object(pkg, "func")',
       ),
+      dict(
+          testcase_name="unittest_mock_patch",
+          source='unittest.mock.patch("pkg.func")',
+      ),
+      dict(
+          testcase_name="imported_patch_object",
+          source='patch.object(pkg, "func")',
+      ),
   )
   def test_flags_call_without_replacement(self, source):
     self.assertEqual(checker.find_unspecced_patches(source), [1])
@@ -95,6 +103,14 @@ class FindUnspeccedPatchesTest(parameterized.TestCase):
       dict(
           testcase_name="new_positional_on_imported_patch_object",
           source='patch.object(pkg, "LIMIT", 3)',
+      ),
+      dict(
+          testcase_name="new_positional_on_imported_patch",
+          source='patch("pkg.LIMIT", 3)',
+      ),
+      dict(
+          testcase_name="new_positional_on_unittest_mock_patch_object",
+          source='unittest.mock.patch.object(pkg, "LIMIT", 3)',
       ),
       dict(
           testcase_name="spec_set",
@@ -215,8 +231,26 @@ class CheckPathsTest(absltest.TestCase):
 
 class MainTest(absltest.TestCase):
 
+  def setUp(self):
+    super().setUp()
+    tmp_dir = tempfile.mkdtemp()
+    self.addCleanup(shutil.rmtree, tmp_dir)
+    self.test_file = pathlib.Path(tmp_dir) / "sample_test.py"
+
+  def test_unspecced_call_exits_with_failure(self):
+    self.test_file.write_text('mock.patch("pkg.func")\n', encoding="utf-8")
+
+    self.assertEqual(checker.main([str(self.test_file)]), 1)
+
+  def test_specced_call_exits_cleanly(self):
+    self.test_file.write_text(
+        'mock.patch("pkg.func", autospec=True)\n', encoding="utf-8"
+    )
+
+    self.assertEqual(checker.main([str(self.test_file)]), 0)
+
   def test_missing_path_exits_with_usage_error(self):
-    self.assertEqual(checker.main(["no_such_directory"]), 2)
+    self.assertEqual(checker.main([str(self.test_file)]), 2)
 
   def test_no_arguments_exits_with_usage_error(self):
     self.assertEqual(checker.main([]), 2)

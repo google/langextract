@@ -110,8 +110,11 @@ def check_paths(
   for path in paths:
     # Resolved so the key is the same however the path was spelled.
     path = path.resolve()
-    root = path if path.is_dir() else path.parent
-    for file in sorted(path.rglob("*.py")) if path.is_dir() else [path]:
+    if path.is_dir():
+      root, files = path, sorted(path.rglob("*.py"))
+    else:
+      root, files = path.parent, [path]
+    for file in files:
       key = (root.name / file.relative_to(root)).as_posix()
       lines = find_unspecced_patches(file.read_bytes(), filename=str(file))
       allowed = legacy.get(key, 0)

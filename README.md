@@ -385,6 +385,13 @@ result = lx.extract(
 )
 ```
 
+By default the OpenAI provider sends a JSON Schema built from your examples
+(`response_format` type `json_schema`). Some OpenAI-compatible endpoints, such
+as DeepSeek, reject that with HTTP 400. For those, pass
+`use_schema_constraints=False` to `lx.extract()`: the provider then uses JSON
+mode (`response_format` type `json_object`), and the output is not checked
+against the example schema.
+
 ## Using Local LLMs with Ollama
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:
 

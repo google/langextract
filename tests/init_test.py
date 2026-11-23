@@ -200,6 +200,36 @@ class InitTest(parameterized.TestCase):
         extraction.char_interval, data.CharInterval(start_pos=0, end_pos=5)
     )
 
+  def test_extract_without_prompt_description_omits_it_from_prompt(self):
+    prompts = []
+
+    class FakeModel(base_model.BaseLanguageModel):
+
+      def infer(self, batch_prompts, **kwargs):
+        for prompt in batch_prompts:
+          prompts.append(prompt)
+          yield [
+              types.ScoredOutput(
+                  score=1.0, output='{"extractions": [{"person": "Alice"}]}'
+              )
+          ]
+
+    lx.extract(
+        "Alice went home.",
+        examples=[
+            data.ExampleData(
+                text="Bob met Carol.",
+                extractions=[data.Extraction("person", "Bob")],
+            )
+        ],
+        model=FakeModel(),
+        use_schema_constraints=False,
+        show_progress=False,
+    )
+
+    self.assertLen(prompts, 1)
+    self.assertStartsWith(prompts[0], "\n\nExamples\n")
+
   @mock.patch("langextract.extraction.resolver.Resolver.align")
   @mock.patch("langextract.extraction.factory.create_model")
   def test_extract_resolver_params_alignment_passthrough(

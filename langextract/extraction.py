@@ -90,7 +90,9 @@ def extract(
         iterable of Document objects. An http:// or https:// string is fetched
         only when `fetch_urls=True`; see that parameter for the security
         caveats.
-      prompt_description: Instructions for what to extract from the text.
+      prompt_description: Instructions for what to extract from the text. If
+        None, the prompt carries no instructions and relies on the examples
+        or output schema alone.
       examples: List of ExampleData objects to guide the extraction.
         Required unless `output_schema` is provided.
       tokenizer: Optional Tokenizer instance to use for chunking and alignment.
@@ -267,7 +269,7 @@ def extract(
     text_or_documents = io.download_text_from_url(text_or_documents)
 
   prompt_template = prompting.PromptTemplateStructured(
-      description=prompt_description
+      description=prompt_description or ""
   )
   prompt_template.examples.extend(examples)
 

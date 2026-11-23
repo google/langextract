@@ -66,16 +66,22 @@ def _discovered() -> dict[str, str]:
   Returns:
     Dictionary mapping provider names to import specs.
   """
+  # LangExtract registers its own providers in this entry-point group too.
+  # Skip exact (name, spec) matches so they neither shadow a third-party entry
+  # of the same name (first seen wins) nor leak when include_optional=False,
+  # while still keeping third-party aliases for built-in classes.
+  builtin_entries = {*_BUILTINS.items(), *_OPTIONAL_BUILTINS.items()}
   discovered: dict[str, str] = {}
   for ep in _safe_entry_points("langextract.providers"):
     # Handle both old and new entry_points API
     if hasattr(ep, "value"):
-
-      discovered.setdefault(ep.name, ep.value)
+      spec = ep.value
     else:
       # Legacy API - construct from module and attr
-      value = f"{ep.module}:{ep.attr}" if ep.attr else ep.module
-      discovered.setdefault(ep.name, value)
+      spec = f"{ep.module}:{ep.attr}" if ep.attr else ep.module
+    if (ep.name, spec) in builtin_entries:
+      continue
+    discovered.setdefault(ep.name, spec)
 
   if discovered:
     logging.debug(
@@ -94,31 +100,21 @@ def available_providers(
     allow_override: If True, third-party providers can override built-ins.
                    If False (default), built-ins take precedence.
     include_optional: If True (default), include optional built-in providers
-                     that may require extra dependencies.
+                     that may require extra dependencies. If False, omit
+                     optional built-ins (a third-party provider registered
+                     under an optional built-in's name is still returned).
 
   Returns:
     Dictionary mapping provider names to import specifications.
   """
 
-  providers = dict(_discovered())
+  built_in = dict(_OPTIONAL_BUILTINS) if include_optional else {}
+  built_in.update(_BUILTINS)
+  third_party = _discovered()
 
-  if include_optional:
-    if allow_override:
-      # Third-party can override optional built-ins
-      providers.update(_OPTIONAL_BUILTINS)
-    else:
-      # Optional built-ins override third-party
-      providers = {**providers, **_OPTIONAL_BUILTINS}
-
-  # Always add core built-ins with highest precedence (unless allow_override)
   if allow_override:
-    # Third-party and optional can override core built-ins
-    providers.update(_BUILTINS)
-  else:
-    # Core built-ins take precedence over everything
-    providers = {**providers, **_BUILTINS}
-
-  return providers
+    return {**built_in, **third_party}
+  return {**third_party, **built_in}
 
 
 def _load_class(spec: str) -> type[base_model.BaseLanguageModel]:

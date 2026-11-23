@@ -66,21 +66,22 @@ def _discovered() -> dict[str, str]:
   Returns:
     Dictionary mapping provider names to import specs.
   """
-  # LangExtract registers its own providers as entry points too. Counting them
-  # as third-party would let them shadow a real third-party entry of the same
-  # name, because the first entry found for a name is the one kept.
-  own_entries = {*_BUILTINS.items(), *_OPTIONAL_BUILTINS.items()}
+  # LangExtract registers its own providers in this entry-point group too.
+  # Skip exact (name, spec) matches so they neither shadow a third-party entry
+  # of the same name (first seen wins) nor leak when include_optional=False,
+  # while still keeping third-party aliases for built-in classes.
+  builtin_entries = {*_BUILTINS.items(), *_OPTIONAL_BUILTINS.items()}
   discovered: dict[str, str] = {}
   for ep in _safe_entry_points("langextract.providers"):
     # Handle both old and new entry_points API
     if hasattr(ep, "value"):
-      value = ep.value
+      spec = ep.value
     else:
       # Legacy API - construct from module and attr
-      value = f"{ep.module}:{ep.attr}" if ep.attr else ep.module
-    if (ep.name, value) in own_entries:
+      spec = f"{ep.module}:{ep.attr}" if ep.attr else ep.module
+    if (ep.name, spec) in builtin_entries:
       continue
-    discovered.setdefault(ep.name, value)
+    discovered.setdefault(ep.name, spec)
 
   if discovered:
     logging.debug(
@@ -99,9 +100,9 @@ def available_providers(
     allow_override: If True, third-party providers can override built-ins.
                    If False (default), built-ins take precedence.
     include_optional: If True (default), include optional built-in providers
-                     that may require extra dependencies. If False, a
-                     third-party provider registered under the same name is
-                     still returned.
+                     that may require extra dependencies. If False, omit
+                     optional built-ins (a third-party provider registered
+                     under an optional built-in's name is still returned).
 
   Returns:
     Dictionary mapping provider names to import specifications.
@@ -111,7 +112,6 @@ def available_providers(
   built_in.update(_BUILTINS)
   third_party = _discovered()
 
-  # Later entries win, so the side that takes precedence is merged last.
   if allow_override:
     return {**built_in, **third_party}
   return {**third_party, **built_in}

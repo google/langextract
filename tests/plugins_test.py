@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for provider discovery precedence in langextract.plugins."""
-
 from importlib import metadata
 from unittest import mock
 
@@ -34,8 +32,9 @@ class AvailableProvidersTest(absltest.TestCase):
     super().setUp()
     plugins._discovered.cache_clear()
     self.addCleanup(plugins._discovered.cache_clear)
-    # LangExtract's own entry points come first, as they do when its
-    # distribution is scanned before a third-party plugin's.
+    # LangExtract's own entry points come first (worst-case scan order), so
+    # an unskipped built-in would shadow the colliding third-party entry and
+    # leak the optional built-in.
     self.enter_context(
         mock.patch.object(
             plugins,
@@ -55,6 +54,7 @@ class AvailableProvidersTest(absltest.TestCase):
     providers = plugins.available_providers()
 
     self.assertEqual(providers["gemini"], _BUILTIN_GEMINI_SPEC)
+    self.assertEqual(providers["openai"], _BUILTIN_OPENAI_SPEC)
 
   def test_allow_override_lets_third_party_replace_builtin(self):
     providers = plugins.available_providers(allow_override=True)

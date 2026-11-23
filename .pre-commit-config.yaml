@@ -44,3 +44,12 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
         args: ['--fix=lf']
+
+  - repo: local
+    hooks:
+      - id: mock-patch-spec
+        name: mock.patch calls in tests declare a spec
+        entry: python scripts/check_mock_patch_spec.py tests
+        language: python
+        pass_filenames: false
+        files: ^(tests/.*\.py|scripts/check_mock_patch_spec\.py)$

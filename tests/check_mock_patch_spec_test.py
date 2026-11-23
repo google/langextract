@@ -89,6 +89,18 @@ class FindUnspeccedPatchesTest(parameterized.TestCase):
           source='mock.patch.object(pkg, "LIMIT", 3)',
       ),
       dict(
+          testcase_name="new_positional_on_unittest_mock_patch",
+          source='unittest.mock.patch("pkg.LIMIT", 3)',
+      ),
+      dict(
+          testcase_name="new_positional_on_imported_patch_object",
+          source='patch.object(pkg, "LIMIT", 3)',
+      ),
+      dict(
+          testcase_name="spec_set",
+          source='mock.patch("pkg.func", spec_set=pkg.Real)',
+      ),
+      dict(
           testcase_name="new_callable",
           source='mock.patch("pkg.prop", new_callable=mock.PropertyMock)',
       ),
@@ -105,8 +117,18 @@ class FindUnspeccedPatchesTest(parameterized.TestCase):
           source='registry.object(pkg, "func")',
       ),
   )
-  def test_accepts_call_with_replacement(self, source):
+  def test_does_not_flag(self, source):
     self.assertEmpty(checker.find_unspecced_patches(source))
+
+  def test_reports_lines_in_ascending_order(self):
+    source = (
+        "def outer():\n"
+        '  with mock.patch("pkg.nested"):\n'
+        "    pass\n"
+        'mock.patch("pkg.top_level")\n'
+    )
+
+    self.assertEqual(checker.find_unspecced_patches(source), [2, 4])
 
 
 class CheckPathsTest(absltest.TestCase):
@@ -168,6 +190,16 @@ class CheckPathsTest(absltest.TestCase):
 
     self.assertEmpty(errors)
 
+  def test_bare_file_name_from_inside_the_directory_uses_the_same_key(self):
+    self.addCleanup(os.chdir, os.getcwd())
+    os.chdir(self.tests_dir)
+
+    errors = checker.check_paths(
+        [pathlib.Path("sample_test.py")], legacy={"tests/sample_test.py": 2}
+    )
+
+    self.assertEmpty(errors)
+
   def test_same_file_name_in_subdirectory_gets_no_legacy_allowance(self):
     nested = self.tests_dir / "nested" / "sample_test.py"
     nested.parent.mkdir()
@@ -179,6 +211,15 @@ class CheckPathsTest(absltest.TestCase):
 
     self.assertLen(errors, 1)
     self.assertIn("nested", errors[0])
+
+
+class MainTest(absltest.TestCase):
+
+  def test_missing_path_exits_with_usage_error(self):
+    self.assertEqual(checker.main(["no_such_directory"]), 2)
+
+  def test_no_arguments_exits_with_usage_error(self):
+    self.assertEqual(checker.main([]), 2)
 
 
 if __name__ == "__main__":

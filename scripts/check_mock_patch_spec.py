@@ -49,8 +49,9 @@ _NEW_POSITION: Mapping[str, int] = {
     "unittest.mock.patch.object": 2,
 }
 
-# Unspecced calls that predate this check, by path from the directory that
-# was checked. Do not raise a number. Lower it when you fix calls in that file.
+# Unspecced calls that predate this check, keyed by the checked directory's
+# name plus the path inside it. Do not raise a number. Lower it when you fix
+# calls in that file.
 _LEGACY_UNSPECCED: Mapping[str, int] = {
     "tests/extract_schema_integration_test.py": 17,
     "tests/factory_schema_test.py": 11,
@@ -99,41 +100,37 @@ def check_paths(
 
   Args:
     paths: Files or directories to check.
-    legacy: Allowed number of unspecced calls per file, keyed by its path
-      from the checked directory, such as "tests/io_test.py".
+    legacy: Allowed number of unspecced calls per file, keyed by the checked
+      directory's name plus the path inside it, such as "tests/io_test.py".
 
   Returns:
     One message per failing file. Empty when everything passes.
   """
-  files = []
+  errors = []
   for path in paths:
     # Resolved so the key is the same however the path was spelled.
     path = path.resolve()
     root = path if path.is_dir() else path.parent
     for file in sorted(path.rglob("*.py")) if path.is_dir() else [path]:
       key = (root.name / file.relative_to(root)).as_posix()
-      files.append((file, key))
-
-  errors = []
-  for file, key in files:
-    lines = find_unspecced_patches(file.read_bytes(), filename=str(file))
-    allowed = legacy.get(key, 0)
-    if len(lines) <= allowed:
-      continue
-    locations = ", ".join(str(line) for line in lines)
-    message = (
-        f"{key}: {len(lines)} mock.patch or mock.patch.object call(s) pass"
-        " none of autospec, spec, spec_set, new or new_callable. Add"
-        " autospec=True to the call you added, or spec=/new= when autospec"
-        f" does not apply. Unspecced calls are on lines: {locations}."
-    )
-    if allowed:
-      message += (
-          f" {allowed} of these predate the check and are tolerated; do not"
-          " raise that number in _LEGACY_UNSPECCED in"
-          " scripts/check_mock_patch_spec.py."
+      lines = find_unspecced_patches(file.read_bytes(), filename=str(file))
+      allowed = legacy.get(key, 0)
+      if len(lines) <= allowed:
+        continue
+      locations = ", ".join(str(line) for line in lines)
+      message = (
+          f"{key}: {len(lines)} mock.patch or mock.patch.object call(s) pass"
+          " none of autospec, spec, spec_set, new or new_callable. Add"
+          " autospec=True to the call you added, or spec=/new= when autospec"
+          f" does not apply. Unspecced calls are on lines: {locations}."
       )
-    errors.append(message)
+      if allowed:
+        message += (
+            f" {allowed} of these predate the check and are tolerated; do not"
+            " raise that number in _LEGACY_UNSPECCED in"
+            " scripts/check_mock_patch_spec.py."
+        )
+      errors.append(message)
   return errors
 
 
@@ -141,7 +138,12 @@ def main(argv: Sequence[str]) -> int:
   if not argv:
     print(__doc__, file=sys.stderr)
     return 2
-  errors = check_paths([pathlib.Path(arg) for arg in argv], _LEGACY_UNSPECCED)
+  paths = [pathlib.Path(arg) for arg in argv]
+  missing = [str(path) for path in paths if not path.exists()]
+  if missing:
+    print(f"No such file or directory: {', '.join(missing)}", file=sys.stderr)
+    return 2
+  errors = check_paths(paths, _LEGACY_UNSPECCED)
   for error in errors:
     print(error, file=sys.stderr)
   return 1 if errors else 0

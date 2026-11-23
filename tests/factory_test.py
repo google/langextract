@@ -35,6 +35,7 @@ import langextract as lx
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import types
+from langextract.providers import ollama
 from langextract.providers import router
 
 
@@ -526,28 +527,24 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
   def test_explicit_provider_loads_builtins_before_resolution(self):
     """Builtins must be loaded even when provider is specified explicitly."""
+    # setUp registers only fakes, so this name resolves only if the
+    # built-in providers were loaded.
     config = factory.ModelConfig(
-        model_id="gemini-pro",
-        provider="FakeGeminiProvider",
-        provider_kwargs={"api_key": "test-key"},
+        model_id="gemma2:2b", provider="OllamaLanguageModel"
     )
 
     model = factory.create_model(config)
-    self.assertIsInstance(model, FakeGeminiProvider)
-    self.assertEqual(model.model_id, "gemini-pro")
+    self.assertIsInstance(model, ollama.OllamaLanguageModel)
 
   def test_explicit_provider_loads_builtins_with_schema_constraints(self):
     """Builtins must be loaded in the _create_model_with_schema path too."""
     config = factory.ModelConfig(
-        model_id="gemini-pro",
-        provider="FakeGeminiProvider",
-        provider_kwargs={"api_key": "test-key"},
+        model_id="gemma2:2b", provider="OllamaLanguageModel"
     )
 
     # This exercises _create_model_with_schema via the fence_output kwarg.
     model = factory.create_model(config, fence_output=False)
-    self.assertIsInstance(model, FakeGeminiProvider)
-    self.assertEqual(model.model_id, "gemini-pro")
+    self.assertIsInstance(model, ollama.OllamaLanguageModel)
 
 
 if __name__ == "__main__":

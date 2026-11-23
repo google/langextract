@@ -498,6 +498,26 @@ class ContextAwarePromptBuilderTest(absltest.TestCase):
     )
     self.assertEqual(100, builder_with_value.context_window_chars)
 
+  def test_negative_context_window_is_rejected(self):
+    """Negative windows must be rejected instead of slicing from the front."""
+    generator = self._create_generator()
+    with self.assertRaisesRegex(ValueError, "context_window_chars"):
+      prompting.ContextAwarePromptBuilder(generator, context_window_chars=-1)
+
+  def test_zero_context_window_disables_context(self):
+    """A zero-length window keeps context disabled, like None."""
+    generator = self._create_generator()
+    builder = prompting.ContextAwarePromptBuilder(
+        generator, context_window_chars=0
+    )
+    builder.build_prompt(chunk_text="First chunk.", document_id="doc1")
+    second_prompt = builder.build_prompt(
+        chunk_text="Second chunk.", document_id="doc1"
+    )
+    self.assertNotIn(
+        prompting.ContextAwarePromptBuilder._CONTEXT_PREFIX, second_prompt
+    )
+
   def test_first_chunk_has_no_previous_context(self):
     """Verifies the first chunk does not include previous context."""
     generator = self._create_generator()

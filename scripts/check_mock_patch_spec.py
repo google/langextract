@@ -107,6 +107,8 @@ def check_paths(
   """
   files = []
   for path in paths:
+    # Resolved so the key is the same however the path was spelled.
+    path = path.resolve()
     root = path if path.is_dir() else path.parent
     for file in sorted(path.rglob("*.py")) if path.is_dir() else [path]:
       key = (root.name / file.relative_to(root)).as_posix()
@@ -120,7 +122,7 @@ def check_paths(
       continue
     locations = ", ".join(str(line) for line in lines)
     message = (
-        f"{file}: {len(lines)} mock.patch or mock.patch.object call(s) pass"
+        f"{key}: {len(lines)} mock.patch or mock.patch.object call(s) pass"
         " none of autospec, spec, spec_set, new or new_callable. Add"
         " autospec=True to the call you added, or spec=/new= when autospec"
         f" does not apply. Unspecced calls are on lines: {locations}."
@@ -128,7 +130,8 @@ def check_paths(
     if allowed:
       message += (
           f" {allowed} of these predate the check and are tolerated; do not"
-          " raise that number."
+          " raise that number in _LEGACY_UNSPECCED in"
+          " scripts/check_mock_patch_spec.py."
       )
     errors.append(message)
   return errors

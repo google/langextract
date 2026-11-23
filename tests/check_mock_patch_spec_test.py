@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import importlib.util
+import os
 import pathlib
 import shutil
 import tempfile
@@ -135,6 +136,13 @@ class CheckPathsTest(absltest.TestCase):
 
     self.assertEmpty(errors)
 
+  def test_legacy_file_below_its_recorded_count_passes(self):
+    errors = checker.check_paths(
+        [self.tests_dir], legacy={"tests/sample_test.py": 3}
+    )
+
+    self.assertEmpty(errors)
+
   def test_legacy_file_above_its_recorded_count_fails(self):
     errors = checker.check_paths(
         [self.tests_dir], legacy={"tests/sample_test.py": 1}
@@ -146,6 +154,16 @@ class CheckPathsTest(absltest.TestCase):
   def test_single_file_uses_the_same_legacy_key_as_its_directory(self):
     errors = checker.check_paths(
         [self.test_file], legacy={"tests/sample_test.py": 2}
+    )
+
+    self.assertEmpty(errors)
+
+  def test_relative_path_from_inside_the_directory_uses_the_same_key(self):
+    self.addCleanup(os.chdir, os.getcwd())
+    os.chdir(self.tests_dir)
+
+    errors = checker.check_paths(
+        [pathlib.Path(".")], legacy={"tests/sample_test.py": 2}
     )
 
     self.assertEmpty(errors)

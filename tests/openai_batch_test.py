@@ -178,7 +178,9 @@ class OpenAIBatchConfigTest(absltest.TestCase):
 class OpenAIBatchHelperTest(parameterized.TestCase):
 
   @mock.patch(
-      'langextract.providers.openai_batch.time.sleep', return_value=None
+      'langextract.providers.openai_batch.time.sleep',
+      return_value=None,
+      autospec=True,
   )
   def test_orders_results_by_custom_id(self, _mock_sleep):
     client = _FakeClient()
@@ -216,7 +218,9 @@ class OpenAIBatchHelperTest(parameterized.TestCase):
     self.assertEqual(res, ['A', 'B'])
 
   @mock.patch(
-      'langextract.providers.openai_batch.time.sleep', return_value=None
+      'langextract.providers.openai_batch.time.sleep',
+      return_value=None,
+      autospec=True,
   )
   def test_splits_jobs_by_batch_size(self, _mock_sleep):
     client = _FakeClient()
@@ -530,7 +534,9 @@ class OpenAIBatchHelperTest(parameterized.TestCase):
     self.assertIn('unexpected custom_id', '\n'.join(logs.output))
 
   @mock.patch(
-      'langextract.providers.openai_batch.time.sleep', return_value=None
+      'langextract.providers.openai_batch.time.sleep',
+      return_value=None,
+      autospec=True,
   )
   def test_output_download_retries_transient_forbidden(self, mock_sleep):
     client = _FakeClient()
@@ -571,7 +577,9 @@ class OpenAIBatchHelperTest(parameterized.TestCase):
     mock_sleep.assert_called_once_with(1)
 
   @mock.patch(
-      'langextract.providers.openai_batch.time.sleep', return_value=None
+      'langextract.providers.openai_batch.time.sleep',
+      return_value=None,
+      autospec=True,
   )
   def test_output_download_forbidden_mentions_files_permission(
       self, mock_sleep
@@ -708,7 +716,7 @@ class OpenAIBatchHelperTest(parameterized.TestCase):
           },
       )
 
-  @mock.patch('langextract.providers.openai_batch.time.time')
+  @mock.patch('langextract.providers.openai_batch.time.time', autospec=True)
   def test_timeout_cancels_job(self, mock_time):
     # The second clock read crosses the timeout immediately, without sleeping.
     mock_time.side_effect = [0, 10]
@@ -737,7 +745,9 @@ class OpenAIBatchHelperTest(parameterized.TestCase):
     self.assertEqual(client.batches.cancelled, ['batch-1'])
 
   @mock.patch(
-      'langextract.providers.openai_batch.time.sleep', return_value=None
+      'langextract.providers.openai_batch.time.sleep',
+      return_value=None,
+      autospec=True,
   )
   def test_default_completion_window_is_sent(self, _mock_sleep):
     client = _FakeClient()

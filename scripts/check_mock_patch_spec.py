@@ -21,10 +21,6 @@ when an attribute name is misspelled. Every `mock.patch(...)` and
 `mock.patch.object(...)` call must therefore pass one of `autospec`, `spec`,
 `spec_set`, `new` (keyword or positional) or `new_callable`.
 
-Files that predate this check are listed in `_LEGACY_UNSPECCED` with the
-number of unspecced calls they had when it was added. A file fails when it has
-more than that.
-
 Usage:
   python scripts/check_mock_patch_spec.py tests
 """
@@ -47,23 +43,6 @@ _NEW_POSITION: Mapping[str, int] = {
     "patch.object": 2,
     "mock.patch.object": 2,
     "unittest.mock.patch.object": 2,
-}
-
-# Unspecced calls that predate this check, keyed by the checked directory's
-# name plus the path inside it. Do not raise a number. Lower it when you fix
-# calls in that file.
-_LEGACY_UNSPECCED: Mapping[str, int] = {
-    "tests/extract_schema_integration_test.py": 17,
-    "tests/factory_schema_test.py": 11,
-    "tests/gemini_retry_test.py": 8,
-    "tests/inference_test.py": 27,
-    "tests/init_test.py": 22,
-    "tests/io_test.py": 3,
-    "tests/openai_batch_test.py": 6,
-    "tests/provider_plugin_test.py": 9,
-    "tests/provider_schema_test.py": 4,
-    "tests/test_gemini_batch_api.py": 1,
-    "tests/test_kwargs_passthrough.py": 9,
 }
 
 
@@ -93,47 +72,29 @@ def find_unspecced_patches(
   return sorted(lines)
 
 
-def check_paths(
-    paths: Sequence[pathlib.Path], legacy: Mapping[str, int]
-) -> list[str]:
+def check_paths(paths: Sequence[pathlib.Path]) -> list[str]:
   """Checks every Python file under the given paths.
 
   Args:
     paths: Files or directories to check.
-    legacy: Allowed number of unspecced calls per file, keyed by the checked
-      directory's name plus the path inside it, such as "tests/io_test.py".
 
   Returns:
     One message per failing file. Empty when everything passes.
   """
   errors = []
   for path in paths:
-    # Resolved so the key is the same however the path was spelled.
-    path = path.resolve()
-    if path.is_dir():
-      root, files = path, sorted(path.rglob("*.py"))
-    else:
-      root, files = path.parent, [path]
+    files = sorted(path.rglob("*.py")) if path.is_dir() else [path]
     for file in files:
-      key = (root.name / file.relative_to(root)).as_posix()
       lines = find_unspecced_patches(file.read_bytes(), filename=str(file))
-      allowed = legacy.get(key, 0)
-      if len(lines) <= allowed:
+      if not lines:
         continue
       locations = ", ".join(str(line) for line in lines)
-      message = (
-          f"{key}: {len(lines)} mock.patch or mock.patch.object call(s) pass"
+      errors.append(
+          f"{file}: {len(lines)} mock.patch or mock.patch.object call(s) pass"
           " none of autospec, spec, spec_set, new or new_callable. Add"
-          " autospec=True to the call you added, or spec=/new= when autospec"
-          f" does not apply. Unspecced calls are on lines: {locations}."
+          " autospec=True, or spec=/new= when autospec does not apply."
+          f" Unspecced calls are on lines: {locations}."
       )
-      if allowed:
-        message += (
-            f" {allowed} of these predate the check and are tolerated; do not"
-            " raise that number in _LEGACY_UNSPECCED in"
-            " scripts/check_mock_patch_spec.py."
-        )
-      errors.append(message)
   return errors
 
 
@@ -146,7 +107,7 @@ def main(argv: Sequence[str]) -> int:
   if missing:
     print(f"No such file or directory: {', '.join(missing)}", file=sys.stderr)
     return 2
-  errors = check_paths(paths, _LEGACY_UNSPECCED)
+  errors = check_paths(paths)
   for error in errors:
     print(error, file=sys.stderr)
   return 1 if errors else 0

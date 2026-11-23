@@ -214,7 +214,9 @@ class OllamaFormatParameterTest(absltest.TestCase):
       mock_post.return_value = mock_response
 
       # Mock the registry to return OllamaLanguageModel
-      with mock.patch("langextract.providers.registry.resolve") as mock_resolve:
+      with mock.patch(
+          "langextract.providers.registry.resolve", autospec=True
+      ) as mock_resolve:
         mock_resolve.return_value = ollama.OllamaLanguageModel
 
         examples = [
@@ -269,7 +271,9 @@ class OllamaFormatParameterTest(absltest.TestCase):
       }
       mock_post.return_value = mock_response
 
-      with mock.patch("langextract.providers.registry.resolve") as mock_resolve:
+      with mock.patch(
+          "langextract.providers.registry.resolve", autospec=True
+      ) as mock_resolve:
         mock_resolve.return_value = ollama.OllamaLanguageModel
 
         examples = [
@@ -357,7 +361,9 @@ class OllamaYAMLOverrideTest(absltest.TestCase):
       mock_response.json.return_value = {"response": '{"extractions": []}'}
       mock_post.return_value = mock_response
 
-      with mock.patch("langextract.providers.registry.resolve") as mock_resolve:
+      with mock.patch(
+          "langextract.providers.registry.resolve", autospec=True
+      ) as mock_resolve:
         mock_resolve.return_value = ollama.OllamaLanguageModel
 
         config = factory.ModelConfig(
@@ -397,7 +403,9 @@ class OllamaYAMLOverrideTest(absltest.TestCase):
       mock_response.json.return_value = {"response": '{"extractions": []}'}
       mock_post.return_value = mock_response
 
-      with mock.patch("langextract.providers.registry.resolve") as mock_resolve:
+      with mock.patch(
+          "langextract.providers.registry.resolve", autospec=True
+      ) as mock_resolve:
         mock_resolve.return_value = ollama.OllamaLanguageModel
 
         config = factory.ModelConfig(

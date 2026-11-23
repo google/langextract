@@ -93,7 +93,10 @@ class TestBaseLanguageModel(absltest.TestCase):
 
 class TestOllamaLanguageModel(absltest.TestCase):
 
-  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  @mock.patch(
+      "langextract.providers.ollama.OllamaLanguageModel._ollama_query",
+      autospec=True,
+  )
   def test_ollama_infer(self, mock_ollama_query):
 
     # Real gemma2 response structure from Ollama API for validation
@@ -152,6 +155,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     results = list(model.infer(batch_prompts))
 
     mock_ollama_query.assert_called_once_with(
+        model,
         prompt="What is bus in Hungarian?",
         model="gemma2:latest",
         structured_output_format="json",
@@ -165,7 +169,10 @@ class TestOllamaLanguageModel(absltest.TestCase):
     ]]
     self.assertEqual(results, expected_results)
 
-  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  @mock.patch(
+      "langextract.providers.ollama.OllamaLanguageModel._ollama_query",
+      autospec=True,
+  )
   def test_ollama_infer_prefers_response_over_thinking(self, mock_ollama_query):
     """Test Ollama inference ignores reasoning when final output is present."""
     thinking_response = {
@@ -193,6 +200,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     results = list(model.infer(batch_prompts))
 
     mock_ollama_query.assert_called_once_with(
+        model,
         prompt="What is bus in Hungarian?",
         model="deepseek-r1:latest",
         structured_output_format="json",
@@ -206,7 +214,10 @@ class TestOllamaLanguageModel(absltest.TestCase):
     ]]
     self.assertEqual(results, expected_results)
 
-  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  @mock.patch(
+      "langextract.providers.ollama.OllamaLanguageModel._ollama_query",
+      autospec=True,
+  )
   def test_ollama_infer_raises_on_empty_response_with_thinking(
       self, mock_ollama_query
   ):
@@ -230,7 +241,10 @@ class TestOllamaLanguageModel(absltest.TestCase):
     ):
       list(model.infer(["What is bus in Hungarian?"]))
 
-  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  @mock.patch(
+      "langextract.providers.ollama.OllamaLanguageModel._ollama_query",
+      autospec=True,
+  )
   def test_ollama_infer_raises_when_response_missing(self, mock_ollama_query):
     """Test Ollama inference requires final generated text."""
     mock_ollama_query.return_value = {
@@ -250,7 +264,10 @@ class TestOllamaLanguageModel(absltest.TestCase):
     ):
       list(model.infer(["What is bus in Hungarian?"]))
 
-  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  @mock.patch(
+      "langextract.providers.ollama.OllamaLanguageModel._ollama_query",
+      autospec=True,
+  )
   def test_ollama_infer_preserves_explicit_think(self, mock_ollama_query):
     """Test user-provided think setting is passed through."""
     mock_ollama_query.return_value = {
@@ -266,6 +283,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     list(model.infer(["Test prompt"], think=True))
 
     mock_ollama_query.assert_called_once_with(
+        model,
         prompt="Test prompt",
         model="deepseek-r1:latest",
         structured_output_format="json",
@@ -273,7 +291,10 @@ class TestOllamaLanguageModel(absltest.TestCase):
         think=True,
     )
 
-  @mock.patch("langextract.providers.ollama.OllamaLanguageModel._ollama_query")
+  @mock.patch(
+      "langextract.providers.ollama.OllamaLanguageModel._ollama_query",
+      autospec=True,
+  )
   def test_ollama_infer_default_think_does_not_mutate_stored_kwargs(
       self, mock_ollama_query
   ):
@@ -437,7 +458,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     # timeout is passed to requests.post, not in the JSON payload
     self.assertEqual(call_args.kwargs["timeout"], 300)
 
-  @mock.patch("requests.post")
+  @mock.patch("requests.post", autospec=True)
   def test_ollama_stop_and_top_p_passthrough(self, mock_post):
     """Verify stop and top_p parameters are passed to Ollama API."""
     mock_response = mock.Mock()
@@ -465,7 +486,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     self.assertEqual(json_payload["stop"], ["\\n\\n", "END"])
     self.assertEqual(json_payload["options"]["top_p"], 0.9)
 
-  @mock.patch("requests.post")
+  @mock.patch("requests.post", autospec=True)
   def test_ollama_defaults_when_unspecified(self, mock_post):
     """Verify Ollama uses correct defaults when parameters are not specified."""
     mock_response = mock.Mock()
@@ -491,7 +512,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     self.assertEqual(json_payload["options"]["num_ctx"], 2048)
     self.assertEqual(call_args.kwargs["timeout"], 120)
 
-  @mock.patch("requests.post")
+  @mock.patch("requests.post", autospec=True)
   def test_ollama_runtime_kwargs_override_stored(self, mock_post):
     """Verify runtime kwargs override stored kwargs."""
     mock_response = mock.Mock()
@@ -518,7 +539,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     self.assertEqual(json_payload["options"]["temperature"], 0.8)
     self.assertEqual(json_payload["options"]["keep_alive"], 600)
 
-  @mock.patch("requests.post")
+  @mock.patch("requests.post", autospec=True)
   def test_ollama_temperature_zero(self, mock_post):
     """Test that temperature=0.0 is properly passed to Ollama."""
     mock_response = mock.Mock()
@@ -554,7 +575,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     mock_response.json.return_value = {"response": "test output"}
 
     with mock.patch.object(
-        model._requests, "post", return_value=mock_response
+        model._requests, "post", return_value=mock_response, autospec=True
     ) as mock_post:
       model._ollama_query(prompt="test prompt")
 
@@ -579,7 +600,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
     mock_response.json.return_value = {"response": "test output"}
 
     with mock.patch.object(
-        model._requests, "post", return_value=mock_response
+        model._requests, "post", return_value=mock_response, autospec=True
     ) as mock_post:
       list(model.infer(["test prompt"]))
 
@@ -594,7 +615,7 @@ class TestOllamaLanguageModel(absltest.TestCase):
 
 class TestGeminiLanguageModel(absltest.TestCase):
 
-  @mock.patch("google.genai.Client")
+  @mock.patch("google.genai.Client", autospec=True)
   def test_gemini_allowlist_filtering(self, mock_client_class):
     """Test that only allow-listed keys are passed through."""
     mock_client = mock.Mock()
@@ -739,7 +760,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
     self.assertEqual(0.8, config["top_p"])
     self.assertEqual(40, config["top_k"])
 
-  @mock.patch("google.genai.Client")
+  @mock.patch("google.genai.Client", autospec=True)
   def test_gemini_runtime_kwargs_filtered(self, mock_client_class):
     """Test that runtime kwargs are also filtered by allow-list."""
     mock_client = mock.Mock()
@@ -803,7 +824,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
 
     self.assertIn("requires both project and location", str(cm.exception))
 
-  @mock.patch("google.genai.Client")
+  @mock.patch("google.genai.Client", autospec=True)
   def test_gemini_vertexai_initialization(self, mock_client_class):
     """Test successful initialization with Vertex AI config."""
     mock_client = mock.Mock()
@@ -826,8 +847,8 @@ class TestGeminiLanguageModel(absltest.TestCase):
         http_options=None,
     )
 
-  @mock.patch("absl.logging.warning")
-  @mock.patch("google.genai.Client")
+  @mock.patch("absl.logging.warning", autospec=True)
+  @mock.patch("google.genai.Client", autospec=True)
   def test_gemini_warns_when_both_auth_provided(
       self, mock_client_class, mock_warning
   ):
@@ -847,7 +868,7 @@ class TestGeminiLanguageModel(absltest.TestCase):
     self.assertIn("Both API key and Vertex AI", warning_msg)
     self.assertIn("API key will take precedence", warning_msg)
 
-  @mock.patch("google.genai.Client")
+  @mock.patch("google.genai.Client", autospec=True)
   def test_gemini_vertexai_with_http_options(self, mock_client_class):
     """Test that http_options are passed to genai.Client for VPC endpoints."""
     mock_client = mock.Mock()
@@ -878,7 +899,7 @@ class TestOpenAILanguageModelInference(parameterized.TestCase):
       ("without", "test-api-key", None, "gpt-4o-mini", 0.5),
       ("with", "test-api-key", "http://127.0.0.1:9001/v1", "gpt-4o-mini", 0.5),
   )
-  @mock.patch("openai.OpenAI")
+  @mock.patch("openai.OpenAI", autospec=True)
   def test_openai_infer_with_parameters(
       self, api_key, base_url, model_id, temperature, mock_openai_class
   ):
@@ -1085,7 +1106,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
       openai.OpenAILanguageModel(api_key=None)
     self.assertEqual(str(context.exception), "API key not provided.")
 
-  @mock.patch("openai.OpenAI")
+  @mock.patch("openai.OpenAI", autospec=True)
   def test_openai_extra_kwargs_passed(self, mock_openai_class):
     """Test that extra kwargs are passed to OpenAI API."""
     mock_client = mock.Mock()
@@ -1114,7 +1135,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(call_args.kwargs["presence_penalty"], 0.7)
     self.assertEqual(call_args.kwargs["seed"], 42)
 
-  @mock.patch("openai.OpenAI")
+  @mock.patch("openai.OpenAI", autospec=True)
   def test_openai_runtime_kwargs_override(self, mock_openai_class):
     """Test that runtime kwargs override stored kwargs."""
     mock_client = mock.Mock()
@@ -1140,7 +1161,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(call_args.kwargs["temperature"], 0.8)
     self.assertEqual(call_args.kwargs["seed"], 456)
 
-  @mock.patch("openai.OpenAI")
+  @mock.patch("openai.OpenAI", autospec=True)
   def test_openai_json_response_format(self, mock_openai_class):
     """Test that JSON format adds response_format parameter."""
     mock_client = mock.Mock()
@@ -1167,7 +1188,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
         call_args.kwargs["response_format"], {"type": "json_object"}
     )
 
-  @mock.patch("openai.OpenAI")
+  @mock.patch("openai.OpenAI", autospec=True)
   def test_openai_temperature_zero(self, mock_openai_class):
     """Verify temperature=0.0 is properly passed to the API."""
     mock_client = mock.Mock()
@@ -1192,7 +1213,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(call_args.kwargs["model"], "gpt-4o-mini")
     self.assertEqual(call_args.kwargs["n"], 1)
 
-  @mock.patch("openai.OpenAI")
+  @mock.patch("openai.OpenAI", autospec=True)
   def test_openai_temperature_none_not_sent(self, mock_openai_class):
     """Test that temperature=None is not sent to the API."""
     mock_client = mock.Mock()
@@ -1218,7 +1239,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     call_args = mock_client.chat.completions.create.call_args
     self.assertNotIn("temperature", call_args.kwargs)
 
-  @mock.patch("openai.OpenAI")
+  @mock.patch("openai.OpenAI", autospec=True)
   def test_openai_none_values_filtered(self, mock_openai_class):
     """Test that None values are not passed to the API."""
     mock_client = mock.Mock()
@@ -1244,7 +1265,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertNotIn("top_p", call_args.kwargs)
     self.assertNotIn("seed", call_args.kwargs)
 
-  @mock.patch("openai.OpenAI")
+  @mock.patch("openai.OpenAI", autospec=True)
   def test_openai_no_system_message_when_not_json_yaml(self, mock_openai_class):
     """Test that no system message is sent when format_type is not JSON/YAML."""
     mock_client = mock.Mock()
@@ -1299,7 +1320,7 @@ class TestOpenAILanguageModel(absltest.TestCase):
     self.assertEqual(call_args.kwargs["reasoning_effort"], "low")
     self.assertNotIn("reasoning", call_args.kwargs)
 
-  @mock.patch("google.genai.Client")
+  @mock.patch("google.genai.Client", autospec=True)
   def test_gemini_none_values_filtered(self, mock_client_class):
     """Test that None values are not passed to Gemini API."""
     mock_client = mock.Mock()

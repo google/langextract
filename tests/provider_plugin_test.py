@@ -98,7 +98,10 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
+        metadata,
+        "entry_points",
+        return_value=_create_mock_entry_points([ep]),
+        autospec=True,
     ):
       lx.providers.load_plugins_once()
 
@@ -119,7 +122,9 @@ class PluginSmokeTest(absltest.TestCase):
     """Test that LANGEXTRACT_DISABLE_PLUGINS=1 prevents plugin loading."""
 
     with mock.patch.dict("os.environ", {"LANGEXTRACT_DISABLE_PLUGINS": "1"}):
-      with mock.patch.object(metadata, "entry_points") as mock_ep:
+      with mock.patch.object(
+          metadata, "entry_points", autospec=True
+      ) as mock_ep:
         lx.providers.load_plugins_once()
         mock_ep.assert_not_called()
 
@@ -140,6 +145,7 @@ class PluginSmokeTest(absltest.TestCase):
         metadata,
         "entry_points",
         return_value=_create_mock_entry_points([bad_ep]),
+        autospec=True,
     ):
       lx.providers.load_plugins_once()
 
@@ -176,7 +182,10 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
+        metadata,
+        "entry_points",
+        return_value=_create_mock_entry_points([ep]),
+        autospec=True,
     ) as m:
       lx.providers.load_plugins_once()
       lx.providers.load_plugins_once()  # should be a no-op
@@ -199,6 +208,7 @@ class PluginSmokeTest(absltest.TestCase):
         metadata,
         "entry_points",
         return_value=_create_mock_entry_points([bad_ep]),
+        autospec=True,
     ):
       lx.providers.load_plugins_once()
       # The system should remain functional even if a bad provider is loaded
@@ -237,7 +247,10 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
+        metadata,
+        "entry_points",
+        return_value=_create_mock_entry_points([ep]),
+        autospec=True,
     ):
       lx.providers.load_plugins_once()
 
@@ -269,7 +282,10 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
+        metadata,
+        "entry_points",
+        return_value=_create_mock_entry_points([ep]),
+        autospec=True,
     ):
       lx.providers.load_plugins_once()
 
@@ -330,7 +346,10 @@ class PluginSmokeTest(absltest.TestCase):
     )
 
     with mock.patch.object(
-        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
+        metadata,
+        "entry_points",
+        return_value=_create_mock_entry_points([ep]),
+        autospec=True,
     ):
       lx.providers.load_plugins_once()
 
@@ -442,7 +461,10 @@ class PluginE2ETest(absltest.TestCase):
     self.addCleanup(setattr, lx.providers, "_plugins_loaded", False)
 
     with mock.patch.object(
-        metadata, "entry_points", return_value=_create_mock_entry_points([ep])
+        metadata,
+        "entry_points",
+        return_value=_create_mock_entry_points([ep]),
+        autospec=True,
     ):
       lx.providers.load_plugins_once()
 

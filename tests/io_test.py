@@ -56,6 +56,7 @@ class IoTest(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmpdir:
       with mock.patch(
           'langextract.io.progress.create_save_progress_bar',
+          autospec=True,
           return_value=tracker,
       ):
         with self.assertRaisesRegex(RuntimeError, 'boom'):
@@ -86,9 +87,12 @@ class IoTest(unittest.TestCase):
 
     response.iter_content.side_effect = broken_iter_content
 
-    with mock.patch('langextract.io.requests.get', return_value=response):
+    with mock.patch(
+        'langextract.io.requests.get', autospec=True, return_value=response
+    ):
       with mock.patch(
           'langextract.io.progress.create_download_progress_bar',
+          autospec=True,
           return_value=tracker,
       ):
         with self.assertRaisesRegex(

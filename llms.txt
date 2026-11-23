@@ -1,0 +1,31 @@
+# LangExtract
+
+> LangExtract is a Python library that uses LLMs to extract structured, source-grounded information from unstructured text. It chunks long documents, runs inference in parallel, and maps every extraction back to its exact character span in the source text. It supports Gemini, OpenAI, local models via Ollama, and community provider plugins. This is not an officially supported Google product.
+
+Key notes for agents:
+
+- Install with `pip install langextract`. Cloud models need `LANGEXTRACT_API_KEY`; Ollama needs no key.
+- The four inputs to `lx.extract()` are `text_or_documents`, `prompt_description`, `examples`, and a model (`model_id` or a custom `model`). Few-shot `examples` with verbatim `extraction_text` drive output structure.
+- Results are `AnnotatedDocument` objects. Each `Extraction` carries `extraction_class`, `extraction_text`, `char_interval`, and `attributes`.
+- Use `lx.io.save_annotated_documents()` to write JSONL and `lx.visualize()` to produce a self-contained interactive HTML review page.
+- Long documents: `fetch_urls=True`, `extraction_passes=3`, `max_workers=20`, `max_char_buffer=1000`.
+- For OpenAI-compatible endpoints use `ModelConfig(model_id=..., provider="openai", provider_kwargs={...})`. Leave `fence_output` and `use_schema_constraints` unset so the provider auto-configures.
+- Output schemas: `output_schema` (Gemini/OpenAI) or `resolver_params={'format_handler': FormatHandler(...)}`. Legacy resolver params are deprecated and will be removed in v2.0.
+
+## Core documentation
+
+- [Quickstart and full README](https://github.com/google/langextract/blob/main/README.md): Installation, API key setup, quick start, long-document scaling, and contributing/testing commands.
+- [Contributing guide](https://github.com/google/langextract/blob/main/CONTRIBUTING.md): CLA, issue templates, development setup, formatting, linting, and PR process.
+
+## Examples
+
+- [Output schema](https://github.com/google/langextract/blob/main/docs/examples/output_schema.md): Constrain extraction attributes with enums and JSON Schema.
+- [Medication extraction](https://github.com/google/langextract/blob/main/docs/examples/medication_examples.md): Healthcare extraction demo with relationship attributes.
+- [Longer text example](https://github.com/google/langextract/blob/main/docs/examples/longer_text_example.md): Romeo and Juliet via URL with parallel processing and extraction passes.
+- [Batch API example](https://github.com/google/langextract/blob/main/docs/examples/batch_api_example.md): Vertex AI Batch API for cost-sensitive workloads.
+- [Japanese extraction](https://github.com/google/langextract/blob/main/docs/examples/japanese_extraction.md): Non-English extraction example.
+
+## Reference
+
+- [API reference source](https://github.com/google/langextract/tree/main/langextract): Package source, including `extract`, `annotation`, `resolver`, `prompting`, and `visualization` modules.
+- [Provider plugins](https://github.com/google/langextract/blob/main/COMMUNITY_PROVIDERS.md): Registry of community providers and the guide to building one.

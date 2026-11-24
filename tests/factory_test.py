@@ -20,6 +20,8 @@ for router. The no-name-in-module warning for providers.registry is expected.
 # pylint: disable=no-name-in-module
 
 import os
+import sys
+import types as py_types
 from unittest import mock
 
 from absl.testing import absltest
@@ -35,6 +37,8 @@ import langextract as lx
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import types
+from langextract.providers import ollama
+from langextract.providers import openai
 from langextract.providers import router
 
 
@@ -548,6 +552,188 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
     model = factory.create_model(config, fence_output=False)
     self.assertIsInstance(model, FakeGeminiProvider)
     self.assertEqual(model.model_id, "gemini-pro")
+
+
+class OllamaEnvironmentDefaultsTest(absltest.TestCase):
+
+  @mock.patch.dict(
+      os.environ,
+      {"OPENAI_API_KEY": "openai-key", "LANGEXTRACT_API_KEY": "fallback"},
+      clear=True,
+  )
+  def test_ollama_provider_does_not_receive_cloud_api_key(self):
+    result = factory._kwargs_with_environment_defaults(
+        "gpt-oss:20b", {}, provider_class=ollama.OllamaLanguageModel
+    )
+
+    self.assertNotIn("api_key", result)
+
+  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "openai-key"}, clear=True)
+  def test_openai_provider_still_receives_openai_key(self):
+    result = factory._kwargs_with_environment_defaults(
+        "gpt-4o", {}, provider_class=openai.OpenAILanguageModel
+    )
+
+    self.assertEqual(result["api_key"], "openai-key")
+
+  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "openai-key"}, clear=True)
+  def test_explicit_api_key_is_kept_for_ollama_provider(self):
+    result = factory._kwargs_with_environment_defaults(
+        "gpt-oss:20b",
+        {"api_key": "proxy-key"},
+        provider_class=ollama.OllamaLanguageModel,
+    )
+
+    self.assertEqual(result["api_key"], "proxy-key")
+
+  @mock.patch.dict(
+      os.environ, {"OLLAMA_BASE_URL": "http://custom:11434"}, clear=True
+  )
+  def test_base_url_from_environment_applies_to_any_ollama_model(self):
+    result = factory._kwargs_with_environment_defaults(
+        "gemma2:2b", {}, provider_class=ollama.OllamaLanguageModel
+    )
+
+    self.assertEqual(result["base_url"], "http://custom:11434")
+
+  @mock.patch.dict(
+      os.environ, {"OLLAMA_BASE_URL": "http://custom:11434"}, clear=True
+  )
+  def test_explicit_model_url_is_not_overridden_by_environment(self):
+    result = factory._kwargs_with_environment_defaults(
+        "ollama/gemma2",
+        {"model_url": "http://explicit:11434"},
+        provider_class=ollama.OllamaLanguageModel,
+    )
+
+    self.assertNotIn("base_url", result)
+
+  @mock.patch.dict(
+      os.environ, {"OLLAMA_BASE_URL": "http://custom:11434"}, clear=True
+  )
+  def test_base_url_from_environment_skipped_for_other_providers(self):
+    result = factory._kwargs_with_environment_defaults(
+        "gpt-4o", {}, provider_class=openai.OpenAILanguageModel
+    )
+
+    self.assertNotIn("base_url", result)
+
+  @mock.patch.dict(
+      os.environ,
+      {
+          "OPENAI_API_KEY": "openai-key",
+          "OLLAMA_BASE_URL": "http://custom:11434",
+      },
+      clear=True,
+  )
+  def test_create_model_for_gpt_oss_uses_ollama_without_openai_key(self):
+    router.clear()
+    self.addCleanup(router.clear)
+    self.enter_context(
+        mock.patch.object(providers, "load_plugins_once", autospec=True)
+    )
+
+    model = factory.create_model(factory.ModelConfig(model_id="gpt-oss:20b"))
+
+    self.assertIsInstance(model, ollama.OllamaLanguageModel)
+    self.assertIsNone(model._api_key)
+    self.assertEqual(model._model_url, "http://custom:11434")
+
+  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "openai-key"}, clear=True)
+  def test_schema_path_for_gpt_oss_does_not_receive_openai_key(self):
+    router.clear()
+    self.addCleanup(router.clear)
+    self.enter_context(
+        mock.patch.object(providers, "load_plugins_once", autospec=True)
+    )
+
+    model = factory.create_model(
+        factory.ModelConfig(model_id="gpt-oss:20b"),
+        examples=[
+            data.ExampleData(
+                text="Alice arrived.",
+                extractions=[
+                    data.Extraction(
+                        extraction_class="person", extraction_text="Alice"
+                    )
+                ],
+            )
+        ],
+        use_schema_constraints=True,
+    )
+
+    self.assertIsInstance(model, ollama.OllamaLanguageModel)
+    self.assertIsNone(model._api_key)
+
+  @mock.patch.dict(
+      os.environ, {"OLLAMA_BASE_URL": "http://custom:11434"}, clear=True
+  )
+  def test_explicit_base_url_is_not_overridden_by_environment(self):
+    result = factory._kwargs_with_environment_defaults(
+        "gemma2:2b",
+        {"base_url": "http://explicit:11434"},
+        provider_class=ollama.OllamaLanguageModel,
+    )
+
+    self.assertEqual(result["base_url"], "http://explicit:11434")
+
+  @mock.patch.dict(os.environ, {}, clear=True)
+  def test_model_id_naming_ollama_falls_back_to_localhost(self):
+    result = factory._kwargs_with_environment_defaults("ollama/llama2", {})
+
+    self.assertEqual(result["base_url"], "http://localhost:11434")
+
+  @mock.patch.dict(
+      os.environ,
+      {
+          "OPENAI_API_KEY": "openai-key",
+          "OLLAMA_BASE_URL": "http://custom:11434",
+      },
+      clear=True,
+  )
+  def test_ollama_subclass_is_treated_as_ollama(self):
+
+    class GatewayOllamaModel(ollama.OllamaLanguageModel):
+      pass
+
+    result = factory._kwargs_with_environment_defaults(
+        "gpt-oss:20b", {}, provider_class=GatewayOllamaModel
+    )
+
+    self.assertNotIn("api_key", result)
+    self.assertEqual(result["base_url"], "http://custom:11434")
+
+  def test_ollama_detection_is_false_while_module_is_still_importing(self):
+    module_name = "langextract.providers.ollama"
+    partially_imported = py_types.ModuleType(module_name)
+
+    with mock.patch.dict(sys.modules, {module_name: partially_imported}):
+      detected = factory._is_ollama_provider(openai.OpenAILanguageModel)
+
+    self.assertFalse(detected)
+
+  def test_ollama_detection_is_false_for_non_class_provider(self):
+    self.assertFalse(factory._is_ollama_provider(lambda **kwargs: None))
+
+  @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "openai-key"}, clear=True)
+  def test_other_provider_with_ollama_in_model_id_still_receives_key(self):
+    result = factory._kwargs_with_environment_defaults(
+        "ollama/gpt-4", {}, provider_class=openai.OpenAILanguageModel
+    )
+
+    self.assertEqual(result["api_key"], "openai-key")
+
+  @mock.patch.dict(os.environ, {}, clear=True)
+  def test_ollama_subclass_keeps_its_own_default_url_without_environment(self):
+
+    class GatewayOllamaModel(ollama.OllamaLanguageModel):
+      pass
+
+    result = factory._kwargs_with_environment_defaults(
+        "gemma2:2b", {}, provider_class=GatewayOllamaModel
+    )
+
+    self.assertNotIn("base_url", result)
 
 
 if __name__ == "__main__":

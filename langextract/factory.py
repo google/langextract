@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
+import sys
 import typing
 import warnings
 
@@ -35,6 +36,8 @@ from langextract.core import schema as core_schema
 from langextract.core import types as core_types
 from langextract.providers import patterns
 from langextract.providers import router
+
+_OLLAMA_PROVIDER_MODULE = "langextract.providers.ollama"
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
@@ -55,21 +58,45 @@ class ModelConfig:
   )
 
 
+def _is_ollama_provider(provider_class: typing.Any) -> bool:
+  """Returns True if the provider class is the Ollama provider or a subclass."""
+  # Looked up rather than imported so that other providers do not load Ollama.
+  # The module may be absent or still importing (another thread); in both
+  # cases no class can derive from the Ollama provider yet.
+  ollama_class = getattr(
+      sys.modules.get(_OLLAMA_PROVIDER_MODULE), "OllamaLanguageModel", None
+  )
+  if ollama_class is None or not isinstance(provider_class, type):
+    return False
+  return issubclass(provider_class, ollama_class)
+
+
 def _kwargs_with_environment_defaults(
-    model_id: str, kwargs: dict[str, typing.Any]
+    model_id: str,
+    kwargs: dict[str, typing.Any],
+    provider_class: type[base_model.BaseLanguageModel] | None = None,
 ) -> dict[str, typing.Any]:
   """Add environment-based defaults to provider kwargs.
 
   Args:
     model_id: The model identifier.
     kwargs: Existing keyword arguments.
+    provider_class: The resolved provider class, when known. Ollama needs no
+      API key, so cloud provider keys are never applied to it, and
+      OLLAMA_BASE_URL is applied to it whatever the model is called.
 
   Returns:
     Updated kwargs with environment defaults.
   """
   resolved = dict(kwargs)
+  is_ollama_provider = _is_ollama_provider(provider_class)
+  ollama_in_model_id = "ollama" in model_id.lower()
 
-  if "api_key" not in resolved and not resolved.get("vertexai", False):
+  if (
+      "api_key" not in resolved
+      and not resolved.get("vertexai", False)
+      and not is_ollama_provider
+  ):
     model_lower = model_id.lower()
     env_vars_by_model_pattern = {
         "gemini": ("GEMINI_API_KEY", "LANGEXTRACT_API_KEY"),
@@ -101,10 +128,16 @@ def _kwargs_with_environment_defaults(
             )
         break
 
-  if "ollama" in model_id.lower() and "base_url" not in resolved:
-    resolved["base_url"] = os.getenv(
-        "OLLAMA_BASE_URL", "http://localhost:11434"
-    )
+  if (
+      (is_ollama_provider or ollama_in_model_id)
+      and resolved.get("base_url") is None
+      and resolved.get("model_url") is None
+  ):
+    env_base_url = os.getenv("OLLAMA_BASE_URL")
+    if env_base_url:
+      resolved["base_url"] = env_base_url
+    elif ollama_in_model_id:
+      resolved["base_url"] = "http://localhost:11434"
 
   return resolved
 
@@ -176,7 +209,9 @@ def create_model(
   model_id = config.model_id
 
   kwargs = _kwargs_with_environment_defaults(
-      model_id or config.provider or "", config.provider_kwargs
+      model_id or config.provider or "",
+      config.provider_kwargs,
+      provider_class=provider_class,
   )
 
   if model_id:
@@ -313,7 +348,7 @@ def _create_model_with_schema(
   # Add environment defaults
   model_id = config.model_id
   kwargs = _kwargs_with_environment_defaults(
-      model_id or config.provider or "", kwargs
+      model_id or config.provider or "", kwargs, provider_class=provider_class
   )
 
   if model_id:

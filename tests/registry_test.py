@@ -273,17 +273,13 @@ class RouterCacheTest(absltest.TestCase):
     super().tearDown()
     router.clear()
 
-  def test_caching(self):
-    """Test that resolve results are cached."""
-    # Use direct registration for test provider to avoid module path issues
+  def test_repeated_resolve_is_served_from_cache(self):
     router.register(r"^cached")(FakeProvider)
 
-    # First call
-    result1 = router.resolve("cached-model")
-    # Second call should return cached result
-    result2 = router.resolve("cached-model")
+    router.resolve("cached-model")
+    router.resolve("cached-model")
 
-    self.assertIs(result1, result2)
+    self.assertEqual(router.resolve.cache_info().hits, 1)
 
   def test_resolve_sees_provider_registered_after_first_lookup(self):
     router.register(r"^model", priority=0)(FakeProvider)

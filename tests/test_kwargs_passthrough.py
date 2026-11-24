@@ -19,6 +19,7 @@ from unittest import mock
 import warnings
 
 from absl.testing import parameterized
+import requests
 
 from langextract import factory
 from langextract.core import data
@@ -751,6 +752,19 @@ class TestOllamaAuthSupport(parameterized.TestCase):
     )
     self.assertEqual(options.get('temperature'), 0.5)
     self.assertEqual(options.get('custom_param'), 'value')
+
+  @mock.patch.object(requests, 'post', autospec=True)
+  def test_max_workers_not_in_options(self, mock_post):
+    """max_workers sets LangExtract's concurrency; Ollama must not get it."""
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {'response': '{}'}
+    model = ollama.OllamaLanguageModel(model_id='gemma2:2b', max_workers=4)
+
+    list(model.infer(['test prompt'], max_workers=4))
+
+    self.assertNotIn(
+        'max_workers', mock_post.call_args.kwargs['json']['options']
+    )
 
   @mock.patch('requests.post', autospec=True)
   def test_api_key_without_localhost_warning(self, mock_post):

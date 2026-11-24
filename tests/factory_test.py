@@ -527,10 +527,10 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
   def test_explicit_provider_loads_builtins_before_resolution(self):
     """Builtins must be loaded even when provider is specified explicitly."""
-    # setUp registers only fakes, so this name resolves only if the
-    # built-in providers were loaded.
+    with self.assertRaises(exceptions.InferenceConfigError):
+      router.resolve_provider("OllamaLanguageModel")
     config = factory.ModelConfig(
-        model_id="gemma2:2b", provider="OllamaLanguageModel"
+        model_id="gemini-pro", provider="OllamaLanguageModel"
     )
 
     model = factory.create_model(config)
@@ -538,8 +538,10 @@ class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
   def test_explicit_provider_loads_builtins_with_schema_constraints(self):
     """Builtins must be loaded in the _create_model_with_schema path too."""
+    with self.assertRaises(exceptions.InferenceConfigError):
+      router.resolve_provider("OllamaLanguageModel")
     config = factory.ModelConfig(
-        model_id="gemma2:2b", provider="OllamaLanguageModel"
+        model_id="gemini-pro", provider="OllamaLanguageModel"
     )
 
     # This exercises _create_model_with_schema via the fence_output kwarg.

@@ -898,6 +898,61 @@ class BatchParseItemTest(parameterized.TestCase):
 
     self.assertDictEqual(outputs, {0: "first", 1: "", 2: "third"})
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="truncated_json",
+          line='{"key": "idx-1", "response": {"text": "Patient Alice',
+          problem="not valid JSON",
+      ),
+      dict(
+          testcase_name="json_array",
+          line='["Patient Alice"]',
+          problem=r"not an object \(got list\)",
+      ),
+  )
+  def test_unusable_line_raises_without_its_text(self, line, problem):
+    outputs = {}
+
+    with self.assertRaisesRegex(
+        core_exceptions.InferenceRuntimeError, problem
+    ) as raised:
+      gb._parse_batch_line(line, outputs, gb.BatchConfig())
+
+    self.assertEqual(raised.exception.provider, "Gemini")
+    self.assertNotIn("Patient Alice", str(raised.exception))
+    self.assertEmpty(outputs)
+
+  def test_invalid_json_line_error_keeps_the_decode_error(self):
+    with self.assertRaises(core_exceptions.InferenceRuntimeError) as raised:
+      gb._parse_batch_line('{"key": "idx-1", "resp', {}, gb.BatchConfig())
+
+    self.assertIsInstance(raised.exception.__cause__, json.JSONDecodeError)
+    self.assertIs(raised.exception.original, raised.exception.__cause__)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="truncated_json",
+          line='{"key": "idx-1", "response": {"text": "Patient Alice',
+          problem="not valid JSON",
+      ),
+      dict(
+          testcase_name="json_string",
+          line='"Patient Alice"',
+          problem="not an object (got str)",
+      ),
+  )
+  def test_ignored_unusable_line_is_logged_and_skipped(self, line, problem):
+    outputs = {0: "first"}
+    cfg = gb.BatchConfig(ignore_item_errors=True)
+
+    with self.assertLogs(level="WARNING") as logs:
+      gb._parse_batch_line(line, outputs, cfg)
+
+    self.assertDictEqual(outputs, {0: "first"})
+    self.assertLen(logs.output, 1)
+    self.assertIn(problem, logs.output[0])
+    self.assertNotIn("Patient Alice", logs.output[0])
+
 
 class BatchConfigValidationTest(parameterized.TestCase):
   """Test BatchConfig validation logic."""

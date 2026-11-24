@@ -182,16 +182,27 @@ def _extract_text_from_response_body(
         provider='OpenAI',
     ) from e
 
-  content = message.get('content')
-  if content is None:
-    refusal = message.get('refusal')
-    if refusal:
-      raise exceptions.InferenceRuntimeError(
-          f'OpenAI batch response refusal: {refusal}',
-          provider='OpenAI',
-      )
+  # Same rules as OpenAILanguageModel._response_to_scored_output: a refusal
+  # can come with content, and empty content is an answer unless the model
+  # reported a reason other than 'stop'.
+  refusal = message.get('refusal')
+  if refusal:
     raise exceptions.InferenceRuntimeError(
-        "OpenAI batch response body missing 'message.content'",
+        f'OpenAI batch response refusal: {refusal}',
+        provider='OpenAI',
+    )
+  content = message.get('content')
+  if content is None or (not content and finish_reason not in (None, 'stop')):
+    detail = f' (finish_reason={finish_reason})' if finish_reason else ''
+    hint = (
+        ' The output token budget was exhausted before any text was'
+        ' emitted; consider raising max_output_tokens (reasoning models'
+        ' may consume the budget before any text is produced).'
+        if finish_reason == 'length'
+        else ''
+    )
+    raise exceptions.InferenceRuntimeError(
+        f'OpenAI batch response contained no message content{detail}.{hint}',
         provider='OpenAI',
     )
   if content and finish_reason == 'length':

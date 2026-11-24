@@ -175,6 +175,89 @@ class FakeOpenAIProvider(base_model.BaseLanguageModel):
     return self.infer(prompts)
 
 
+class ProviderImportErrorTest(parameterized.TestCase):
+  """Tests that provider import failures raise InferenceConfigError."""
+
+  def setUp(self):
+    super().setUp()
+    router.clear()
+    self.enter_context(mock.patch.object(providers, "_plugins_loaded", True))
+    router.register_lazy(
+        r"^missing_dep_model$",
+        target="langextract_test_missing_module:Provider",
+        priority=100,
+    )
+
+  def tearDown(self):
+    super().tearDown()
+    router.clear()
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="direct",
+          config_kwargs={"model_id": "missing_dep_model"},
+          create_kwargs={},
+      ),
+      dict(
+          testcase_name="schema_constraints",
+          config_kwargs={"model_id": "missing_dep_model"},
+          create_kwargs={"use_schema_constraints": True},
+      ),
+      dict(
+          testcase_name="fence_output",
+          config_kwargs={"model_id": "missing_dep_model"},
+          create_kwargs={"fence_output": False},
+      ),
+      dict(
+          testcase_name="output_schema",
+          config_kwargs={"model_id": "missing_dep_model"},
+          create_kwargs={"output_schema": {"type": "object"}},
+      ),
+      dict(
+          testcase_name="explicit_provider",
+          config_kwargs={"provider": "missing_dep_model"},
+          create_kwargs={},
+      ),
+      dict(
+          testcase_name="explicit_provider_fence_output",
+          config_kwargs={"provider": "missing_dep_model"},
+          create_kwargs={"fence_output": False},
+      ),
+  )
+  def test_create_model_wraps_import_error(self, config_kwargs, create_kwargs):
+    config = factory.ModelConfig(**config_kwargs)
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "Failed to load provider"
+    ) as cm:
+      factory.create_model(config, **create_kwargs)
+
+    self.assertIsInstance(cm.exception.__cause__, ModuleNotFoundError)
+
+  def test_extract_wraps_import_error(self):
+    # lx.extract builds the model with schema constraints on by default.
+    examples = [
+        data.ExampleData(
+            text="Alice",
+            extractions=[
+                data.Extraction(
+                    extraction_class="name", extraction_text="Alice"
+                )
+            ],
+        )
+    ]
+
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "Failed to load provider"
+    ):
+      lx.extract(
+          text_or_documents="Bob",
+          prompt_description="Extract names.",
+          examples=examples,
+          model_id="missing_dep_model",
+      )
+
+
 class FactoryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
 
   def setUp(self):

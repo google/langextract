@@ -266,7 +266,7 @@ class TestGeminiRetryLogic(_MockClientTest):
       dict(testcase_name='503', message='503 The model is overloaded'),
       dict(testcase_name='429', message='429 Rate limit exceeded'),
   )
-  @mock.patch.object(time, 'sleep')
+  @mock.patch.object(time, 'sleep', autospec=True)
   def test_retry_then_success(self, mock_sleep, message):
     model = _build_model(max_retries=3, retry_delay=1.0)
     self.mock_client.models.generate_content.side_effect = [
@@ -280,7 +280,7 @@ class TestGeminiRetryLogic(_MockClientTest):
     self.assertEqual(self.mock_client.models.generate_content.call_count, 2)
     mock_sleep.assert_called_once()
 
-  @mock.patch.object(time, 'sleep')
+  @mock.patch.object(time, 'sleep', autospec=True)
   def test_retry_multiple_times_before_success(self, mock_sleep):
     model = _build_model(max_retries=3, retry_delay=1.0, max_retry_delay=16.0)
     self.mock_client.models.generate_content.side_effect = [
@@ -295,7 +295,7 @@ class TestGeminiRetryLogic(_MockClientTest):
     self.assertEqual(self.mock_client.models.generate_content.call_count, 4)
     self.assertEqual(mock_sleep.call_count, 3)
 
-  @mock.patch.object(time, 'sleep')
+  @mock.patch.object(time, 'sleep', autospec=True)
   def test_exponential_backoff_is_jittered(self, mock_sleep):
     """Each sleep is delay * uniform(0.5, 1.5); delay doubles each attempt."""
     model = _build_model(max_retries=3, retry_delay=1.0, max_retry_delay=16.0)
@@ -316,7 +316,7 @@ class TestGeminiRetryLogic(_MockClientTest):
       self.assertGreaterEqual(observed, low)
       self.assertLessEqual(observed, high)
 
-  @mock.patch.object(time, 'sleep')
+  @mock.patch.object(time, 'sleep', autospec=True)
   def test_max_retry_delay_caps_post_jitter_sleep(self, mock_sleep):
     model = _build_model(max_retries=5, retry_delay=4.0, max_retry_delay=8.0)
     self.mock_client.models.generate_content.side_effect = [
@@ -336,7 +336,7 @@ class TestGeminiRetryLogic(_MockClientTest):
     self.assertGreaterEqual(value, low)
     self.assertLessEqual(value, high)
 
-  @mock.patch.object(time, 'sleep')
+  @mock.patch.object(time, 'sleep', autospec=True)
   def test_max_retries_exhausted_raises(self, mock_sleep):
     model = _build_model(max_retries=2, retry_delay=1.0)
     self.mock_client.models.generate_content.side_effect = RuntimeError(
@@ -378,7 +378,7 @@ class TestGeminiRetryLogic(_MockClientTest):
 class TestGeminiParallelRetry(_MockClientTest):
   """Retry behavior under concurrent chunk processing."""
 
-  @mock.patch.object(time, 'sleep')
+  @mock.patch.object(time, 'sleep', autospec=True)
   def test_single_chunk_retries_without_failing_batch(self, _mock_sleep):
     """One flaky chunk retries while peers complete independently."""
     model = _build_model(max_workers=2, max_retries=2, retry_delay=0.1)
@@ -398,7 +398,7 @@ class TestGeminiParallelRetry(_MockClientTest):
     self.assertEqual(results[1][0].output, '{"p": "flaky"}')
     self.assertEqual(calls['flaky'], 3)
 
-  @mock.patch.object(time, 'sleep')
+  @mock.patch.object(time, 'sleep', autospec=True)
   def test_all_succeed_never_sleeps(self, mock_sleep):
     model = _build_model(max_workers=4, max_retries=3)
     self.mock_client.models.generate_content.side_effect = (
@@ -409,7 +409,7 @@ class TestGeminiParallelRetry(_MockClientTest):
 
     mock_sleep.assert_not_called()
 
-  @mock.patch.object(time, 'sleep')
+  @mock.patch.object(time, 'sleep', autospec=True)
   def test_permanent_error_fails_batch(self, _mock_sleep):
     model = _build_model(max_workers=2, max_retries=2)
 

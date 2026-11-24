@@ -173,22 +173,20 @@ def load_annotated_documents_jsonl(
   )
 
   doc_count = 0
-  bytes_read = 0
 
-  with open(jsonl_path, 'r', encoding='utf-8') as f:
-    for line in f:
-      line_bytes = len(line.encode('utf-8'))
-      bytes_read += line_bytes
-      progress_bar.update(line_bytes)
+  try:
+    with open(jsonl_path, 'r', encoding='utf-8') as f:
+      for line in f:
+        progress_bar.update(len(line.encode('utf-8')))
 
-      line = line.strip()
-      if not line:
-        continue
-      doc_dict = json.loads(line)
-      doc_count += 1
-      yield data_lib.dict_to_annotated_document(doc_dict)
-
-  progress_bar.close()
+        line = line.strip()
+        if not line:
+          continue
+        doc_dict = json.loads(line)
+        doc_count += 1
+        yield data_lib.dict_to_annotated_document(doc_dict)
+  finally:
+    progress_bar.close()
 
   if show_progress:
     progress.print_load_complete(doc_count, str(jsonl_path))

@@ -136,8 +136,8 @@ def create_model(
 
   Raises:
     ValueError: If neither model_id nor provider is specified.
-    ValueError: If no provider is registered for the model_id.
-    InferenceConfigError: If provider instantiation fails.
+    InferenceConfigError: If no provider matches the model_id or provider,
+      or provider instantiation fails.
   """
   if not config.model_id and not config.provider:
     raise ValueError("Either model_id or provider must be specified")

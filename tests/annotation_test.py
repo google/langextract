@@ -561,12 +561,8 @@ class AnnotatorTest(absltest.TestCase):
             batch_prompts=[
                 "\n\nQ: Patient takes one Aspirin for headaches.\nA: "
             ],
-            enable_fuzzy_alignment=False,
         ),
-        mock.call(
-            batch_prompts=["\n\nQ: Pt has fever.\nA: "],
-            enable_fuzzy_alignment=False,
-        ),
+        mock.call(batch_prompts=["\n\nQ: Pt has fever.\nA: "]),
     ])
 
   def test_annotate_text_no_extractions(self):

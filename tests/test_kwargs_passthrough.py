@@ -19,6 +19,7 @@ from unittest import mock
 import warnings
 
 from absl.testing import parameterized
+import requests
 
 from langextract import factory
 from langextract.core import data
@@ -533,7 +534,7 @@ class TestOpenAIKwargsPassthrough(unittest.TestCase):
 class TestOllamaAuthSupport(parameterized.TestCase):
   """Test Ollama provider's authentication support for proxied instances."""
 
-  @mock.patch('requests.post')
+  @mock.patch('requests.post', autospec=True)
   def test_api_key_in_authorization_header(self, mock_post):
     """API key should be sent in Authorization header with Bearer scheme."""
     mock_response = mock.Mock()
@@ -555,7 +556,7 @@ class TestOllamaAuthSupport(parameterized.TestCase):
     self.assertEqual(headers.get('Authorization'), 'Bearer sk-test-key-123')
     self.assertEqual(headers.get('Content-Type'), 'application/json')
 
-  @mock.patch('requests.post')
+  @mock.patch('requests.post', autospec=True)
   def test_custom_auth_header_name(self, mock_post):
     """Custom auth header name (e.g. X-API-Key) should be supported."""
     mock_response = mock.Mock()
@@ -577,7 +578,7 @@ class TestOllamaAuthSupport(parameterized.TestCase):
     self.assertEqual(headers.get('X-API-Key'), 'abc123')
     self.assertNotIn('Authorization', headers)
 
-  @mock.patch('requests.post')
+  @mock.patch('requests.post', autospec=True)
   def test_pass_through_kwargs(self, mock_post):
     """Future Ollama parameters should pass through without code changes."""
     mock_response = mock.Mock()
@@ -617,7 +618,7 @@ class TestOllamaAuthSupport(parameterized.TestCase):
         'super-secret-key', repr_str, 'Actual API key should not appear'
     )
 
-  @mock.patch('requests.post')
+  @mock.patch('requests.post', autospec=True)
   def test_localhost_auth_warning_but_still_works(self, mock_post):
     """Should warn about localhost auth but still send the auth header."""
     mock_response = mock.Mock()
@@ -643,7 +644,7 @@ class TestOllamaAuthSupport(parameterized.TestCase):
     headers = mock_post.call_args.kwargs.get('headers', {})
     self.assertEqual(headers.get('Authorization'), 'Bearer unnecessary-key')
 
-  @mock.patch('requests.post')
+  @mock.patch('requests.post', autospec=True)
   def test_runtime_kwargs_override(self, mock_post):
     """Runtime parameters should override constructor parameters."""
     mock_response = mock.Mock()
@@ -672,7 +673,7 @@ class TestOllamaAuthSupport(parameterized.TestCase):
       ('ipv4_localhost', 'http://127.0.0.1:8080/', True),
       ('remote_proxy', 'https://proxy.example.com', False),
   )
-  @mock.patch('requests.post')
+  @mock.patch('requests.post', autospec=True)
   def test_localhost_detection(self, url, should_warn, mock_post):
     """Should detect localhost in various URL formats (IPv6, https, etc)."""
     mock_response = mock.Mock()
@@ -699,7 +700,7 @@ class TestOllamaAuthSupport(parameterized.TestCase):
             f'Unexpected warning for {url}',
         )
 
-  @mock.patch('requests.post')
+  @mock.patch('requests.post', autospec=True)
   def test_format_none_not_in_payload(self, mock_post):
     """Format key should be omitted from payload when None (not sent as null)."""
     mock_response = mock.Mock()
@@ -724,7 +725,7 @@ class TestOllamaAuthSupport(parameterized.TestCase):
 
     self.assertNotIn('format', payload, 'format=None should not be in payload')
 
-  @mock.patch('requests.post')
+  @mock.patch('requests.post', autospec=True)
   def test_reserved_kwargs_not_in_options(self, mock_post):
     """Reserved top-level keys (stop, format) should not go into options dict."""
     mock_response = mock.Mock()
@@ -752,7 +753,20 @@ class TestOllamaAuthSupport(parameterized.TestCase):
     self.assertEqual(options.get('temperature'), 0.5)
     self.assertEqual(options.get('custom_param'), 'value')
 
-  @mock.patch('requests.post')
+  @mock.patch.object(requests, 'post', autospec=True)
+  def test_max_workers_not_in_options(self, mock_post):
+    """max_workers sets LangExtract's concurrency; Ollama must not get it."""
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {'response': '{}'}
+    model = ollama.OllamaLanguageModel(model_id='gemma2:2b', max_workers=4)
+
+    list(model.infer(['test prompt'], max_workers=4))
+
+    self.assertNotIn(
+        'max_workers', mock_post.call_args.kwargs['json']['options']
+    )
+
+  @mock.patch('requests.post', autospec=True)
   def test_api_key_without_localhost_warning(self, mock_post):
     """Should not warn when using auth with remote/proxied Ollama instances."""
     mock_response = mock.Mock()

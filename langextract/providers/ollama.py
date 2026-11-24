@@ -276,6 +276,9 @@ class OllamaLanguageModel(base_model.BaseLanguageModel):
       Lists of ScoredOutputs.
     """
     combined_kwargs = dict(self.merge_kwargs(kwargs))
+    # LangExtract's concurrency setting, not an Ollama option; this provider
+    # sends prompts one at a time.
+    combined_kwargs.pop('max_workers', None)
     # LangExtract consumes final structured output, not Ollama reasoning traces.
     combined_kwargs.setdefault('think', False)
 

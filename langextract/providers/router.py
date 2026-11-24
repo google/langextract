@@ -72,6 +72,9 @@ def _add_entry(
     return
   _entry_keys.add(key)
   _entries.append(_Entry(patterns=patterns, loader=loader, priority=priority))
+  # A new entry can outrank or newly match an ID that was already resolved.
+  resolve.cache_clear()
+  resolve_provider.cache_clear()
   logging.debug(
       "Registered provider %s with patterns %s at priority %d",
       provider_id,
@@ -146,7 +149,7 @@ def resolve(model_id: str) -> type[base_model.BaseLanguageModel]:
     The provider class that handles this model ID.
 
   Raises:
-    ValueError: If no provider is registered for the model ID.
+    InferenceConfigError: If no provider is registered for the model ID.
   """
   # Providers should be loaded by the caller (e.g., factory.create_model)
   # Router doesn't load providers to avoid circular dependencies
@@ -180,7 +183,7 @@ def resolve_provider(provider_name: str) -> type[base_model.BaseLanguageModel]:
     The provider class.
 
   Raises:
-    ValueError: If no provider matches the name.
+    InferenceConfigError: If no provider matches the name.
   """
   # Providers should be loaded by the caller (e.g., factory.create_model)
   # Router doesn't load providers to avoid circular dependencies

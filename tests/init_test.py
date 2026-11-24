@@ -933,6 +933,32 @@ class AnnotationSuppressParseErrorsTest(absltest.TestCase):
     _, infer_kwargs = self._mock_model.infer.call_args
     self.assertNotIn("suppress_parse_errors", infer_kwargs)
 
+  def test_alignment_params_reach_resolver_not_infer(self):
+    self._mock_model.infer.return_value = [
+        [types.ScoredOutput(output='{"extractions": []}')]
+    ]
+    align = self.enter_context(
+        mock.patch.object(
+            self._resolver, "align", autospec=True, return_value=[]
+        )
+    )
+
+    _ = self._annotator.annotate_text(
+        text="test text",
+        resolver=self._resolver,
+        max_workers=4,
+        enable_fuzzy_alignment=False,
+        fuzzy_alignment_threshold=0.9,
+    )
+
+    _, infer_kwargs = self._mock_model.infer.call_args
+    self.assertEqual(
+        infer_kwargs, {"batch_prompts": mock.ANY, "max_workers": 4}
+    )
+    _, align_kwargs = align.call_args
+    self.assertFalse(align_kwargs["enable_fuzzy_alignment"])
+    self.assertEqual(align_kwargs["fuzzy_alignment_threshold"], 0.9)
+
   def test_warning_excludes_raw_chunk_text(self):
     """Suppressed parse error logs must not contain raw document text."""
     sensitive_text = "Patient has diabetes and hypertension"

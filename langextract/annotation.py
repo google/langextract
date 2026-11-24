@@ -245,7 +245,8 @@ class Annotator:
       show_progress: Whether to show progress bar. Defaults to True.
       tokenizer: Optional tokenizer to use. If None, uses default tokenizer.
       **kwargs: Additional arguments passed to LanguageModel.infer and
-        Resolver.
+        Resolver. Alignment settings (resolver.ALIGNMENT_PARAM_KEYS) go only
+        to the Resolver.
 
     Yields:
       Resolved annotations from input documents.
@@ -304,6 +305,13 @@ class Annotator:
     When context_window_chars is set, includes text from the previous chunk as
     context for coreference resolution across chunk boundaries.
     """
+    # Alignment settings are for the resolver; providers that forward unknown
+    # kwargs to their API (Ollama does) would otherwise send them too.
+    infer_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key not in resolver_lib.ALIGNMENT_PARAM_KEYS
+    }
     doc_order: list[str] = []
     doc_text_by_id: dict[str, str] = {}
     per_doc: DefaultDict[str, list[data.Extraction]] = collections.defaultdict(
@@ -389,7 +397,9 @@ class Annotator:
           except AttributeError:
             pass
 
-        outputs = self._language_model.infer(batch_prompts=prompts, **kwargs)
+        outputs = self._language_model.infer(
+            batch_prompts=prompts, **infer_kwargs
+        )
         if not isinstance(outputs, list):
           outputs = list(outputs)
         # Avoid retaining these prompts while constructing the next batch.
@@ -565,6 +575,7 @@ class Annotator:
       show_progress: Whether to show progress bar. Defaults to True.
       tokenizer: Optional tokenizer instance.
       **kwargs: Additional arguments for inference and resolver_lib.
+        Alignment settings go only to the resolver.
 
     Returns:
       Resolved annotations from text for document.

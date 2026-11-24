@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import importlib.util
-import os
 import pathlib
 import shutil
 import tempfile
@@ -160,73 +159,36 @@ class CheckPathsTest(absltest.TestCase):
         'mock.patch("pkg.one")\nmock.patch("pkg.two")\n', encoding="utf-8"
     )
 
-  def test_new_file_with_unspecced_call_fails_with_fix_and_lines(self):
-    errors = checker.check_paths([self.tests_dir], legacy={})
+  def test_unspecced_calls_fail_with_file_fix_and_lines(self):
+    errors = checker.check_paths([self.tests_dir])
 
     self.assertLen(errors, 1)
+    self.assertIn("sample_test.py", errors[0])
     self.assertIn("Add autospec=True", errors[0])
     self.assertIn("lines: 1, 2", errors[0])
 
-  def test_legacy_file_at_its_recorded_count_passes(self):
-    errors = checker.check_paths(
-        [self.tests_dir], legacy={"tests/sample_test.py": 2}
+  def test_specced_calls_pass(self):
+    self.test_file.write_text(
+        'mock.patch("pkg.one", autospec=True)\n', encoding="utf-8"
     )
 
-    self.assertEmpty(errors)
+    self.assertEmpty(checker.check_paths([self.tests_dir]))
 
-  def test_legacy_file_below_its_recorded_count_passes(self):
-    errors = checker.check_paths(
-        [self.tests_dir], legacy={"tests/sample_test.py": 3}
-    )
-
-    self.assertEmpty(errors)
-
-  def test_legacy_file_above_its_recorded_count_fails(self):
-    errors = checker.check_paths(
-        [self.tests_dir], legacy={"tests/sample_test.py": 1}
-    )
+  def test_single_file_is_checked(self):
+    errors = checker.check_paths([self.test_file])
 
     self.assertLen(errors, 1)
-    self.assertIn("1 of these predate the check", errors[0])
+    self.assertIn(str(self.test_file), errors[0])
 
-  def test_single_file_uses_the_same_legacy_key_as_its_directory(self):
-    errors = checker.check_paths(
-        [self.test_file], legacy={"tests/sample_test.py": 2}
-    )
-
-    self.assertEmpty(errors)
-
-  def test_relative_path_from_inside_the_directory_uses_the_same_key(self):
-    self.addCleanup(os.chdir, os.getcwd())
-    os.chdir(self.tests_dir)
-
-    errors = checker.check_paths(
-        [pathlib.Path(".")], legacy={"tests/sample_test.py": 2}
-    )
-
-    self.assertEmpty(errors)
-
-  def test_bare_file_name_from_inside_the_directory_uses_the_same_key(self):
-    self.addCleanup(os.chdir, os.getcwd())
-    os.chdir(self.tests_dir)
-
-    errors = checker.check_paths(
-        [pathlib.Path("sample_test.py")], legacy={"tests/sample_test.py": 2}
-    )
-
-    self.assertEmpty(errors)
-
-  def test_same_file_name_in_subdirectory_gets_no_legacy_allowance(self):
-    nested = self.tests_dir / "nested" / "sample_test.py"
+  def test_files_in_subdirectories_are_checked(self):
+    nested = self.tests_dir / "nested" / "other_test.py"
     nested.parent.mkdir()
     nested.write_text('mock.patch("pkg.three")\n', encoding="utf-8")
 
-    errors = checker.check_paths(
-        [self.tests_dir], legacy={"tests/sample_test.py": 2}
-    )
+    errors = checker.check_paths([self.tests_dir])
 
-    self.assertLen(errors, 1)
-    self.assertIn("nested", errors[0])
+    self.assertLen(errors, 2)
+    self.assertIn(str(nested), "\n".join(errors))
 
 
 class MainTest(absltest.TestCase):

@@ -72,7 +72,7 @@ def _add_entry(
     return
   _entry_keys.add(key)
   _entries.append(_Entry(patterns=patterns, loader=loader, priority=priority))
-  # A new entry can outrank or newly match an ID that was already resolved.
+  # A new entry can take over an ID or name whose lookup is already cached.
   resolve.cache_clear()
   resolve_provider.cache_clear()
   logging.debug(

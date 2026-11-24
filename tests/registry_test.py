@@ -290,7 +290,7 @@ class RouterCacheTest(absltest.TestCase):
     self.assertIs(router.resolve("model-v1"), AnotherFakeProvider)
 
   def test_resolve_provider_sees_provider_registered_after_first_lookup(self):
-    router.register(r"^fake-model")(FakeProvider)
+    router.register(r"^unrelated-model")(FakeProvider)
     # Matches FakeProvider by class name until an exact name is registered.
     self.assertIs(router.resolve_provider("fake"), FakeProvider)
 

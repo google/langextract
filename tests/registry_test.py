@@ -53,7 +53,7 @@ class AnotherFakeProvider(base_model.BaseLanguageModel):
     return self.infer(prompts)
 
 
-class RegistryTest(absltest.TestCase):  # pylint: disable=too-many-public-methods
+class RegistryTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -105,46 +105,6 @@ class RegistryTest(absltest.TestCase):  # pylint: disable=too-many-public-method
         "No provider registered for model_id='unknown-model'",
     ):
       router.resolve("unknown-model")
-
-  def test_caching(self):
-    """Test that resolve results are cached."""
-    # Use direct registration for test provider to avoid module path issues
-    router.register(r"^cached")(FakeProvider)
-
-    # First call
-    result1 = router.resolve("cached-model")
-    # Second call should return cached result
-    result2 = router.resolve("cached-model")
-
-    self.assertIs(result1, result2)
-
-  def test_resolve_sees_provider_registered_after_first_lookup(self):
-    router.register(r"^model", priority=0)(FakeProvider)
-    self.assertIs(router.resolve("model-v1"), FakeProvider)
-
-    router.register(r"^model", priority=10)(AnotherFakeProvider)
-
-    self.assertIs(router.resolve("model-v1"), AnotherFakeProvider)
-
-  def test_resolve_provider_sees_provider_registered_after_first_lookup(self):
-    router.register(r"^fake-model")(FakeProvider)
-    # Matches FakeProvider by class name until an exact name is registered.
-    self.assertIs(router.resolve_provider("fake"), FakeProvider)
-
-    router.register(r"^fake$")(AnotherFakeProvider)
-
-    self.assertIs(router.resolve_provider("fake"), AnotherFakeProvider)
-
-  def test_duplicate_registration_keeps_cache(self):
-    # factory.create_model re-registers the built-ins on every call; that
-    # must not flush resolutions that are already cached.
-    router.register(r"^model")(FakeProvider)
-    router.resolve("model-v1")
-
-    router.register(r"^model")(FakeProvider)
-    router.resolve("model-v1")
-
-    self.assertEqual(router.resolve.cache_info().hits, 1)
 
   def test_clear_registry(self):
     """Test clearing the router."""
@@ -301,6 +261,57 @@ class RegistryTest(absltest.TestCase):  # pylint: disable=too-many-public-method
       with self.subTest(model_id=model_id):
         provider_class = router.resolve(model_id)
         self.assertEqual(provider_class, TestHFProvider)
+
+
+class RouterCacheTest(absltest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    router.clear()
+
+  def tearDown(self):
+    super().tearDown()
+    router.clear()
+
+  def test_caching(self):
+    """Test that resolve results are cached."""
+    # Use direct registration for test provider to avoid module path issues
+    router.register(r"^cached")(FakeProvider)
+
+    # First call
+    result1 = router.resolve("cached-model")
+    # Second call should return cached result
+    result2 = router.resolve("cached-model")
+
+    self.assertIs(result1, result2)
+
+  def test_resolve_sees_provider_registered_after_first_lookup(self):
+    router.register(r"^model", priority=0)(FakeProvider)
+    self.assertIs(router.resolve("model-v1"), FakeProvider)
+
+    router.register(r"^model", priority=10)(AnotherFakeProvider)
+
+    self.assertIs(router.resolve("model-v1"), AnotherFakeProvider)
+
+  def test_resolve_provider_sees_provider_registered_after_first_lookup(self):
+    router.register(r"^fake-model")(FakeProvider)
+    # Matches FakeProvider by class name until an exact name is registered.
+    self.assertIs(router.resolve_provider("fake"), FakeProvider)
+
+    router.register(r"^fake$")(AnotherFakeProvider)
+
+    self.assertIs(router.resolve_provider("fake"), AnotherFakeProvider)
+
+  def test_duplicate_registration_keeps_cache(self):
+    # factory.create_model re-registers the built-ins on every call; that
+    # must not flush resolutions that are already cached.
+    router.register(r"^model")(FakeProvider)
+    router.resolve("model-v1")
+
+    router.register(r"^model")(FakeProvider)
+    router.resolve("model-v1")
+
+    self.assertEqual(router.resolve.cache_info().hits, 1)
 
 
 if __name__ == "__main__":

@@ -198,6 +198,15 @@ class DatasetTest(parameterized.TestCase):
     self.assertStartsWith(documents[1].document_id, 'doc_')
     self.assertNotEqual(documents[0].document_id, documents[1].document_id)
 
+  @parameterized.named_parameters(
+      dict(testcase_name='zero_byte_file', csv_text=''),
+      dict(testcase_name='header_only', csv_text='id,text\n'),
+      dict(testcase_name='header_only_no_newline', csv_text='id,text'),
+  )
+  def test_load_raises_for_dataset_without_rows(self, csv_text):
+    with self.assertRaisesRegex(io.InvalidDatasetError, 'Empty dataset'):
+      _load_csv(csv_text)
+
   def test_load_with_custom_delimiter_preserves_literal_strings(self):
     documents = _load_csv('id|text\n0001|NULL\n', delimiter='|')
 

@@ -37,7 +37,7 @@ class InitTest(parameterized.TestCase):
   @mock.patch.object(
       schemas.gemini.GeminiSchema, "from_examples", autospec=True
   )
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_lang_extract_as_lx_extract(
       self, mock_create_model, mock_gemini_schema
   ):
@@ -200,8 +200,38 @@ class InitTest(parameterized.TestCase):
         extraction.char_interval, data.CharInterval(start_pos=0, end_pos=5)
     )
 
-  @mock.patch("langextract.extraction.resolver.Resolver.align")
-  @mock.patch("langextract.extraction.factory.create_model")
+  def test_extract_without_prompt_description_omits_it_from_prompt(self):
+    prompts = []
+
+    class FakeModel(base_model.BaseLanguageModel):
+
+      def infer(self, batch_prompts, **kwargs):
+        for prompt in batch_prompts:
+          prompts.append(prompt)
+          yield [
+              types.ScoredOutput(
+                  score=1.0, output='{"extractions": [{"person": "Alice"}]}'
+              )
+          ]
+
+    lx.extract(
+        "Alice went home.",
+        examples=[
+            data.ExampleData(
+                text="Bob met Carol.",
+                extractions=[data.Extraction("person", "Bob")],
+            )
+        ],
+        model=FakeModel(),
+        use_schema_constraints=False,
+        show_progress=False,
+    )
+
+    self.assertLen(prompts, 1)
+    self.assertStartsWith(prompts[0], "\n\nExamples\n")
+
+  @mock.patch("langextract.extraction.resolver.Resolver.align", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_extract_resolver_params_alignment_passthrough(
       self, mock_create_model, mock_align
   ):
@@ -247,8 +277,8 @@ class InitTest(parameterized.TestCase):
     self.assertEqual(kwargs.get("fuzzy_alignment_threshold"), 0.8)
     self.assertFalse(kwargs.get("accept_match_lesser"))
 
-  @mock.patch("langextract.annotation.Annotator.annotate_text")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator.annotate_text", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_extract_resolver_params_suppress_parse_errors(
       self, mock_create_model, mock_annotate
   ):
@@ -343,8 +373,8 @@ class InitTest(parameterized.TestCase):
     _, kwargs = mock_annotate.call_args
     self.assertEqual(kwargs.get("suppress_parse_errors"), expected)
 
-  @mock.patch("langextract.extraction.resolver.Resolver")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.extraction.resolver.Resolver", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_extract_resolver_params_none_handling(
       self, mock_create_model, mock_resolver_class
   ):
@@ -371,7 +401,7 @@ class InitTest(parameterized.TestCase):
     ]
 
     with mock.patch(
-        "langextract.annotation.Annotator.annotate_text"
+        "langextract.annotation.Annotator.annotate_text", autospec=True
     ) as mock_annotate:
       mock_annotate.return_value = lx.data.AnnotatedDocument(
           text="test", extractions=[]
@@ -397,7 +427,7 @@ class InitTest(parameterized.TestCase):
       self.assertNotIn("enable_fuzzy_alignment", annotate_kwargs)
       self.assertEqual(annotate_kwargs["fuzzy_alignment_threshold"], 0.8)
 
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_extract_resolver_params_typo_error(self, mock_create_model):
     mock_model = mock.MagicMock()
     mock_model.requires_fence_output = False
@@ -428,8 +458,10 @@ class InitTest(parameterized.TestCase):
           },
       )
 
-  @mock.patch("langextract.annotation.Annotator.annotate_documents")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch(
+      "langextract.annotation.Annotator.annotate_documents", autospec=True
+  )
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_extract_resolver_params_docs_path_passthrough(
       self, mock_create_model, mock_annotate_docs
   ):
@@ -471,9 +503,9 @@ class InitTest(parameterized.TestCase):
     self.assertEqual(kwargs.get("fuzzy_alignment_threshold"), 0.9)
     self.assertFalse(kwargs.get("accept_match_lesser"))
 
-  @mock.patch("langextract.annotation.Annotator.annotate_text")
-  @mock.patch("langextract.extraction.resolver.Resolver")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.annotation.Annotator.annotate_text", autospec=True)
+  @mock.patch("langextract.extraction.resolver.Resolver", autospec=True)
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_extract_resolver_params_none_threshold(
       self, mock_create_model, mock_resolver_cls, mock_annotate
   ):
@@ -515,7 +547,7 @@ class InitTest(parameterized.TestCase):
   @mock.patch.object(
       schemas.gemini.GeminiSchema, "from_examples", autospec=True
   )
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_extract_custom_params_reach_inference(
       self, mock_create_model, mock_gemini_schema
   ):
@@ -560,7 +592,7 @@ class InitTest(parameterized.TestCase):
     _, kwargs = mock_model.infer.call_args
     self.assertEqual(kwargs.get("max_workers"), 5)
 
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_extract_with_custom_tokenizer(self, mock_create_model):
     """Test that a custom tokenizer can be passed to extract()."""
     input_text = "Test text"
@@ -691,8 +723,10 @@ class InitTest(parameterized.TestCase):
           expected_progress_disabled=True,
       ),
   )
-  @mock.patch("langextract.progress.create_extraction_progress_bar")
-  @mock.patch("langextract.extraction.factory.create_model")
+  @mock.patch(
+      "langextract.progress.create_extraction_progress_bar", autospec=True
+  )
+  @mock.patch("langextract.extraction.factory.create_model", autospec=True)
   def test_show_progress_controls_progress_bar(
       self,
       mock_create_model,
@@ -743,7 +777,7 @@ class InitTest(parameterized.TestCase):
         call_args.kwargs.get("disable", False), expected_progress_disabled
     )
 
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.factory.create_model", autospec=True)
   def test_schema_validation_warning_issued(self, mock_create_model):
     """Test that schema validation warnings are properly issued."""
     mock_model = mock.Mock(spec=base_model.BaseLanguageModel)
@@ -808,6 +842,7 @@ class InitTest(parameterized.TestCase):
         mock.patch(
             "langextract.factory.create_model",
             return_value=mock_model,
+            autospec=True,
         )
     )
 
@@ -815,6 +850,7 @@ class InitTest(parameterized.TestCase):
         mock.patch(
             "langextract.annotation.Annotator.annotate_text",
             return_value=data.AnnotatedDocument(text="test", extractions=[]),
+            autospec=True,
         )
     )
 
@@ -897,6 +933,32 @@ class AnnotationSuppressParseErrorsTest(absltest.TestCase):
     _, infer_kwargs = self._mock_model.infer.call_args
     self.assertNotIn("suppress_parse_errors", infer_kwargs)
 
+  def test_alignment_params_reach_resolver_not_infer(self):
+    self._mock_model.infer.return_value = [
+        [types.ScoredOutput(output='{"extractions": []}')]
+    ]
+    align = self.enter_context(
+        mock.patch.object(
+            self._resolver, "align", autospec=True, return_value=[]
+        )
+    )
+
+    _ = self._annotator.annotate_text(
+        text="test text",
+        resolver=self._resolver,
+        max_workers=4,
+        enable_fuzzy_alignment=False,
+        fuzzy_alignment_threshold=0.9,
+    )
+
+    _, infer_kwargs = self._mock_model.infer.call_args
+    self.assertEqual(
+        infer_kwargs, {"batch_prompts": mock.ANY, "max_workers": 4}
+    )
+    _, align_kwargs = align.call_args
+    self.assertFalse(align_kwargs["enable_fuzzy_alignment"])
+    self.assertEqual(align_kwargs["fuzzy_alignment_threshold"], 0.9)
+
   def test_warning_excludes_raw_chunk_text(self):
     """Suppressed parse error logs must not contain raw document text."""
     sensitive_text = "Patient has diabetes and hypertension"
@@ -904,13 +966,16 @@ class AnnotationSuppressParseErrorsTest(absltest.TestCase):
         [types.ScoredOutput(output="I cannot extract entities")]
     ]
 
-    with mock.patch("langextract.resolver.logging") as mock_logging:
+    with mock.patch(
+        "langextract.resolver.logging", autospec=True
+    ) as mock_logging:
       _ = self._annotator.annotate_text(
           text=sensitive_text,
           resolver=self._resolver,
           suppress_parse_errors=True,
       )
 
+      mock_logging.warning.assert_called()
       for call in mock_logging.warning.call_args_list:
         log_message = str(call)
         self.assertNotIn(sensitive_text, log_message)

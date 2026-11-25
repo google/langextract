@@ -53,16 +53,19 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.gemini.GeminiLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ) as mock_init:
       with mock.patch(
           "langextract.providers.gemini.GeminiLanguageModel.infer",
           return_value=iter([[mock.Mock(output='{"extractions": []}')]]),
+          autospec=True,
       ):
         with mock.patch(
             "langextract.annotation.Annotator.annotate_text",
             return_value=data.AnnotatedDocument(
                 text=self.test_text, extractions=[]
             ),
+            autospec=True,
         ):
           result = lx.extract(
               text_or_documents=self.test_text,
@@ -119,16 +122,19 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.ollama.OllamaLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ) as mock_init:
       with mock.patch(
           "langextract.providers.ollama.OllamaLanguageModel.infer",
           return_value=iter([[mock.Mock(output='{"extractions": []}')]]),
+          autospec=True,
       ):
         with mock.patch(
             "langextract.annotation.Annotator.annotate_text",
             return_value=data.AnnotatedDocument(
                 text=self.test_text, extractions=[]
             ),
+            autospec=True,
         ):
           result = lx.extract(
               text_or_documents=self.test_text,
@@ -152,19 +158,24 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.gemini.GeminiLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ):
       with mock.patch(
           "langextract.providers.gemini.GeminiLanguageModel.infer",
           return_value=iter([[mock.Mock(output='{"extractions": []}')]]),
+          autospec=True,
       ):
         with mock.patch(
-            "langextract.annotation.Annotator.__init__", return_value=None
+            "langextract.annotation.Annotator.__init__",
+            return_value=None,
+            autospec=True,
         ) as mock_annotator_init:
           with mock.patch(
               "langextract.annotation.Annotator.annotate_text",
               return_value=data.AnnotatedDocument(
                   text=self.test_text, extractions=[]
               ),
+              autospec=True,
           ):
             _ = lx.extract(
                 text_or_documents=self.test_text,
@@ -186,16 +197,19 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.gemini.GeminiLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ):
       with mock.patch(
           "langextract.providers.gemini.GeminiLanguageModel.infer",
           return_value=iter([[mock.Mock(output='{"extractions": []}')]]),
+          autospec=True,
       ):
         with mock.patch(
             "langextract.annotation.Annotator.annotate_text",
             return_value=data.AnnotatedDocument(
                 text=self.test_text, extractions=[]
             ),
+            autospec=True,
         ):
           with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -222,32 +236,17 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
 
   def test_extract_no_schema_when_disabled(self):
     """Test that no schema is used when use_schema_constraints=False."""
-    # Create a mock instance with required attributes
-    mock_model = mock.MagicMock()
-    mock_model._schema = None
-    mock_model._fence_output_override = None
-    mock_model.gemini_schema = None
-    mock_model.requires_fence_output = True
-    mock_model.infer.return_value = iter(
-        [[mock.Mock(output='{"extractions": []}')]]
-    )
-
-    # Track the kwargs passed to the constructor
-    constructor_kwargs = {}
-
-    def mock_constructor(**kwargs):
-      constructor_kwargs.update(kwargs)
-      return mock_model
-
     with mock.patch(
-        "langextract.providers.gemini.GeminiLanguageModel",
-        side_effect=mock_constructor,
-    ):
+        "langextract.providers.gemini.GeminiLanguageModel.__init__",
+        return_value=None,
+        autospec=True,
+    ) as mock_init:
       with mock.patch(
           "langextract.annotation.Annotator.annotate_text",
           return_value=data.AnnotatedDocument(
               text=self.test_text, extractions=[]
           ),
+          autospec=True,
       ):
         _ = lx.extract(
             text_or_documents=self.test_text,
@@ -259,10 +258,11 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
         )
 
         # Should NOT have response_schema when schema constraints are disabled
-        self.assertNotIn("response_schema", constructor_kwargs)
-        self.assertNotIn("gemini_schema", constructor_kwargs)
+        mock_init.assert_called_once()
+        self.assertNotIn("response_schema", mock_init.call_args.kwargs)
+        self.assertNotIn("gemini_schema", mock_init.call_args.kwargs)
 
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.factory.create_model", autospec=True)
   def test_validation_triggers_warning_for_gemini(self, mock_create_model):
     """Test that Gemini schema validation triggers warnings."""
 
@@ -313,7 +313,7 @@ class ExtractSchemaIntegrationTest(absltest.TestCase):
     # Result should still be returned
     self.assertIsNotNone(result)
 
-  @mock.patch("langextract.factory.create_model")
+  @mock.patch("langextract.factory.create_model", autospec=True)
   def test_no_validation_without_schema(self, mock_create_model):
     """Test that validation is skipped when no schema is present."""
 

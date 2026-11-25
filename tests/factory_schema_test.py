@@ -54,6 +54,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.gemini.GeminiLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ) as mock_init:
       model = factory._create_model_with_schema(
           config=config,
@@ -76,6 +77,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.ollama.OllamaLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ) as mock_init:
       model = factory._create_model_with_schema(
           config=config,
@@ -133,6 +135,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.gemini.GeminiLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ):
       model = factory._create_model_with_schema(
           config=config,
@@ -154,9 +157,13 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
     config = factory.ModelConfig(model_id="test-model")
 
     with mock.patch(
-        "langextract.providers.registry.resolve", return_value=NoSchemaModel
+        "langextract.providers.registry.resolve",
+        return_value=NoSchemaModel,
+        autospec=True,
     ):
-      with mock.patch.object(NoSchemaModel, "__init__", return_value=None):
+      with mock.patch.object(
+          NoSchemaModel, "__init__", return_value=None, autospec=True
+      ):
         model = factory._create_model_with_schema(
             config=config,
             examples=self.examples,
@@ -175,6 +182,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.gemini.GeminiLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ) as mock_init:
       model = factory._create_model_with_schema(
           config=config,
@@ -198,6 +206,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.ollama.OllamaLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ) as mock_init:
       _ = factory._create_model_with_schema(
           config=config,
@@ -220,6 +229,7 @@ class FactorySchemaIntegrationTest(absltest.TestCase):
     with mock.patch(
         "langextract.providers.gemini.GeminiLanguageModel.__init__",
         return_value=None,
+        autospec=True,
     ) as mock_init:
       model = factory._create_model_with_schema(
           config=config,
@@ -260,10 +270,16 @@ class SchemaApplicationTest(absltest.TestCase):
     config = factory.ModelConfig(model_id="test-model")
 
     with mock.patch(
-        "langextract.providers.registry.resolve", return_value=SchemaAwareModel
+        "langextract.providers.registry.resolve",
+        return_value=SchemaAwareModel,
+        autospec=True,
     ):
-      with mock.patch.object(SchemaAwareModel, "__init__", return_value=None):
-        with mock.patch.object(SchemaAwareModel, "apply_schema") as mock_apply:
+      with mock.patch.object(
+          SchemaAwareModel, "__init__", return_value=None, autospec=True
+      ):
+        with mock.patch.object(
+            SchemaAwareModel, "apply_schema", autospec=True
+        ) as mock_apply:
           _ = factory._create_model_with_schema(
               config=config,
               examples=examples,
@@ -271,7 +287,7 @@ class SchemaApplicationTest(absltest.TestCase):
           )
 
           mock_apply.assert_called_once()
-          schema_arg = mock_apply.call_args[0][0]
+          _, schema_arg = mock_apply.call_args.args
           self.assertIsInstance(schema_arg, schema.GeminiSchema)
 
 

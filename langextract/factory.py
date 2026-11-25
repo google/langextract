@@ -136,8 +136,9 @@ def create_model(
 
   Raises:
     ValueError: If neither model_id nor provider is specified.
-    ValueError: If no provider is registered for the model_id.
-    InferenceConfigError: If provider instantiation fails.
+    InferenceConfigError: If no provider matches the model_id or provider,
+      the matching provider's module cannot be imported, or provider
+      instantiation fails.
   """
   if not config.model_id and not config.provider:
     raise ValueError("Either model_id or provider must be specified")
@@ -158,20 +159,7 @@ def create_model(
       return model, model.requires_fence_output
     return model
 
-  providers.load_builtins_once()
-  providers.load_plugins_once()
-
-  try:
-    if config.provider:
-      provider_class = router.resolve_provider(config.provider)
-    else:
-      provider_class = router.resolve(config.model_id)
-  except (ModuleNotFoundError, ImportError) as e:
-    raise exceptions.InferenceConfigError(
-        "Failed to load provider. "
-        "This may be due to missing dependencies. "
-        f"Check that all required packages are installed. Error: {e}"
-    ) from e
+  provider_class = _resolve_provider_class(config)
 
   model_id = config.model_id
 
@@ -232,6 +220,39 @@ def _unsupported_output_schema_error(
   return exceptions.unsupported_output_schema_error(f"Provider for {target}")
 
 
+def _resolve_provider_class(
+    config: ModelConfig,
+) -> type[base_model.BaseLanguageModel]:
+  """Load providers and resolve the provider class for config.
+
+  Both model-creation paths use this so provider import failures are reported
+  the same way.
+
+  Args:
+    config: Model configuration with model_id and/or provider.
+
+  Returns:
+    The provider class.
+
+  Raises:
+    InferenceConfigError: If no provider matches the model_id or provider, or
+      the matching provider's module cannot be imported.
+  """
+  providers.load_builtins_once()
+  providers.load_plugins_once()
+
+  try:
+    if config.provider:
+      return router.resolve_provider(config.provider)
+    return router.resolve(config.model_id)
+  except ImportError as e:
+    raise exceptions.InferenceConfigError(
+        "Failed to load provider. "
+        "This may be due to missing dependencies. "
+        f"Check that all required packages are installed. Error: {e}"
+    ) from e
+
+
 def _create_model_with_schema(
     config: ModelConfig,
     examples: typing.Sequence[typing.Any] | None = None,
@@ -264,14 +285,7 @@ def _create_model_with_schema(
   ):
     raise exceptions.output_schema_format_error()
 
-  # Must run before resolution regardless of config path.
-  providers.load_builtins_once()
-  providers.load_plugins_once()
-
-  if config.provider:
-    provider_class = router.resolve_provider(config.provider)
-  else:
-    provider_class = router.resolve(config.model_id)
+  provider_class = _resolve_provider_class(config)
 
   schema_instance = None
   if output_schema is not None:

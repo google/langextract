@@ -1224,8 +1224,10 @@ class GCSBatchCachingTest(parameterized.TestCase):
 
     # Mock GCS cache: hit for "cached_prompt", miss for "new_prompt"
     # We mock _compute_hash to avoid dealing with complex hashing in test
-    with mock.patch.object(gb.GCSBatchCache, "_compute_hash") as mock_hash:
-      mock_hash.side_effect = lambda k: f"hash_{k['prompt']}"
+    with mock.patch.object(
+        gb.GCSBatchCache, "_compute_hash", autospec=True
+    ) as mock_hash:
+      mock_hash.side_effect = lambda _, k: f"hash_{k['prompt']}"
 
       # Pre-configure blobs
       blob_hit = mock.create_autospec(gb.storage.Blob, instance=True)

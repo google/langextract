@@ -975,6 +975,7 @@ class AnnotationSuppressParseErrorsTest(absltest.TestCase):
           suppress_parse_errors=True,
       )
 
+      mock_logging.warning.assert_called()
       for call in mock_logging.warning.call_args_list:
         log_message = str(call)
         self.assertNotIn(sensitive_text, log_message)

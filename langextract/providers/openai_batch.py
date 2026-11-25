@@ -182,9 +182,8 @@ def _extract_text_from_response_body(
         provider='OpenAI',
     ) from e
 
-  # Same rules as OpenAILanguageModel._response_to_scored_output: a refusal
-  # can come with content, and empty content is an answer unless the model
-  # reported a reason other than 'stop'.
+  # Keep in sync with OpenAILanguageModel._response_to_scored_output:
+  # refusals may accompany non-empty content, so check refusal first.
   refusal = message.get('refusal')
   if refusal:
     raise exceptions.InferenceRuntimeError(

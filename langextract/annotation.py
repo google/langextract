@@ -402,6 +402,12 @@ class Annotator:
         )
         if not isinstance(outputs, list):
           outputs = list(outputs)
+        if len(outputs) != len(batch):
+          raise exceptions.InferenceOutputError(
+              "Expected "
+              f"{len(batch)} outputs from language model for the current "
+              f"batch, but received {len(outputs)}."
+          )
         # Avoid retaining these prompts while constructing the next batch.
         del prompts
 

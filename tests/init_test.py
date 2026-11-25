@@ -995,6 +995,7 @@ class AnnotationSuppressParseErrorsTest(absltest.TestCase):
         text="The patient has diabetes and takes insulin daily",
         resolver=self._resolver,
         max_char_buffer=25,
+        batch_length=2,
         suppress_parse_errors=True,
     )
 

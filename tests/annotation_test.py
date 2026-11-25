@@ -745,6 +745,7 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
                   document_id="doc1",
               ),
           ],
+          expected_infer_calls=1,
       ),
       dict(
           testcase_name="multiple_documents",
@@ -762,11 +763,13 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
                   document_id="doc2",
               ),
           ],
+          expected_infer_calls=2,
       ),
       dict(
           testcase_name="zero_documents",
           documents=[],
           expected_result=[],
+          expected_infer_calls=0,
       ),
       dict(
           testcase_name="multiple_documents_same_batch",
@@ -784,6 +787,7 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
                   document_id="doc2",
               ),
           ],
+          expected_infer_calls=1,
           batch_length=10,
       ),
   )
@@ -791,6 +795,7 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
       self,
       documents: Sequence[dict[str, str]],
       expected_result: Sequence[data.AnnotatedDocument],
+      expected_infer_calls: int,
       batch_length: int = 1,
   ):
     mock_language_model = self.enter_context(
@@ -841,7 +846,7 @@ class AnnotatorMultipleDocumentTest(parameterized.TestCase):
     ):
       self.assertDataclassEqual(expected_annotation, actual_annotation)
 
-    self.assertGreaterEqual(mock_language_model.infer.call_count, 0)
+    self.assertEqual(mock_language_model.infer.call_count, expected_infer_calls)
 
   @parameterized.named_parameters(
       dict(

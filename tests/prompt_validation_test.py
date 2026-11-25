@@ -19,6 +19,7 @@ import warnings
 from absl.testing import absltest
 from absl.testing import parameterized
 
+from langextract import exceptions
 from langextract import extraction
 from langextract import prompt_validation
 from langextract.core import data
@@ -442,7 +443,11 @@ class AlgorithmPolicyIntegrationTest(absltest.TestCase):
         )
     ]
 
-    try:
+    # No provider serves "fake-model", so reaching model creation shows that
+    # prompt validation passed.
+    with self.assertRaisesRegex(
+        exceptions.InferenceConfigError, "No provider registered"
+    ):
       extraction.extract(
           text_or_documents="Test",
           prompt_description="Extract entities",
@@ -452,10 +457,6 @@ class AlgorithmPolicyIntegrationTest(absltest.TestCase):
           ),
           model_id="fake-model",
       )
-    except prompt_validation.PromptAlignmentError:
-      self.fail("LCS prompt validation should not raise for this example")
-    except Exception:  # pylint: disable=broad-except
-      pass
 
     with self.assertRaises(prompt_validation.PromptAlignmentError):
       extraction.extract(
@@ -491,7 +492,9 @@ class LegacyDeprecationWarningTest(absltest.TestCase):
     """Warning fires when extract() routes through prompt validation."""
     with warnings.catch_warnings(record=True) as caught:
       warnings.simplefilter("always")
-      try:
+      with self.assertRaisesRegex(
+          exceptions.InferenceConfigError, "No provider registered"
+      ):
         extraction.extract(
             text_or_documents="Test",
             prompt_description="Extract medications",
@@ -502,8 +505,6 @@ class LegacyDeprecationWarningTest(absltest.TestCase):
             ),
             model_id="fake-model",
         )
-      except Exception:  # pylint: disable=broad-except
-        pass
     deprecations = [
         w for w in caught if issubclass(w.category, DeprecationWarning)
     ]
@@ -513,7 +514,9 @@ class LegacyDeprecationWarningTest(absltest.TestCase):
   def test_lcs_default_does_not_warn(self):
     with warnings.catch_warnings(record=True) as caught:
       warnings.simplefilter("always")
-      try:
+      with self.assertRaisesRegex(
+          exceptions.InferenceConfigError, "No provider registered"
+      ):
         extraction.extract(
             text_or_documents="Test",
             prompt_description="Extract medications",
@@ -523,8 +526,6 @@ class LegacyDeprecationWarningTest(absltest.TestCase):
             ),
             model_id="fake-model",
         )
-      except Exception:  # pylint: disable=broad-except
-        pass
     deprecations = [
         w for w in caught if issubclass(w.category, DeprecationWarning)
     ]

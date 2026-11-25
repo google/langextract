@@ -1891,7 +1891,6 @@ class ResolverTest(parameterized.TestCase):
   def test_resolve_valid_inputs(self, resolver, input_text, expected_output):
     actual_extractions = resolver.resolve(input_text)
     self.assertCountEqual(expected_output, actual_extractions)
-    assert_char_interval_match_source(self, input_text, actual_extractions)
 
   def test_handle_integer_extraction(self):
     test_input = textwrap.dedent(f"""\

@@ -783,6 +783,9 @@ class OpenAIBatchHelperTest(parameterized.TestCase):
     with self.assertRaisesRegex(ValueError, 'completion_window'):
       openai_batch.BatchConfig(enabled=True, completion_window='1h')
 
+
+class CollectOutputsFromJsonlTest(parameterized.TestCase):
+
   def test_truncated_batch_item_is_kept_and_logged(self):
     truncated_json = '{"extractions": [{"a'
     line = json.dumps({
@@ -832,6 +835,112 @@ class OpenAIBatchHelperTest(parameterized.TestCase):
       openai_batch._collect_outputs_from_jsonl(line, outputs, errors)
 
     self.assertDictEqual(outputs, {3: complete_json})
+    self.assertEmpty(errors)
+
+  def test_refusal_with_content_is_an_item_error(self):
+    line = json.dumps({
+        'custom_id': 'idx-000002',
+        'response': {
+            'status_code': 200,
+            'body': {
+                'choices': [{
+                    'finish_reason': 'stop',
+                    'message': {
+                        'content': '{"extractions": []}',
+                        'refusal': 'cannot comply',
+                    },
+                }]
+            },
+        },
+        'error': None,
+    })
+    outputs: dict[int, str] = {}
+    errors: list[str] = []
+
+    openai_batch._collect_outputs_from_jsonl(line, outputs, errors)
+
+    self.assertEmpty(outputs)
+    self.assertLen(errors, 1)
+    self.assertIn('idx-000002', errors[0])
+    self.assertIn('cannot comply', errors[0])
+
+  @parameterized.named_parameters(
+      dict(testcase_name='length', finish_reason='length', content=''),
+      dict(
+          testcase_name='content_filter',
+          finish_reason='content_filter',
+          content='',
+      ),
+      dict(testcase_name='length_null', finish_reason='length', content=None),
+  )
+  def test_empty_content_cut_short_is_an_item_error(
+      self, finish_reason, content
+  ):
+    line = json.dumps({
+        'custom_id': 'idx-000004',
+        'response': {
+            'status_code': 200,
+            'body': {
+                'choices': [{
+                    'finish_reason': finish_reason,
+                    'message': {'content': content},
+                }]
+            },
+        },
+        'error': None,
+    })
+    outputs: dict[int, str] = {}
+    errors: list[str] = []
+
+    openai_batch._collect_outputs_from_jsonl(line, outputs, errors)
+
+    self.assertEmpty(outputs)
+    self.assertLen(errors, 1)
+    self.assertIn('idx-000004', errors[0])
+    self.assertIn(f'finish_reason={finish_reason}', errors[0])
+
+  def test_empty_content_at_token_limit_mentions_max_output_tokens(self):
+    line = json.dumps({
+        'custom_id': 'idx-000004',
+        'response': {
+            'status_code': 200,
+            'body': {
+                'choices': [{
+                    'finish_reason': 'length',
+                    'message': {'content': ''},
+                }]
+            },
+        },
+        'error': None,
+    })
+    outputs: dict[int, str] = {}
+    errors: list[str] = []
+
+    openai_batch._collect_outputs_from_jsonl(line, outputs, errors)
+
+    self.assertLen(errors, 1)
+    self.assertIn('max_output_tokens', errors[0])
+
+  def test_empty_content_with_stop_is_kept(self):
+    line = json.dumps({
+        'custom_id': 'idx-000005',
+        'response': {
+            'status_code': 200,
+            'body': {
+                'choices': [{
+                    'finish_reason': 'stop',
+                    'message': {'content': ''},
+                }]
+            },
+        },
+        'error': None,
+    })
+    outputs: dict[int, str] = {}
+    errors: list[str] = []
+
+    openai_batch._collect_outputs_from_jsonl(line, outputs, errors)
+
+    self.assertDictEqual(outputs, {5: ''})
     self.assertEmpty(errors)
 
 

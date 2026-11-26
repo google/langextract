@@ -223,6 +223,9 @@ def _read_csv(
           # with dtype=str.
           keep_default_na=False,
       )
+      # A file with only a header row parses into a frame with no rows.
+      if df.empty:
+        raise InvalidDatasetError(f'Empty dataset: {filepath}')
       for _, row in df.iterrows():
         yield row.to_dict()
   except pd.errors.EmptyDataError as e:

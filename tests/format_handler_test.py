@@ -273,6 +273,34 @@ class NonGeminiModelParsingTest(parameterized.TestCase):
     self.assertLen(parsed, 1)
     self.assertEqual(parsed[0]["person"], "Alice")
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="fenced_answer",
+          answer='```json\n{"extractions": [{"person": "Alice"}]}\n```',
+      ),
+      dict(
+          testcase_name="unfenced_answer",
+          answer='{"extractions": [{"person": "Alice"}]}',
+      ),
+  )
+  def test_fenced_draft_inside_think_tags_is_ignored(self, answer):
+    # Reasoning models can draft the fenced output while thinking. Only the
+    # answer after </think> should be parsed.
+    handler = format_handler.FormatHandler(
+        format_type=data.FormatType.JSON,
+        use_wrapper=True,
+        wrapper_key="extractions",
+        use_fences=True,
+    )
+    output = (
+        "<think>\nDraft:\n"
+        '```json\n{"extractions": [{"person": "Alise"}]}\n```\n'
+        "The name is misspelled, fix it.\n</think>\n"
+        + answer
+    )
+    parsed = handler.parse_output(output)
+    self.assertEqual(parsed, [{"person": "Alice"}])
+
   def test_top_level_list_accepted_as_fallback(self):
     # Some models return [...] instead of {"extractions": [...]}
     handler = format_handler.FormatHandler(

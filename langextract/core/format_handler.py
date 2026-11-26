@@ -187,10 +187,16 @@ class FormatHandler:
     if not text:
       raise exceptions.FormatParseError("Empty or invalid input string.")
 
+    if not strict:
+      # Reasoning models (DeepSeek-R1, QwQ) emit <think> tags before the
+      # answer, and the reasoning can hold fenced drafts. Drop it before
+      # looking for fences so only the answer is parsed.
+      text = _THINK_TAG_RE.sub("", text)
+
     content = self._extract_content(text)
 
     try:
-      parsed = self._parse_with_fallback(content, strict)
+      parsed = self._parse(content)
     except (yaml.YAMLError, json.JSONDecodeError) as e:
       msg = (
           f"Failed to parse {self.format_type.value.upper()} content:"
@@ -276,22 +282,11 @@ class FormatHandler:
     tag = lang.strip().lower()
     return tag in valid_tags.get(self.format_type, set())
 
-  def _parse_with_fallback(self, content: str, strict: bool):
-    """Parse content, retrying without <think> tags on failure."""
-    try:
-      if self.format_type == data.FormatType.YAML:
-        return yaml.safe_load(content)
-      return json.loads(content)
-    except (yaml.YAMLError, json.JSONDecodeError):
-      if strict:
-        raise
-      # Reasoning models (DeepSeek-R1, QwQ) emit <think> tags before JSON.
-      if _THINK_TAG_RE.search(content):
-        stripped = _THINK_TAG_RE.sub("", content).strip()
-        if self.format_type == data.FormatType.YAML:
-          return yaml.safe_load(stripped)
-        return json.loads(stripped)
-      raise
+  def _parse(self, content: str):
+    """Parse content as YAML or JSON."""
+    if self.format_type == data.FormatType.YAML:
+      return yaml.safe_load(content)
+    return json.loads(content)
 
   def _extract_content(self, text: str) -> str:
     """Extract content from text, handling fences if configured.

@@ -625,7 +625,9 @@ def find_sentence_range(
     if tokens[i].token_type == TokenType.PUNCTUATION:
       if _is_end_of_sentence_token(text, tokens, i, known_abbreviations):
         end_index = i + 1
-        # Consume any trailing closing punctuation (e.g. quotes, parens)
+        # Consume any trailing closing punctuation (e.g. quotes, parens).
+        # Only punctuation that directly follows the previous token closes
+        # the sentence; after whitespace, a quote opens the next sentence.
         while end_index < len(tokens):
           next_token_text = text[
               tokens[end_index]
@@ -635,6 +637,8 @@ def find_sentence_range(
           if (
               tokens[end_index].token_type == TokenType.PUNCTUATION
               and next_token_text in _CLOSING_PUNCTUATION
+              and tokens[end_index].char_interval.start_pos
+              == tokens[end_index - 1].char_interval.end_pos
           ):
             end_index += 1
           else:

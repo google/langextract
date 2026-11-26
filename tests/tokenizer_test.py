@@ -946,6 +946,45 @@ class SentenceRangeTest(parameterized.TestCase):
     interval = tokenizer.find_sentence_range(text, tokens, 0)
     self.assertEqual(interval.end_index, len(tokens))
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="space_before_double_quote",
+          input_text='He left. "Hello."',
+          expected_sentences=["He left.", '"Hello."'],
+      ),
+      dict(
+          testcase_name="newline_before_double_quote",
+          input_text='He left.\n"Hello."',
+          expected_sentences=["He left.", '"Hello."'],
+      ),
+      dict(
+          testcase_name="space_before_single_quote",
+          input_text="He left. 'Hi.'",
+          expected_sentences=["He left.", "'Hi.'"],
+      ),
+      dict(
+          testcase_name="adjacent_closing_quote_and_parenthesis",
+          input_text='(He said "Hi.") Then he left.',
+          expected_sentences=['(He said "Hi.")', "Then he left."],
+      ),
+  )
+  def test_quote_after_whitespace_starts_next_sentence(
+      self, input_text, expected_sentences
+  ):
+    """A quote after whitespace opens the next sentence, not closes this one."""
+    for tok in (tokenizer.RegexTokenizer(), tokenizer.UnicodeTokenizer()):
+      with self.subTest(tokenizer=type(tok).__name__):
+        tokenized = tok.tokenize(input_text)
+        sentences = []
+        start = 0
+        while start < len(tokenized.tokens):
+          interval = tokenizer.find_sentence_range(
+              input_text, tokenized.tokens, start
+          )
+          sentences.append(tokenizer.tokens_text(tokenized, interval))
+          start = interval.end_index
+        self.assertEqual(sentences, expected_sentences)
+
   def test_sentence_splitting_permissive(self):
     """Test permissive sentence splitting (quotes, numbers, \\r)."""
     # Quote-initiated sentence.

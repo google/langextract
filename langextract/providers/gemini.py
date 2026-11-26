@@ -550,10 +550,19 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           batch_config = {
               key: value for key, value in config.items() if value is not None
           }
-          # Schema fields use the separate schema_config argument.
-          batch_config.pop('response_mime_type', None)
-          batch_config.pop('response_schema', None)
-          batch_config.pop('response_json_schema', None)
+          # Schema fields use the separate schema_config argument; keep
+          # caller-supplied ones when no gemini_schema is attached.
+          caller_schema_config = {
+              key: batch_config.pop(key)
+              for key in (
+                  'response_mime_type',
+                  'response_schema',
+                  'response_json_schema',
+              )
+              if key in batch_config
+          }
+          if schema_config is None and caller_schema_config:
+            schema_config = caller_schema_config
           # Extract top-level fields that don't belong in generationConfig
           system_instruction = batch_config.pop('system_instruction', None)
           safety_settings = batch_config.pop('safety_settings', None)

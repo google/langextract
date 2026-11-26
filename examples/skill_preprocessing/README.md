@@ -1,6 +1,10 @@
-# Local Agent Skills as LangExtract inputs
+# Reuse local Agent Skills for grounded extraction
 
-**To use a new skill without writing a Python adapter**, see [Runtime skill bridge](RUNTIME.md). The selected `SKILL.md` body drives a model-generated preprocessing plan; the executor checks every operation against caller-granted tools before reading the document. Tested with the official PPTX skill and an unrelated order-ledger skill using the same executor and local language model.
+A local `SKILL.md` tells the bridge how to prepare source material before LangExtract extracts values. In the order-ledger example, changing one instruction from `CONFIRMED:` to `PENDING:` changes the extracted order from `PO-240` to `PO-108`. The input, extraction prompt, model and Python code stay the same.
+
+A second example uses Anthropic’s PPTX skill to read a deck and retain slide references. The bridge reuses preparation instructions; it does not add a general document parser or PDF geometry. A new skill can use the executor’s approved tools, not introduce new ones. See [Runtime skill bridge](RUNTIME.md) for the API and both examples.
+
+![Different local skills use the same bridge before LangExtract extraction.](diagrams/skill-bridge.png)
 
 ## Alternative: deterministic, pinned PPTX adapter
 
@@ -46,5 +50,3 @@ python compare.py "$LX_TEST_SKILL"
 - Titles, text, simple tables, notes and cached simple chart data work in the tested files. No layout fidelity, coordinates, OCR, chart interpretation or exhaustive Office support. Images may appear as Markdown placeholders; image-only slides receive a warning, and a deck with no readable text fails. Heading/table punctuation is normalized Markdown, not raw Office XML. No shape/cell-level grounding.
 
 For the no-registration API, execution trace, security limits and real-model acceptance test, see [Runtime skill bridge](RUNTIME.md).
-
-![Different local skills use the same bridge before LangExtract extraction.](diagrams/skill-bridge.png)

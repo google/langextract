@@ -1769,5 +1769,162 @@ class BatchHttpLoggerSuppressionTest(parameterized.TestCase):
     self.assertTrue(logger.disabled)
 
 
+class BatchCallerSchemaConfigTest(parameterized.TestCase):
+
+  def _make_batch_model(self, **extra_kwargs):
+    return gemini.GeminiLanguageModel(
+        model_id="gemini-3.5-flash",
+        vertexai=True,
+        project="p",
+        location="l",
+        batch={
+            "enabled": True,
+            "threshold": 1,
+            "enable_caching": False,
+            "retention_days": None,
+        },
+        **extra_kwargs,
+    )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="response_json_schema_init",
+          init_kwargs={"response_json_schema": {"type": "object"}},
+          infer_kwargs={},
+          expected_schema_config={"response_json_schema": {"type": "object"}},
+      ),
+      dict(
+          testcase_name="response_schema_init",
+          init_kwargs={"response_schema": {"type": "object"}},
+          infer_kwargs={},
+          expected_schema_config={"response_schema": {"type": "object"}},
+      ),
+      dict(
+          testcase_name="response_mime_type_init",
+          init_kwargs={"response_mime_type": "text/plain"},
+          infer_kwargs={},
+          expected_schema_config={"response_mime_type": "text/plain"},
+      ),
+      dict(
+          testcase_name="per_call_infer_kwargs",
+          init_kwargs={},
+          infer_kwargs={
+              "response_json_schema": {"type": "object"},
+              "response_mime_type": "application/json",
+          },
+          expected_schema_config={
+              "response_json_schema": {"type": "object"},
+              "response_mime_type": "application/json",
+          },
+      ),
+  )
+  @mock.patch.object(genai, "Client", autospec=True)
+  @mock.patch.object(gb, "infer_batch", autospec=True, return_value=["{}"])
+  def test_forwards_caller_schema_kwargs_without_gemini_schema(
+      self,
+      mock_infer_batch,
+      mock_client_cls,
+      init_kwargs,
+      infer_kwargs,
+      expected_schema_config,
+  ):
+    mock_client_cls.return_value.vertexai = True
+    model = self._make_batch_model(**init_kwargs)
+
+    list(model.infer(["prompt"], **infer_kwargs))
+
+    mock_infer_batch.assert_called_once()
+    call_kwargs = mock_infer_batch.call_args.kwargs
+    self.assertEqual(call_kwargs["schema_config"], expected_schema_config)
+    for key in (
+        "response_mime_type",
+        "response_schema",
+        "response_json_schema",
+    ):
+      self.assertNotIn(key, call_kwargs["gen_config"])
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  @mock.patch.object(gb, "infer_batch", autospec=True, return_value=["{}"])
+  def test_no_schema_kwargs_keeps_schema_config_none(
+      self, mock_infer_batch, mock_client_cls
+  ):
+    mock_client_cls.return_value.vertexai = True
+    model = self._make_batch_model()
+
+    list(model.infer(["prompt"]))
+
+    mock_infer_batch.assert_called_once()
+    self.assertIsNone(mock_infer_batch.call_args.kwargs["schema_config"])
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  @mock.patch.object(gb, "infer_batch", autospec=True, return_value=["{}"])
+  def test_gemini_schema_takes_precedence_over_caller_kwargs(
+      self, mock_infer_batch, mock_client_cls
+  ):
+    mock_client_cls.return_value.vertexai = True
+    model = self._make_batch_model()
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "extractions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"item": {"type": "string"}},
+                },
+            }
+        },
+        "required": ["extractions"],
+    }
+    model.apply_output_schema(output_schema)
+
+    list(model.infer(["prompt"], response_mime_type="text/plain"))
+
+    mock_infer_batch.assert_called_once()
+    call_kwargs = mock_infer_batch.call_args.kwargs
+    self.assertEqual(
+        call_kwargs["schema_config"],
+        {
+            "response_mime_type": "application/json",
+            "response_json_schema": output_schema,
+        },
+    )
+    self.assertNotIn("response_mime_type", call_kwargs["gen_config"])
+
+  @mock.patch.object(genai, "Client", autospec=True)
+  def test_caller_response_json_schema_reaches_batch_request(
+      self, mock_client_cls
+  ):
+    mock_client = mock_client_cls.return_value
+    mock_client.vertexai = True
+    caller_schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+    }
+    model = self._make_batch_model(response_json_schema=caller_schema)
+
+    with mock.patch.object(gb.storage, "Client", autospec=True) as storage_cls:
+      bucket = storage_cls.return_value.bucket.return_value
+      output_blob = mock.create_autospec(gb.storage.Blob, instance=True)
+      output_blob.name = f"output{gb._EXT_JSONL}"
+      output_blob.open.return_value.__enter__.return_value = io.StringIO(
+          _create_batch_response(0, {"name": "Alice"})
+      )
+      bucket.list_blobs.return_value = [output_blob]
+      mock_client.batches.get.return_value = create_mock_batch_job()
+
+      with mock.patch.object(gb, "_submit_file", autospec=True) as mock_submit:
+        mock_submit.return_value = create_mock_batch_job()
+
+        list(model.infer(["test prompt"]))
+
+        request = mock_submit.call_args[0][2][0]
+        generation_config = request["generationConfig"]
+        self.assertEqual(generation_config["responseJsonSchema"], caller_schema)
+        self.assertEqual(
+            generation_config["responseMimeType"], "application/json"
+        )
+
+
 if __name__ == "__main__":
   absltest.main()

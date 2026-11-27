@@ -32,11 +32,11 @@ _JSON_FORMAT = "json"
 _YAML_FORMAT = "yaml"
 _YML_FORMAT = "yml"
 
-_FENCE_START = r"```"
-_LANGUAGE_TAG = r"(?P<lang>[A-Za-z0-9_+-]+)?"
-_FENCE_NEWLINE = r"(?:\s*\n)?"
+_FENCE_START = r"^[ \t]*```"
+_LANGUAGE_TAG = r"[ \t]*(?P<lang>[A-Za-z0-9_+-]+)?"
+_FENCE_NEWLINE = r"[ \t]*(?:\r?\n)?"
 _FENCE_BODY = r"(?P<body>[\s\S]*?)"
-_FENCE_END = r"```"
+_FENCE_END = r"(?:\r?\n|^|[ \t]+)```[ \t]*$"
 
 _FENCE_RE = re.compile(
     _FENCE_START + _LANGUAGE_TAG + _FENCE_NEWLINE + _FENCE_BODY + _FENCE_END,

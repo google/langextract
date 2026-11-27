@@ -475,9 +475,9 @@ class Resolver(AbstractResolver):
     associated index keys (identified by the index_suffix). It sorts these pairs
     by their indices in ascending order and excludes pairs without an index key,
     returning a list of lists of tuples (extraction_class: str, extraction_text:
-    str). Values made only of whitespace, control, or format characters (such
-    as zero-width spaces) are skipped because they have no text to ground in
-    the source.
+    str). Null values and values made only of whitespace, control, or format
+    characters (such as zero-width spaces) are skipped because they have no
+    text to ground in the source.
 
     Args:
         extraction_data: A list of dictionaries. Each dictionary contains pairs
@@ -523,6 +523,14 @@ class Resolver(AbstractResolver):
             raise ValueError(
                 "Extraction value must be a dict or None for attributes."
             )
+          continue
+
+        if extraction_value is None:
+          # A null value means the model found nothing; treat it like an
+          # omitted key instead of failing the whole chunk.
+          logging.debug(
+              "Null value for %s. Skipping extraction.", extraction_class
+          )
           continue
 
         if not isinstance(extraction_value, (str, int, float)):

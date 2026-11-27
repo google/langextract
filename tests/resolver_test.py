@@ -564,6 +564,26 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
           ],
       ),
       dict(
+          testcase_name="null_values_skipped",
+          resolver=resolver_lib.Resolver(
+              extraction_index_suffix=None,
+              format_type=data.FormatType.JSON,
+          ),
+          test_input=[
+              {"medication": "Aspirin"},
+              {"dosage": None, "dosage_attributes": {"NOTE": "not stated"}},
+              {"frequency": None},
+          ],
+          expected_output=[
+              data.Extraction(
+                  extraction_class="medication",
+                  extraction_text="Aspirin",
+                  extraction_index=1,
+                  group_index=0,
+              ),
+          ],
+      ),
+      dict(
           testcase_name="invisible_only_values_skipped",
           test_input=[{
               "medication": "\ufeffLisinopril",
@@ -621,6 +641,16 @@ class ExtractOrderedEntitiesTest(parameterized.TestCase):
           test_input=[{"medication": "Aspirin", "medication_index": 1.0}],
           expected_exception=ValueError,
           expected_regex=".*must be an integer.*",
+      ),
+      dict(
+          testcase_name="list_value",
+          resolver=resolver_lib.Resolver(
+              format_type=data.FormatType.JSON,
+              extraction_index_suffix=None,
+          ),
+          test_input=[{"medication": ["Aspirin", "Ibuprofen"]}],
+          expected_exception=ValueError,
+          expected_regex=".*must be a string, integer, or float.*",
       ),
   )
   def test_extract_ordered_extractions_exceptions(
@@ -1942,6 +1972,52 @@ class ResolverTest(parameterized.TestCase):
     aligned = list(
         resolver.align(
             resolver.resolve(model_output),
+            "Patient takes 10mg Lisinopril daily.",
+            token_offset=0,
+            char_offset=0,
+        )
+    )
+
+    self.assertEqual(
+        [e.extraction_text for e in aligned], ["10mg", "Lisinopril"]
+    )
+    for extraction in aligned:
+      self.assertIsNotNone(extraction.char_interval)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="json_null",
+          format_type=data.FormatType.JSON,
+          model_output=textwrap.dedent(f"""\
+              {{
+                "{data.EXTRACTIONS_KEY}": [
+                  {{"dosage": "10mg"}},
+                  {{"medication": "Lisinopril"}},
+                  {{"frequency": null}}
+                ]
+              }}"""),
+      ),
+      dict(
+          testcase_name="yaml_empty_value",
+          format_type=data.FormatType.YAML,
+          model_output=textwrap.dedent(f"""\
+              {data.EXTRACTIONS_KEY}:
+              - dosage: 10mg
+              - medication: Lisinopril
+              - frequency:
+              """),
+      ),
+  )
+  def test_resolve_and_align_skip_null_extraction_values(
+      self, format_type, model_output
+  ):
+    resolver = resolver_lib.Resolver(format_type=format_type)
+
+    # Before null values were skipped, resolve raised here and the default
+    # suppress_parse_errors=True in extract() dropped the whole chunk.
+    aligned = list(
+        resolver.align(
+            resolver.resolve(model_output, suppress_parse_errors=False),
             "Patient takes 10mg Lisinopril daily.",
             token_offset=0,
             char_offset=0,

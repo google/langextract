@@ -200,9 +200,16 @@ class ContextAwarePromptBuilder(PromptBuilder):
     Args:
       generator: The underlying prompt generator to use.
       context_window_chars: Number of characters from the previous chunk's
-          tail to include as context. Defaults to None (disabled).
+          tail to include as context. Defaults to None (disabled). Must be
+          non-negative; negative values would slice from the front of the
+          previous chunk instead of its tail.
+
+    Raises:
+      ValueError: If context_window_chars is negative.
     """
     super().__init__(generator)
+    if context_window_chars is not None and context_window_chars < 0:
+      raise ValueError("context_window_chars must be non-negative.")
     self._context_window_chars = context_window_chars
     self._prev_chunk_by_doc_id: dict[str, str] = {}
 

@@ -1706,6 +1706,52 @@ class AlignEntitiesTest(parameterized.TestCase):
           ]],
           enable_fuzzy_alignment=True,
       ),
+      dict(
+          testcase_name="shared_prefix_upgraded_to_fuzzy",
+          # An exact block covering only the shared opening must not shadow
+          # a fuzzy span covering nearly the whole extraction.
+          extractions=[[
+              data.Extraction(
+                  extraction_class="sentence",
+                  extraction_text="the quick brown fox leaps over the lazy dog",
+              )
+          ]],
+          source_text="the quick brown fox jumps over the lazy dog",
+          expected_output=[[
+              data.Extraction(
+                  extraction_class="sentence",
+                  extraction_text="the quick brown fox leaps over the lazy dog",
+                  token_interval=tokenizer.TokenInterval(
+                      start_index=0, end_index=9
+                  ),
+                  char_interval=data.CharInterval(start_pos=0, end_pos=43),
+                  alignment_status=data.AlignmentStatus.MATCH_FUZZY,
+              )
+          ]],
+          enable_fuzzy_alignment=True,
+      ),
+      dict(
+          testcase_name="shared_prefix_stays_lesser_without_fuzzy",
+          extractions=[[
+              data.Extraction(
+                  extraction_class="sentence",
+                  extraction_text="the quick brown fox leaps over the lazy dog",
+              )
+          ]],
+          source_text="the quick brown fox jumps over the lazy dog",
+          expected_output=[[
+              data.Extraction(
+                  extraction_class="sentence",
+                  extraction_text="the quick brown fox leaps over the lazy dog",
+                  token_interval=tokenizer.TokenInterval(
+                      start_index=0, end_index=4
+                  ),
+                  char_interval=data.CharInterval(start_pos=0, end_pos=19),
+                  alignment_status=data.AlignmentStatus.MATCH_LESSER,
+              )
+          ]],
+          enable_fuzzy_alignment=False,
+      ),
   )
   def test_extraction_alignment(
       self,

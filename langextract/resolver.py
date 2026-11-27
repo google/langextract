@@ -763,6 +763,7 @@ class WordAligner:
       fuzzy_alignment_threshold: float = _FUZZY_ALIGNMENT_MIN_THRESHOLD,
       fuzzy_alignment_min_density: float = _FUZZY_ALIGNMENT_MIN_DENSITY,
       tokenizer_impl: tokenizer_lib.Tokenizer | None = None,
+      min_matches: int = 0,
   ) -> data.Extraction | None:
     """Fuzzy-align an extraction using LCS DP with coverage/density gates.
 
@@ -775,6 +776,7 @@ class WordAligner:
       fuzzy_alignment_threshold: Minimum coverage fraction for acceptance.
       fuzzy_alignment_min_density: Minimum matched-to-span density.
       tokenizer_impl: Optional tokenizer instance.
+      min_matches: Reject spans that match this many tokens or fewer.
 
     Returns:
       The aligned extraction on success, None otherwise.
@@ -800,6 +802,8 @@ class WordAligner:
     spans = _best_lcs_spans(source_tokens_norm, extraction_tokens_norm)
     accepted: LcsSpan | None = None
     for k in sorted(spans.keys(), reverse=True):
+      if k <= min_matches:
+        break
       candidate = spans[k]
       if _accept_lcs_match(
           candidate,
@@ -997,6 +1001,13 @@ class WordAligner:
       aligned_extractions.extend(dp_matched)
       dp_matched_extraction_ids = {id(ext) for ext in dp_matched}
 
+    src_norm = (
+        [_normalize_token(t) for t in source_tokens]
+        if enable_fuzzy_alignment
+        and fuzzy_alignment_algorithm == _FUZZY_ALGORITHM_LCS
+        else None
+    )
+
     # Exact matching phase
     for i, j, n in self._get_matching_blocks()[:-1]:
       extraction, _ = index_to_extraction_group.get(j, (None, None))
@@ -1048,8 +1059,25 @@ class WordAligner:
       else:
         # Partial match (extraction longer than matched text)
         if accept_match_lesser:
-          extraction.alignment_status = data.AlignmentStatus.MATCH_LESSER
-          lesser_matches += 1
+          # A short exact block (e.g. a shared opening phrase) must not
+          # shadow a much better fuzzy span, so try fuzzy first and keep
+          # the partial match only when it does not beat it.
+          upgraded = None
+          if src_norm is not None:
+            upgraded = self._lcs_fuzzy_align_extraction(
+                extraction,
+                src_norm,
+                tokenized_text,
+                token_offset,
+                char_offset,
+                fuzzy_alignment_threshold=fuzzy_alignment_threshold,
+                fuzzy_alignment_min_density=fuzzy_alignment_min_density,
+                tokenizer_impl=tokenizer_impl,
+                min_matches=n,
+            )
+          if upgraded is None:
+            extraction.alignment_status = data.AlignmentStatus.MATCH_LESSER
+            lesser_matches += 1
           aligned_extractions.append(extraction)
         else:
           # Reset intervals when not accepting lesser matches
@@ -1068,11 +1096,6 @@ class WordAligner:
           "Starting fuzzy alignment (%s) for %d unaligned extractions",
           fuzzy_alignment_algorithm,
           len(unaligned_extractions),
-      )
-      src_norm = (
-          [_normalize_token(t) for t in source_tokens]
-          if fuzzy_alignment_algorithm == _FUZZY_ALGORITHM_LCS
-          else None
       )
       for extraction in unaligned_extractions:
         if fuzzy_alignment_algorithm == _FUZZY_ALGORITHM_LCS:

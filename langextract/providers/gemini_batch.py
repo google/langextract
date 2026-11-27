@@ -752,17 +752,48 @@ def _is_max_tokens_finish(resp: Any) -> bool:
   )
 
 
+def _reject_unusable_line(
+    problem: str,
+    cfg: BatchConfig,
+    original: Exception | None = None,
+) -> None:
+  """Raise for an unusable output line, or log a warning if ignored.
+
+  Omits the raw line text from messages because it may contain document text.
+
+  Raises:
+    InferenceRuntimeError: If errors are not ignored.
+  """
+  message = f"Batch output line is {problem}"
+  if cfg.ignore_item_errors:
+    logging.warning("Batch API: Ignoring output line: %s", message)
+    return
+  error = exceptions.InferenceRuntimeError(
+      message, original=original, provider="Gemini"
+  )
+  if original is not None:
+    raise error from original
+  raise error
+
+
 def _parse_batch_line(
     line: str, outputs: dict[int, str], cfg: BatchConfig
 ) -> None:
   """Parse a single line from batch output JSONL.
 
   Raises:
-    InferenceRuntimeError: If the item failed and errors are not ignored.
+    InferenceRuntimeError: If the item failed or the line is not a JSON
+      object, and errors are not ignored.
   """
   try:
     obj = json.loads(line)
-  except json.JSONDecodeError:
+  except json.JSONDecodeError as e:
+    _reject_unusable_line(f"not valid JSON: {e}", cfg, original=e)
+    return
+  if not isinstance(obj, dict):
+    _reject_unusable_line(
+        f"valid JSON but not an object (got {type(obj).__name__})", cfg
+    )
     return
 
   key = obj.get("key", "")

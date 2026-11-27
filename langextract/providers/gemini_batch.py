@@ -757,14 +757,13 @@ def _reject_unusable_line(
     cfg: BatchConfig,
     original: Exception | None = None,
 ) -> None:
-  """Raise for an output line with no usable item, or log it if ignored.
+  """Raise for an unusable output line, or log a warning if ignored.
+
+  Omits the raw line text from messages because it may contain document text.
 
   Raises:
     InferenceRuntimeError: If errors are not ignored.
   """
-  # The line's index is unknown, so ignoring it leaves its prompt's output
-  # empty; only do that when the caller asked to ignore item errors. The
-  # message leaves out the line itself, which can hold document text.
   message = f"Batch output line is {problem}"
   if cfg.ignore_item_errors:
     logging.warning("Batch API: Ignoring output line: %s", message)

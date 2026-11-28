@@ -32,6 +32,8 @@ OPENAI_PATTERNS = (
     r'^gpt5\.',
     r'^gpt-6',
     OPENAI_REASONING_PATTERN,
+    r'^MiniMax-M3$',
+    r'^MiniMax-M3\.1-Flash$',
 )
 OPENAI_PRIORITY = 10
 

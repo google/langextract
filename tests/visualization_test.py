@@ -13,11 +13,14 @@
 # limitations under the License.
 
 import json
+import pathlib
 import re
+import tempfile
 from unittest import mock
 
 from absl.testing import absltest
 
+from langextract import io
 from langextract import visualization
 from langextract.core import data
 
@@ -41,6 +44,23 @@ def _markup_document() -> data.AnnotatedDocument:
               char_interval=data.CharInterval(
                   start_pos=0, end_pos=len(_MARKUP_TEXT)
               ),
+          )
+      ],
+  )
+
+
+def _single_extraction_document(
+    document_id: str, text: str
+) -> data.AnnotatedDocument:
+  """Returns a document whose whole text is one extraction."""
+  return data.AnnotatedDocument(
+      document_id=document_id,
+      text=text,
+      extractions=[
+          data.Extraction(
+              extraction_class="C",
+              extraction_text=text,
+              char_interval=data.CharInterval(start_pos=0, end_pos=len(text)),
           )
       ],
   )
@@ -218,6 +238,98 @@ class VisualizationTest(absltest.TestCase):
     embedded_data = json.loads(match.group(1))
     self.assertEqual(embedded_data[0]["text"], _MARKUP_TEXT)
     self.assertEqual(embedded_data[0]["class"], _MARKUP_CLASS)
+
+  def _write_two_documents(self) -> pathlib.Path:
+    tmp = tempfile.TemporaryDirectory()
+    self.addCleanup(tmp.cleanup)
+    tmp_dir = pathlib.Path(tmp.name)
+    docs = [
+        _single_extraction_document(doc_id, f"{doc_id} text")
+        for doc_id in ("first", "second")
+    ]
+    io.save_annotated_documents(
+        docs, output_dir=tmp_dir, output_name="docs.jsonl", show_progress=False
+    )
+    return tmp_dir / "docs.jsonl"
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_visualize_jsonl_defaults_to_first_document(self):
+    path = self._write_two_documents()
+
+    actual_html = visualization.visualize(path)
+
+    self.assertIn("first text", actual_html)
+    self.assertNotIn("second text", actual_html)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_visualize_jsonl_selects_document_by_id(self):
+    path = self._write_two_documents()
+
+    actual_html = visualization.visualize(path, document_id="second")
+
+    self.assertIn("second text", actual_html)
+    self.assertNotIn("first text", actual_html)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_visualize_jsonl_selects_last_document_and_accepts_str_path(self):
+    path = self._write_two_documents()
+
+    actual_html = visualization.visualize(str(path), document_id="second")
+
+    self.assertIn("second text", actual_html)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_visualize_jsonl_duplicate_document_id_uses_first_match(self):
+    tmp = tempfile.TemporaryDirectory()
+    self.addCleanup(tmp.cleanup)
+    docs = [
+        _single_extraction_document("dup", "one text"),
+        _single_extraction_document("dup", "two text"),
+    ]
+    io.save_annotated_documents(
+        docs, output_dir=tmp.name, output_name="d.jsonl", show_progress=False
+    )
+
+    actual_html = visualization.visualize(
+        pathlib.Path(tmp.name) / "d.jsonl", document_id="dup"
+    )
+
+    self.assertIn("one text", actual_html)
+    self.assertNotIn("two text", actual_html)
+
+  @mock.patch.object(
+      visualization, "HTML", new=None
+  )  # Ensures visualize returns str
+  def test_visualize_in_memory_document_ignores_document_id(self):
+    doc = _single_extraction_document("mine", "memory text")
+
+    actual_html = visualization.visualize(doc, document_id="other")
+
+    self.assertIn("memory text", actual_html)
+
+  def test_visualize_empty_document_id_is_not_treated_as_default(self):
+    path = self._write_two_documents()
+
+    with self.assertRaisesRegex(ValueError, "''"):
+      visualization.visualize(path, document_id="")
+
+  def test_visualize_missing_file_still_raises_with_document_id(self):
+    with self.assertRaises(FileNotFoundError):
+      visualization.visualize("/nonexistent/x.jsonl", document_id="a")
+
+  def test_visualize_jsonl_unknown_document_id_lists_available_ids(self):
+    path = self._write_two_documents()
+
+    with self.assertRaisesRegex(ValueError, "'missing'.*first.*second"):
+      visualization.visualize(path, document_id="missing")
 
 
 if __name__ == "__main__":

@@ -574,6 +574,7 @@ def visualize(
     animation_speed: float = 1.0,
     show_legend: bool = True,
     gif_optimized: bool = True,
+    document_id: str | None = None,
 ) -> HTML | str:
   """Visualises extraction data as animated highlighted HTML.
 
@@ -584,10 +585,18 @@ def visualize(
       to colours.
     gif_optimized: If ``True``, applies GIF-optimized styling with larger fonts,
       better contrast, and improved dimensions for video capture.
+    document_id: When ``data_source`` is a JSONL file, the ``document_id`` of the
+      document to render. Defaults to the first document in the file. Ignored
+      for an in-memory ``AnnotatedDocument``.
 
   Returns:
     An :class:`IPython.display.HTML` object if IPython is available, otherwise
     the generated HTML string.
+
+  Raises:
+    FileNotFoundError: If ``data_source`` is a path that does not exist.
+    ValueError: If the JSONL file has no documents, or ``document_id`` is not
+      among the documents in the file.
   """
   # Load document if it's a file path
   if isinstance(data_source, (str, pathlib.Path)):
@@ -599,7 +608,17 @@ def visualize(
     if not documents:
       raise ValueError(f'No documents found in JSONL file: {file_path}')
 
-    annotated_doc = documents[0]  # Use first document
+    if document_id is None:
+      annotated_doc = documents[0]
+    else:
+      annotated_doc = next(
+          (doc for doc in documents if doc.document_id == document_id), None
+      )
+      if annotated_doc is None:
+        raise ValueError(
+            f'document_id {document_id!r} not found in {file_path}. Available'
+            f' ids: {[doc.document_id for doc in documents]}'
+        )
   else:
     annotated_doc = data_source
 
